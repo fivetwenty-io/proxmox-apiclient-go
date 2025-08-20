@@ -1,4 +1,4 @@
-module github.com/proxmox/pve-apiclient-go
+module github.com/fivetwenty-io/pve-apicilent-go
 
 go 1.25.0
 

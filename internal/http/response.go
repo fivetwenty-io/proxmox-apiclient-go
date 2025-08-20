@@ -8,7 +8,7 @@ import (
 	"reflect"
 	"strconv"
 
-	"github.com/proxmox/pve-apiclient-go/pkg/errors"
+	"github.com/fivetwenty-io/pve-apicilent-go/pkg/errors"
 )
 
 // ResponseParser handles parsing of HTTP responses from the PVE API.

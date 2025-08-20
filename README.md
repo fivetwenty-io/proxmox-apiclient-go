@@ -14,7 +14,7 @@ A Go client library for the Proxmox Virtual Environment (PVE) API.
 ## Installation
 
 ```bash
-go get github.com/proxmox/pve-apiclient-go
+go get github.com/fivetwenty-io/pve-apicilent-go
 ```
 
 ## Quick Start
@@ -26,7 +26,7 @@ import (
     "fmt"
     "log"
     
-    pve "github.com/proxmox/pve-apiclient-go/pkg/client"
+    pve "github.com/fivetwenty-io/pve-apicilent-go/pkg/client"
 )
 
 func main() {
@@ -51,7 +51,7 @@ func main() {
 
 ## Documentation
 
-See the [documentation](https://pkg.go.dev/github.com/proxmox/pve-apiclient-go) for detailed API reference.
+See the [documentation](https://pkg.go.dev/github.com/fivetwenty-io/pve-apicilent-go) for detailed API reference.
 
 ## Examples
 

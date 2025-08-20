@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/proxmox/pve-apiclient-go/pkg/auth"
-	"github.com/proxmox/pve-apiclient-go/pkg/client"
-	"github.com/proxmox/pve-apiclient-go/pkg/errors"
+	"github.com/fivetwenty-io/pve-apicilent-go/pkg/auth"
+	"github.com/fivetwenty-io/pve-apicilent-go/pkg/client"
+	"github.com/fivetwenty-io/pve-apicilent-go/pkg/errors"
 )
 
 // Client implements the HTTP client for PVE API communication.

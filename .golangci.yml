@@ -89,7 +89,7 @@ linters-settings:
     require-explanation: false
     require-specific: false
   goimports:
-    local-prefixes: github.com/proxmox/pve-apiclient-go
+    local-prefixes: github.com/fivetwenty-io/pve-apicilent-go
 
 issues:
   exclude-rules:

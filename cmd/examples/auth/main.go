@@ -5,8 +5,8 @@ import (
 	"log"
 	"os"
 
-	"github.com/proxmox/pve-apiclient-go/pkg/auth"
-	pve "github.com/proxmox/pve-apiclient-go/pkg/client"
+	"github.com/fivetwenty-io/pve-apicilent-go/pkg/auth"
+	pve "github.com/fivetwenty-io/pve-apicilent-go/pkg/client"
 )
 
 func main() {

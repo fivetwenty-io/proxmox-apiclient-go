@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/proxmox/pve-apiclient-go/pkg/batch"
-	"github.com/proxmox/pve-apiclient-go/pkg/client"
-	"github.com/proxmox/pve-apiclient-go/pkg/pool"
-	"github.com/proxmox/pve-apiclient-go/pkg/stream"
+	"github.com/fivetwenty-io/pve-apicilent-go/pkg/batch"
+	"github.com/fivetwenty-io/pve-apicilent-go/pkg/client"
+	"github.com/fivetwenty-io/pve-apicilent-go/pkg/pool"
+	"github.com/fivetwenty-io/pve-apicilent-go/pkg/stream"
 )
 
 // Mock server for benchmarking

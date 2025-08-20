@@ -49,4 +49,4 @@ jobs:
     
     - name: Publish to pkg.go.dev
       run: |
-        go list -m github.com/proxmox/pve-apiclient-go@${{ github.ref_name }}
+        go list -m github.com/fivetwenty-io/pve-apicilent-go@${{ github.ref_name }}

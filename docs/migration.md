@@ -35,7 +35,7 @@ apt-get install libpve-apiclient-perl
 
 **Go Client:**
 ```bash
-go get github.com/proxmox/pve-apiclient-go
+go get github.com/fivetwenty-io/pve-apicilent-go
 ```
 
 ### Initialization
@@ -54,7 +54,7 @@ my $conn = PVE::APIClient::LWP->new(
 
 **Go:**
 ```go
-import "github.com/proxmox/pve-apiclient-go/pkg/client"
+import "github.com/fivetwenty-io/pve-apicilent-go/pkg/client"
 
 client, err := client.NewClient(&client.Options{
     Host:     "pve.example.com",
@@ -253,7 +253,7 @@ if err != nil {
 ### Connection Pooling (Go Only)
 
 ```go
-import "github.com/proxmox/pve-apiclient-go/pkg/pool"
+import "github.com/fivetwenty-io/pve-apicilent-go/pkg/pool"
 
 // Create connection pool
 pool, err := pool.New(&pool.Config{
@@ -268,7 +268,7 @@ client.SetTransport(pool.Transport())
 ### Request Batching (Go Only)
 
 ```go
-import "github.com/proxmox/pve-apiclient-go/pkg/batch"
+import "github.com/fivetwenty-io/pve-apicilent-go/pkg/batch"
 
 // Create batch
 batch := batch.New(nil)
@@ -289,7 +289,7 @@ result, err := executor.Execute(ctx, batch)
 ### Response Streaming (Go Only)
 
 ```go
-import "github.com/proxmox/pve-apiclient-go/pkg/stream"
+import "github.com/fivetwenty-io/pve-apicilent-go/pkg/stream"
 
 // Stream large responses
 resp, err := client.GetRaw(ctx, "/nodes/pve/tasks")
@@ -308,7 +308,7 @@ for {
 ### WebSocket Support (Go Only)
 
 ```go
-import "github.com/proxmox/pve-apiclient-go/pkg/websocket"
+import "github.com/fivetwenty-io/pve-apicilent-go/pkg/websocket"
 
 // Create WebSocket client
 ws, err := websocket.New(&websocket.Config{
@@ -534,7 +534,7 @@ client, err := client.NewClient(&client.Options{
 
 - [API Documentation](https://pve.proxmox.com/pve-docs/api-viewer/)
 - [Go Client Examples](examples/)
-- [Issue Tracker](https://github.com/proxmox/pve-apiclient-go/issues)
+- [Issue Tracker](https://github.com/fivetwenty-io/pve-apicilent-go/issues)
 - [Proxmox Forum](https://forum.proxmox.com/)
 
 ## Next Steps

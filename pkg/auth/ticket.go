@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/proxmox/pve-apiclient-go/pkg/errors"
+	"github.com/fivetwenty-io/pve-apicilent-go/pkg/errors"
 )
 
 // TicketAuthenticator provides ticket-based authentication for PVE.

@@ -7,9 +7,9 @@ import (
 	"os"
 	"time"
 
-	"github.com/proxmox/pve-apiclient-go/internal/ssl"
-	pve "github.com/proxmox/pve-apiclient-go/pkg/client"
-	"github.com/proxmox/pve-apiclient-go/pkg/errors"
+	"github.com/fivetwenty-io/pve-apicilent-go/internal/ssl"
+	pve "github.com/fivetwenty-io/pve-apicilent-go/pkg/client"
+	"github.com/fivetwenty-io/pve-apicilent-go/pkg/errors"
 )
 
 func main() {
