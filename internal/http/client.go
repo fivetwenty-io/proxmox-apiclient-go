@@ -603,21 +603,22 @@ func (c *Client) buildRequestWithContext(ctx context.Context, method, path strin
 
 	switch method {
 	case "GET", "DELETE":
-		// Add parameters to query string
+		// Add parameters to query string using the Proxmox-aware encoder
+		// (bool→0/1, slice→repeated, time.Time→unix, nested map→k=v,k=v).
 		if len(params) > 0 {
 			query := url.Values{}
 			for key, value := range params {
-				query.Add(key, fmt.Sprintf("%v", value))
+				addEncodedParam(query, key, value)
 			}
 
 			fullURL += "?" + query.Encode()
 		}
 	case "POST", "PUT":
-		// Encode parameters as form data
+		// Encode parameters as form data using the Proxmox-aware encoder.
 		if len(params) > 0 {
 			formData := url.Values{}
 			for key, value := range params {
-				formData.Add(key, fmt.Sprintf("%v", value))
+				addEncodedParam(formData, key, value)
 			}
 
 			body = strings.NewReader(formData.Encode())
