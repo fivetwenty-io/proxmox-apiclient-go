@@ -146,7 +146,7 @@ func (rp *ResponseParser) parseText(body []byte, target interface{}) error {
 
 func (rp *ResponseParser) assignResult(result interface{}, target interface{}) error {
 	targetValue := reflect.ValueOf(target)
-	if targetValue.Kind() != reflect.Ptr {
+	if targetValue.Kind() != reflect.Pointer {
 		return ErrTargetMustBePointer
 	}
 

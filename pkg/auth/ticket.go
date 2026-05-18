@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/fivetwenty-io/pve-apiclient-go/v3/internal/constants"
@@ -21,7 +22,11 @@ var (
 )
 
 // TicketAuthenticator provides ticket-based authentication for PVE.
+// mu guards all reads and writes of the ticket field; Refresh/RefreshForce/
+// SetTicket/CompleteTFA/processTFAResult acquire the write lock, GetTicket/
+// GetHeaders/IsAuthenticated acquire the read lock.
 type TicketAuthenticator struct {
+	mu           sync.RWMutex
 	baseURL      string
 	httpClient   *http.Client
 	credentials  *Credentials
@@ -31,9 +36,15 @@ type TicketAuthenticator struct {
 }
 
 // NewTicketAuthenticator creates a new ticket authenticator.
-func NewTicketAuthenticator(baseURL string, credentials *Credentials, httpClient *http.Client, cookieName string, pveNewFormat bool) *TicketAuthenticator {
+func NewTicketAuthenticator(
+	baseURL string,
+	credentials *Credentials,
+	httpClient *http.Client,
+	cookieName string,
+	pveNewFormat bool,
+) *TicketAuthenticator {
 	if credentials.Realm == "" {
-		credentials.Realm = "pam" // Default realm
+		credentials.Realm = "pam"
 	}
 
 	return &TicketAuthenticator{
@@ -71,7 +82,9 @@ func (ta *TicketAuthenticator) Authenticate() error {
 	}
 
 	if result.Ticket != nil {
+		ta.mu.Lock()
 		ta.ticket = result.Ticket
+		ta.mu.Unlock()
 
 		return nil
 	}
@@ -81,22 +94,30 @@ func (ta *TicketAuthenticator) Authenticate() error {
 
 // IsAuthenticated checks if the current session is authenticated.
 func (ta *TicketAuthenticator) IsAuthenticated() bool {
-	return ta.ticket != nil && ta.ticket.IsValid()
+	ta.mu.RLock()
+	t := ta.ticket
+	ta.mu.RUnlock()
+
+	return t != nil && t.IsValid()
 }
 
 // GetHeaders returns the authentication headers.
 func (ta *TicketAuthenticator) GetHeaders() map[string]string {
-	if ta.ticket == nil {
+	ta.mu.RLock()
+	tkt := ta.ticket
+	ta.mu.RUnlock()
+
+	if tkt == nil {
 		return nil
 	}
 
 	headers := make(map[string]string)
-	if ta.ticket.Value != "" {
-		headers["Cookie"] = fmt.Sprintf("%s=%s", ta.cookieName, ta.ticket.Value)
+	if tkt.Value != "" {
+		headers["Cookie"] = fmt.Sprintf("%s=%s", ta.cookieName, tkt.Value)
 	}
 
-	if ta.ticket.CSRFToken != "" {
-		headers["CSRFPreventionToken"] = ta.ticket.CSRFToken
+	if tkt.CSRFToken != "" {
+		headers["CSRFPreventionToken"] = tkt.CSRFToken
 	}
 
 	return headers
@@ -107,11 +128,9 @@ func (ta *TicketAuthenticator) GetHeaders() map[string]string {
 // For forced renewal (e.g., when ticket is old but not expired), use RefreshForce.
 func (ta *TicketAuthenticator) Refresh() error {
 	if ta.IsAuthenticated() {
-		// Ticket is still valid
 		return nil
 	}
 
-	// Re-authenticate
 	return ta.Authenticate()
 }
 
@@ -133,7 +152,9 @@ func (ta *TicketAuthenticator) RefreshForce() error {
 	}
 
 	if result.Ticket != nil {
+		ta.mu.Lock()
 		ta.ticket = result.Ticket
+		ta.mu.Unlock()
 
 		return nil
 	}
@@ -143,11 +164,14 @@ func (ta *TicketAuthenticator) RefreshForce() error {
 
 // Logout performs logout operations.
 func (ta *TicketAuthenticator) Logout() error {
-	if ta.ticket == nil {
+	ta.mu.RLock()
+	hasTicket := ta.ticket != nil
+	ta.mu.RUnlock()
+
+	if !hasTicket {
 		return nil
 	}
 
-	// Create logout request
 	logoutURL := ta.baseURL + "/access/ticket"
 
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodDelete, logoutURL, nil)
@@ -155,35 +179,40 @@ func (ta *TicketAuthenticator) Logout() error {
 		return fmt.Errorf("failed to create logout request: %w", err)
 	}
 
-	// Add authentication headers
 	for key, value := range ta.GetHeaders() {
 		req.Header.Set(key, value)
 	}
 
-	// Send logout request
 	resp, err := ta.httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to send logout request: %w", err)
 	}
 
 	defer func() {
-		_ = resp.Body.Close() // Ignore close errors
+		_ = resp.Body.Close()
 	}()
 
-	// Clear the ticket
+	ta.mu.Lock()
 	ta.ticket = nil
+	ta.mu.Unlock()
 
 	return nil
 }
 
 // SetTicket sets the authentication ticket.
 func (ta *TicketAuthenticator) SetTicket(ticket *Ticket) {
+	ta.mu.Lock()
 	ta.ticket = ticket
+	ta.mu.Unlock()
 }
 
 // GetTicket returns the current authentication ticket.
 func (ta *TicketAuthenticator) GetTicket() *Ticket {
-	return ta.ticket
+	ta.mu.RLock()
+	t := ta.ticket
+	ta.mu.RUnlock()
+
+	return t
 }
 
 type tfaResponse struct {
@@ -227,7 +256,12 @@ func (ta *TicketAuthenticator) createTFARequest(challenge *TFAChallenge, respons
 	data := url.Values{}
 	data.Set("response", response.Response)
 
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, tfaURL, strings.NewReader(data.Encode()))
+	req, err := http.NewRequestWithContext(
+		context.Background(),
+		http.MethodPost,
+		tfaURL,
+		strings.NewReader(data.Encode()),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create TFA request: %w", err)
 	}
@@ -284,7 +318,9 @@ func (ta *TicketAuthenticator) processTFAResult(resp *http.Response, tfaResp *tf
 			ValidUntil: validUntil,
 		}
 
+		ta.mu.Lock()
 		ta.ticket = ticket
+		ta.mu.Unlock()
 
 		return &AuthResult{
 			Success: true,
@@ -326,8 +362,13 @@ func (ta *TicketAuthenticator) prepareLoginData() url.Values {
 	// Use password, or fallback to ticket if password is empty.
 	// PVE API allows using an existing ticket as password to renew/create a new ticket.
 	password := ta.credentials.Password
-	if password == "" && ta.ticket != nil && ta.ticket.Value != "" {
-		password = ta.ticket.Value
+
+	ta.mu.RLock()
+	tkt := ta.ticket
+	ta.mu.RUnlock()
+
+	if password == "" && tkt != nil && tkt.Value != "" {
+		password = tkt.Value
 	}
 
 	data.Set("password", password)
@@ -344,7 +385,12 @@ func (ta *TicketAuthenticator) prepareLoginData() url.Values {
 }
 
 func (ta *TicketAuthenticator) createLoginRequest(loginURL string, data url.Values) (*http.Request, error) {
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, loginURL, strings.NewReader(data.Encode()))
+	req, err := http.NewRequestWithContext(
+		context.Background(),
+		http.MethodPost,
+		loginURL,
+		strings.NewReader(data.Encode()),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create login request: %w", err)
 	}

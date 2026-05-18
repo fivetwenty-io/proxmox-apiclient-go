@@ -9,6 +9,20 @@ import (
 	"github.com/fivetwenty-io/pve-apiclient-go/v3/internal/constants"
 )
 
+// Sentinel errors for HTTP status classes. Use errors.Is to test wrapped APIErrors.
+var (
+	// ErrUnauthorized matches any 401 response.
+	ErrUnauthorized = errors.New("unauthorized")
+	// ErrForbidden matches any 403 response.
+	ErrForbidden = errors.New("forbidden")
+	// ErrNotFound matches any 404 response.
+	ErrNotFound = errors.New("not found")
+	// ErrConflict matches any 409 response.
+	ErrConflict = errors.New("conflict")
+	// ErrServer matches any 5xx response.
+	ErrServer = errors.New("server error")
+)
+
 // APIError represents a general API error from PVE.
 type APIError struct {
 	Message  string            `json:"message"`
@@ -17,12 +31,20 @@ type APIError struct {
 	File     string            `json:"file,omitempty"`
 	Line     int               `json:"line,omitempty"`
 	HTTPCode int               `json:"-"`
+
+	// sentinel is the wrapped sentinel for errors.Is matching.
+	sentinel error
+}
+
+// Unwrap returns the wrapped sentinel error, enabling errors.Is chains.
+func (e *APIError) Unwrap() error {
+	return e.sentinel
 }
 
 // Error implements the error interface.
 func (e *APIError) Error() string {
 	if len(e.Errors) > 0 {
-		var errStrs []string
+		errStrs := make([]string, 0, len(e.Errors))
 		for field, msg := range e.Errors {
 			errStrs = append(errStrs, fmt.Sprintf("%s: %s", field, msg))
 		}
@@ -188,38 +210,79 @@ func (e *TimeoutError) Error() string {
 }
 
 // ParseAPIError attempts to parse an error response into an appropriate error type.
+// The returned error wraps a sentinel (ErrUnauthorized, ErrForbidden, ErrNotFound,
+// ErrConflict, ErrServer) so callers can use errors.Is for status-class checks while
+// still extracting full detail via errors.As(*APIError).
 func ParseAPIError(statusCode int, body []byte) error {
 	var apiErr APIError
 
-	// Try to parse JSON error response
 	err := json.Unmarshal(body, &apiErr)
 	if err != nil {
-		// If JSON parsing fails, create a generic error
-		return &APIError{
-			Message:  string(body),
-			Code:     statusCode,
-			HTTPCode: statusCode,
-		}
+		return newGenericError(statusCode, body)
 	}
 
 	apiErr.HTTPCode = statusCode
+	apiErr.sentinel = sentinelFor(statusCode)
 
-	// Determine specific error type based on status code and content
+	return dispatchByStatus(statusCode, body, apiErr)
+}
+
+// newGenericError builds an APIError for non-JSON or empty bodies.
+func newGenericError(statusCode int, body []byte) *APIError {
+	msg := strings.TrimSpace(string(body))
+	if msg == "" {
+		msg = fmt.Sprintf("HTTP %d", statusCode)
+	}
+
+	return &APIError{
+		Message:  msg,
+		Code:     statusCode,
+		HTTPCode: statusCode,
+		sentinel: sentinelFor(statusCode),
+	}
+}
+
+// dispatchByStatus returns the specialised error type for known status codes.
+func dispatchByStatus(statusCode int, body []byte, apiErr APIError) error {
 	switch statusCode {
 	case constants.HTTPStatusUnauthorized:
-		// Check if it's a TFA requirement
-		var tfaErr TFARequiredError
-		if json.Unmarshal(body, &tfaErr) == nil && tfaErr.Ticket != "" {
-			return &tfaErr
-		}
-
-		return &AuthenticationError{APIError: apiErr}
+		return dispatchUnauthorized(body, apiErr)
 	case constants.HTTPStatusForbidden:
 		return &PermissionError{APIError: apiErr}
 	case constants.HTTPStatusBadRequest:
 		return &ParameterError{APIError: apiErr}
 	default:
 		return &apiErr
+	}
+}
+
+// dispatchUnauthorized returns TFARequiredError when the body contains a ticket,
+// otherwise returns AuthenticationError.
+func dispatchUnauthorized(body []byte, apiErr APIError) error {
+	var tfaErr TFARequiredError
+	if json.Unmarshal(body, &tfaErr) == nil && tfaErr.Ticket != "" {
+		return &tfaErr
+	}
+
+	return &AuthenticationError{APIError: apiErr}
+}
+
+// sentinelFor maps an HTTP status code to its sentinel error.
+// Returns nil for unrecognised codes.
+func sentinelFor(statusCode int) error {
+	switch {
+	case statusCode == constants.HTTPStatusUnauthorized:
+		return ErrUnauthorized
+	case statusCode == constants.HTTPStatusForbidden:
+		return ErrForbidden
+	case statusCode == constants.HTTPStatusNotFound:
+		return ErrNotFound
+	case statusCode == StatusConflict:
+		return ErrConflict
+	case statusCode >= StatusInternalServerError && statusCode < 600:
+		return ErrServer
+	default:
+		return nil
 	}
 }
 

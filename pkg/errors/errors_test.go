@@ -2,9 +2,18 @@ package errors_test
 
 import (
 	"errors"
+	"strconv"
 	"testing"
 
 	pveerr "github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/errors"
+)
+
+// Repeated string constants used across multiple tests.
+const (
+	testHost      = "pve.example.com"
+	typeAPIErr    = "*pveerr.APIError"
+	typeParamErr  = "*pveerr.ParameterError"
+	testMessage   = "test"
 )
 
 func TestAPIError_Error(t *testing.T) {
@@ -249,7 +258,7 @@ func TestConnectionError(t *testing.T) {
 		t.Parallel()
 
 		err := pveerr.ConnectionError{
-			Host:    "pve.example.com",
+			Host:    testHost,
 			Port:    8006,
 			Message: "connection refused",
 		}
@@ -267,7 +276,7 @@ func TestConnectionError(t *testing.T) {
 
 		cause := &pveerr.APIError{Message: "timeout"}
 		err := pveerr.ConnectionError{
-			Host:  "pve.example.com",
+			Host:  testHost,
 			Port:  8006,
 			Cause: cause,
 		}
@@ -285,7 +294,7 @@ func TestSSLError(t *testing.T) {
 		t.Parallel()
 
 		err := pveerr.SSLError{
-			Host:        "pve.example.com",
+			Host:        testHost,
 			Fingerprint: "AA:BB:CC:DD",
 			Message:     "certificate verification failed",
 		}
@@ -303,7 +312,7 @@ func TestSSLError(t *testing.T) {
 
 		cause := &pveerr.APIError{Message: "expired"}
 		err := pveerr.SSLError{
-			Host:  "pve.example.com",
+			Host:  testHost,
 			Cause: cause,
 		}
 
@@ -366,13 +375,13 @@ func getParseAPIErrorTestCases() []parseAPIErrorTestCase {
 			name:       "400 parameter error",
 			statusCode: 400,
 			body:       []byte(`{"message": "bad request"}`),
-			wantType:   "*pveerr.ParameterError",
+			wantType:   typeParamErr,
 		},
 		{
 			name:       "500 generic error",
 			statusCode: 500,
 			body:       []byte(`{"message": "internal server error"}`),
-			wantType:   "*pveerr.APIError",
+			wantType:   typeAPIErr,
 		},
 		{
 			name:       "TFA required",
@@ -384,7 +393,7 @@ func getParseAPIErrorTestCases() []parseAPIErrorTestCase {
 			name:       "invalid JSON",
 			statusCode: 500,
 			body:       []byte(`not json`),
-			wantType:   "*pveerr.APIError",
+			wantType:   typeAPIErr,
 		},
 	}
 }
@@ -409,12 +418,12 @@ func runParseAPIErrorTest(t *testing.T, testCase parseAPIErrorTestCase) {
 func TestIsErrorType(t *testing.T) {
 	t.Parallel()
 
-	apiErr := &pveerr.APIError{Message: "test"}
-	permErr := &pveerr.PermissionError{APIError: pveerr.APIError{Message: "test"}}
-	authErr := &pveerr.AuthenticationError{APIError: pveerr.APIError{Message: "test"}}
-	connErr := &pveerr.ConnectionError{Message: "test"}
-	sslErr := &pveerr.SSLError{Message: "test"}
-	timeoutErr := &pveerr.TimeoutError{Operation: "test"}
+	apiErr := &pveerr.APIError{Message: testMessage}
+	permErr := &pveerr.PermissionError{APIError: pveerr.APIError{Message: testMessage}}
+	authErr := &pveerr.AuthenticationError{APIError: pveerr.APIError{Message: testMessage}}
+	connErr := &pveerr.ConnectionError{Message: testMessage}
+	sslErr := &pveerr.SSLError{Message: testMessage}
+	timeoutErr := &pveerr.TimeoutError{Operation: testMessage}
 	tfaErr := &pveerr.TFARequiredError{Types: []string{"totp"}}
 
 	tests := []struct {
@@ -448,6 +457,301 @@ func TestIsErrorType(t *testing.T) {
 	}
 }
 
+// -- Edge case tests --
+
+type edgeCase struct {
+	name        string
+	statusCode  int
+	body        []byte
+	wantMsgPart string
+	wantType    string
+}
+
+func edgeCases() []edgeCase {
+	return []edgeCase{
+		{"empty body", 503, []byte{}, "HTTP 503", typeAPIErr},
+		{"whitespace-only body", 502, []byte("   \n  "), "HTTP 502", typeAPIErr},
+		{"plain text body", 500, []byte("Internal Server Error"), "Internal Server Error", typeAPIErr},
+		{"malformed JSON", 500, []byte(`{bad json`), "{bad json", typeAPIErr},
+		{
+			"JSON with nested errors map", 400,
+			[]byte(`{"message":"validation failed","code":400,"errors":{"vmid":"required","memory":"must be positive"}}`),
+			"validation failed", typeParamErr,
+		},
+		{"JSON missing message field", 404, []byte(`{"code":404}`), "", typeAPIErr},
+		{"404 not found JSON", 404, []byte(`{"message":"resource not found","code":404}`), "resource not found", typeAPIErr},
+		{"409 conflict JSON", 409, []byte(`{"message":"resource exists","code":409}`), "resource exists", typeAPIErr},
+	}
+}
+
+func runEdgeCase(t *testing.T, tcase edgeCase) {
+	t.Helper()
+
+	err := pveerr.ParseAPIError(tcase.statusCode, tcase.body)
+	if err == nil {
+		t.Fatal("ParseAPIError() returned nil")
+	}
+
+	if gotType := typeOf(err); gotType != tcase.wantType {
+		t.Errorf("type = %v, want %v", gotType, tcase.wantType)
+	}
+
+	if tcase.wantMsgPart != "" && !contains(err.Error(), tcase.wantMsgPart) {
+		t.Errorf("Error() = %q, want containing %q", err.Error(), tcase.wantMsgPart)
+	}
+}
+
+// TestParseAPIError_EdgeCases covers empty body, malformed JSON, nested errors map,
+// missing data fields, and text/plain bodies.
+func TestParseAPIError_EdgeCases(t *testing.T) {
+	t.Parallel()
+
+	for _, tcase := range edgeCases() {
+		t.Run(tcase.name, func(t *testing.T) {
+			t.Parallel()
+			runEdgeCase(t, tcase)
+		})
+	}
+}
+
+// TestParseAPIError_SentinelIs verifies errors.Is works with sentinel vars.
+func TestParseAPIError_SentinelIs(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		statusCode int
+		sentinel   error
+	}{
+		{"401", 401, pveerr.ErrUnauthorized},
+		{"403", 403, pveerr.ErrForbidden},
+		{"404", 404, pveerr.ErrNotFound},
+		{"409", 409, pveerr.ErrConflict},
+		{"500", 500, pveerr.ErrServer},
+		{"503", 503, pveerr.ErrServer},
+	}
+
+	for _, tcase := range tests {
+		t.Run(tcase.name, func(t *testing.T) {
+			t.Parallel()
+
+			body := []byte(`{"message":"test","code":0}`)
+			err := pveerr.ParseAPIError(tcase.statusCode, body)
+
+			if !errors.Is(err, tcase.sentinel) {
+				t.Errorf("errors.Is(%v, %v) = false, want true", err, tcase.sentinel)
+			}
+		})
+	}
+}
+
+// TestParseAPIError_ErrorsAs verifies errors.As extracts *APIError with HTTPCode.
+func TestParseAPIError_ErrorsAs(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		statusCode int
+		body       []byte
+	}{
+		{"404 APIError", 404, []byte(`{"message":"not found","code":404}`)},
+		{"409 APIError", 409, []byte(`{"message":"conflict","code":409}`)},
+		{"500 APIError", 500, []byte(`{"message":"server error","code":500}`)},
+		{"non-JSON 502", 502, []byte(`bad gateway`)},
+	}
+
+	for _, tcase := range tests {
+		t.Run(tcase.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := pveerr.ParseAPIError(tcase.statusCode, tcase.body)
+
+			var apiErr *pveerr.APIError
+			if !errors.As(err, &apiErr) {
+				t.Fatalf("errors.As(*APIError) = false for %v", err)
+			}
+
+			if apiErr.HTTPCode != tcase.statusCode {
+				t.Errorf("apiErr.HTTPCode = %d, want %d", apiErr.HTTPCode, tcase.statusCode)
+			}
+		})
+	}
+}
+
+// TestParseAPIError_NestedErrorsMap verifies field-level errors surface in Error() string.
+func TestParseAPIError_NestedErrorsMap(t *testing.T) {
+	t.Parallel()
+
+	body := []byte(`{"message":"param error","code":400,"errors":{"vmid":"must be positive","name":"required"}}`)
+	err := pveerr.ParseAPIError(400, body)
+
+	var paramErr *pveerr.ParameterError
+	if !errors.As(err, &paramErr) {
+		t.Fatalf("expected *ParameterError, got %T", err)
+	}
+
+	if !contains(paramErr.Error(), "param error") {
+		t.Errorf("Error() missing base message: %q", paramErr.Error())
+	}
+
+	if len(paramErr.Errors) != 2 {
+		t.Errorf("Errors map len = %d, want 2", len(paramErr.Errors))
+	}
+}
+
+// TestSentinelVarsDistinct ensures sentinel vars are distinct errors.
+func TestSentinelVarsDistinct(t *testing.T) {
+	t.Parallel()
+
+	sentinels := []error{
+		pveerr.ErrUnauthorized,
+		pveerr.ErrForbidden,
+		pveerr.ErrNotFound,
+		pveerr.ErrConflict,
+		pveerr.ErrServer,
+	}
+
+	for idxA, sentA := range sentinels {
+		for idxB, sentB := range sentinels {
+			if idxA == idxB {
+				continue
+			}
+
+			if errors.Is(sentA, sentB) {
+				t.Errorf("sentinel[%d] (%v) matches sentinel[%d] (%v), want distinct", idxA, sentA, idxB, sentB)
+			}
+		}
+	}
+}
+
+// -- codes.go helper tests, each in its own function to stay under funlen/gocognit --
+
+// TestGetErrorMessage covers known and unknown status codes.
+func TestGetErrorMessage(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		code int
+		want string
+	}{
+		{200, "Success"},
+		{201, "Created"},
+		{204, "No Content"},
+		{400, "Bad Request"},
+		{401, "Unauthorized"},
+		{403, "Forbidden"},
+		{404, "Not Found"},
+		{409, "Conflict"},
+		{429, "Too Many Requests"},
+		{500, "Internal Server Error"},
+		{502, "Bad Gateway"},
+		{503, "Service Unavailable"},
+		{504, "Gateway Timeout"},
+		{999, "Unknown Error"},
+	}
+
+	for _, tcase := range cases {
+		t.Run(strconv.Itoa(tcase.code), func(t *testing.T) {
+			t.Parallel()
+
+			got := pveerr.GetErrorMessage(tcase.code)
+			if got != tcase.want {
+				t.Errorf("GetErrorMessage(%d) = %q, want %q", tcase.code, got, tcase.want)
+			}
+		})
+	}
+}
+
+// TestIsSuccessCode verifies 2xx detection.
+func TestIsSuccessCode(t *testing.T) {
+	t.Parallel()
+
+	if !pveerr.IsSuccessCode(200) {
+		t.Error("IsSuccessCode(200) = false")
+	}
+
+	if !pveerr.IsSuccessCode(204) {
+		t.Error("IsSuccessCode(204) = false")
+	}
+
+	if pveerr.IsSuccessCode(400) {
+		t.Error("IsSuccessCode(400) = true")
+	}
+}
+
+// TestIsClientErrorCode verifies 4xx detection.
+func TestIsClientErrorCode(t *testing.T) {
+	t.Parallel()
+
+	if !pveerr.IsClientErrorCode(400) {
+		t.Error("IsClientErrorCode(400) = false")
+	}
+
+	if !pveerr.IsClientErrorCode(404) {
+		t.Error("IsClientErrorCode(404) = false")
+	}
+
+	if pveerr.IsClientErrorCode(500) {
+		t.Error("IsClientErrorCode(500) = true")
+	}
+}
+
+// TestIsServerErrorCode verifies 5xx detection.
+func TestIsServerErrorCode(t *testing.T) {
+	t.Parallel()
+
+	if !pveerr.IsServerErrorCode(500) {
+		t.Error("IsServerErrorCode(500) = false")
+	}
+
+	if !pveerr.IsServerErrorCode(503) {
+		t.Error("IsServerErrorCode(503) = false")
+	}
+
+	if pveerr.IsServerErrorCode(400) {
+		t.Error("IsServerErrorCode(400) = true")
+	}
+}
+
+// TestIsRetryableCode verifies retryable code classification.
+func TestIsRetryableCode(t *testing.T) {
+	t.Parallel()
+
+	for _, code := range []int{429, 502, 503, 504} {
+		if !pveerr.IsRetryableCode(code) {
+			t.Errorf("IsRetryableCode(%d) = false, want true", code)
+		}
+	}
+
+	for _, code := range []int{400, 401, 403, 404, 500} {
+		if pveerr.IsRetryableCode(code) {
+			t.Errorf("IsRetryableCode(%d) = true, want false", code)
+		}
+	}
+}
+
+// TestConnectionError_NoMessage tests the no-message path.
+func TestConnectionError_NoMessage(t *testing.T) {
+	t.Parallel()
+
+	err := pveerr.ConnectionError{Host: "h", Port: 8006}
+	got := err.Error()
+
+	if !contains(got, "h:8006") {
+		t.Errorf("Error() = %q, want h:8006 present", got)
+	}
+}
+
+// TestSSLError_NoCause tests SSL error without cause.
+func TestSSLError_NoCause(t *testing.T) {
+	t.Parallel()
+
+	err := pveerr.SSLError{Host: "h"}
+	if err.Unwrap() != nil {
+		t.Errorf("Unwrap() = %v, want nil", err.Unwrap())
+	}
+}
+
 // Helper functions.
 func contains(s, substr string) bool {
 	for i := 0; i <= len(s)-len(substr); i++ {
@@ -466,11 +770,11 @@ func typeOf(v interface{}) string {
 
 	switch v.(type) {
 	case *pveerr.APIError:
-		return "*pveerr.APIError"
+		return typeAPIErr
 	case *pveerr.PermissionError:
 		return "*pveerr.PermissionError"
 	case *pveerr.ParameterError:
-		return "*pveerr.ParameterError"
+		return typeParamErr
 	case *pveerr.AuthenticationError:
 		return "*pveerr.AuthenticationError"
 	case *pveerr.TFARequiredError:

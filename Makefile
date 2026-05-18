@@ -78,6 +78,25 @@ fmt: ## Format all Go source files
 	@go fmt $(shell go list ./... | grep -v vendor)
 	@echo "$(GREEN)✓ Code formatted$(RESET)"
 
+.PHONY: generate
+generate: ## Regenerate typed API bindings from _data/apidoc.json
+	@echo "$(GREEN)Running go generate...$(RESET)"
+	@go generate ./...
+	@echo "$(GREEN)✓ Generation complete$(RESET)"
+
+.PHONY: verify-generated
+verify-generated: ## Verify generated files are in sync with the spec
+	@echo "$(GREEN)Verifying generated files...$(RESET)"
+	@go generate ./...
+	@dirty=$$(git status --porcelain -- pkg/api _data | grep -vE '^A[ M]' || true); \
+	if [ -n "$$dirty" ]; then \
+		echo "$(YELLOW)Generated files are out of sync. Run 'make generate' and commit:$(RESET)"; \
+		echo "$$dirty"; \
+		git --no-pager diff -- pkg/api _data | head -200; \
+		exit 1; \
+	fi
+	@echo "$(GREEN)✓ Generated files are up to date$(RESET)"
+
 .PHONY: vet
 vet: ## Run go vet on all source files
 	@echo "$(GREEN)Running go vet...$(RESET)"

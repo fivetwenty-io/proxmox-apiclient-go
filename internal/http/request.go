@@ -48,7 +48,7 @@ func NewRequestBuilder(method, baseURL, path string) *RequestBuilder {
 
 // AddQueryParam adds a query parameter to the request.
 func (rb *RequestBuilder) AddQueryParam(key string, value interface{}) *RequestBuilder {
-	rb.queryParams.Add(key, fmt.Sprintf("%v", value))
+	addEncodedParam(rb.queryParams, key, value)
 
 	return rb
 }
@@ -64,7 +64,7 @@ func (rb *RequestBuilder) AddQueryParams(params map[string]interface{}) *Request
 
 // AddFormParam adds a form parameter to the request.
 func (rb *RequestBuilder) AddFormParam(key string, value interface{}) *RequestBuilder {
-	rb.formParams.Add(key, fmt.Sprintf("%v", value))
+	addEncodedParam(rb.formParams, key, value)
 
 	return rb
 }

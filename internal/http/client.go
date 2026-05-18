@@ -219,9 +219,13 @@ func configureVerifierCallbacks(verifier *issl.FingerprintVerifier, options *Opt
 
 func createAuthenticator(options *Options, httpClient *http.Client) auth.Authenticator { //nolint:ireturn // Factory function pattern
 	if options.APIToken != "" {
-		token := &auth.Token{
-			ID:     options.APIToken,
-			Secret: options.APIToken,
+		token, err := auth.ParseAPIToken(options.APIToken)
+		if err != nil {
+			// Caller cannot receive this error through NewClient currently; surface it via a
+			// sentinel authenticator that always returns an error on Authenticate(). This keeps
+			// the public API unchanged (NewClient returns (*Client, error) — callers that pass
+			// a malformed token will discover the problem on first use or via Authenticate()).
+			return auth.NewInvalidAuthenticator(fmt.Errorf("invalid APIToken %q: %w", options.APIToken, err))
 		}
 
 		return auth.NewAPITokenAuthenticator(token, options.APITokenName)
