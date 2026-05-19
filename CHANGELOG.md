@@ -5,6 +5,14 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v3.1.3] — 2026-05-19
+
+### Added
+
+- `Storage().Upload(ctx, node, storage, content, filename, body) (upid, err)` — uploads a file to a named storage pool as the given content type; returns the upload UPID for the caller to await via Tasks if synchronous semantics are required.
+
+- `Storage().DeleteVolumeIfExists(ctx, node, storage, volume) (existed, err)` — deletes a volume and reports whether it was present; returns `(false, nil)` on 404, `(true, nil)` on success, and a wrapped error on any other failure. Distinct from `DeleteVolume`, which silently swallows 404.
+
 ## [Unreleased] — 2026-05-18
 
 ### Fixed

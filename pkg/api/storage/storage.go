@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 
 	"github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/client"
 	pveerr "github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/errors"
@@ -15,7 +16,18 @@ var errSizeGiBPositive = errors.New("sizeGiB must be > 0")
 type Service interface {
 	CreateVolume(ctx context.Context, node, storage string, sizeGiB int, format string, vmid int, name string) (string, error)
 	DeleteVolume(ctx context.Context, node, storage, volume string) error
+	// DeleteVolumeIfExists deletes the named volume and reports whether it
+	// actually removed anything. Returns (false, nil) when the volume did
+	// not exist; (true, nil) on successful deletion; (_, err) on any other
+	// failure. Distinct from DeleteVolume (which swallows 404 silently) —
+	// callers that need the existed signal should use this method instead.
+	DeleteVolumeIfExists(ctx context.Context, node, storage, volume string) (existed bool, err error)
 	Exists(ctx context.Context, node, storage, volume string) (bool, error)
+	// Upload uploads a single file to the named storage pool as the given
+	// content type (iso, import, vztmpl, ...). Returns the upload UPID; the
+	// caller is responsible for awaiting it via Tasks() if synchronous
+	// semantics are required.
+	Upload(ctx context.Context, node, storage, content, filename string, body io.Reader) (upid string, err error)
 }
 
 type service struct{ c client.Client }
@@ -91,4 +103,44 @@ func (s *service) Exists(ctx context.Context, node, storage, volume string) (boo
 	}
 
 	return false, fmt.Errorf("failed to check if volume %q exists on storage %q node %q: %w", volume, storage, node, err)
+}
+
+func (s *service) DeleteVolumeIfExists(ctx context.Context, node, storage, volume string) (bool, error) {
+	_, err := s.c.DeleteCtx(ctx, fmt.Sprintf("/nodes/%s/storage/%s/content/%s", node, storage, volume), nil)
+	if err == nil {
+		return true, nil
+	}
+
+	if pveerr.IsAPIError(err) {
+		var ae *pveerr.APIError
+		if errors.As(err, &ae) && ae.IsNotFound() {
+			return false, nil
+		}
+	}
+
+	return false, fmt.Errorf("failed to delete volume %q from storage %q on node %q: %w", volume, storage, node, err)
+}
+
+func (s *service) Upload(ctx context.Context, node, storage, content, filename string, body io.Reader) (string, error) {
+	fields := map[string]string{
+		"content":  content,
+		"filename": filename,
+	}
+
+	resp, err := s.c.UploadCtx(ctx, fmt.Sprintf("/nodes/%s/storage/%s/upload", node, storage), fields, "filename", filename, body)
+	if err != nil {
+		return "", fmt.Errorf("failed to upload %q to storage %q on node %q: %w", filename, storage, node, err)
+	}
+
+	if upid, ok := resp.Data.(string); ok {
+		return upid, nil
+	}
+
+	if m, ok := resp.Data.(map[string]interface{}); ok {
+		if v, ok := m["upid"].(string); ok {
+			return v, nil
+		}
+	}
+
+	return "", nil
 }
