@@ -50,9 +50,9 @@ func TestQemuDiskAttachDetachResize(t *testing.T) {
 		http.Error(writer, "method", http.StatusMethodNotAllowed)
 	})
 
-	// POST resize endpoint
+	// PUT resize endpoint (PVE uses PUT for /resize, not POST)
 	mux.HandleFunc("/api2/json/nodes/testnode/qemu/123/resize", func(writer http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
+		if r.Method != http.MethodPut {
 			http.Error(writer, "method", http.StatusMethodNotAllowed)
 
 			return

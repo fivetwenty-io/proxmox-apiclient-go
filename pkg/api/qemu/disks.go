@@ -123,5 +123,18 @@ func (s *service) ResizeDisk(ctx context.Context, node string, vmid int, diskID 
 		"size": fmt.Sprintf("+%dG", sizeGiB),
 	}
 
-	return s.postUPID(ctx, fmt.Sprintf("/nodes/%s/qemu/%d/resize", node, vmid), params)
+	// PVE's /resize endpoint uses PUT.
+	data, err := s.c.PutCtx(ctx, fmt.Sprintf("/nodes/%s/qemu/%d/resize", node, vmid), params)
+	if err != nil {
+		return "", fmt.Errorf("failed to execute QEMU operation: %w", err)
+	}
+	if upid, ok := data.(string); ok {
+		return upid, nil
+	}
+	if m, ok := data.(map[string]interface{}); ok {
+		if v, ok := m["upid"].(string); ok {
+			return v, nil
+		}
+	}
+	return "", nil
 }
