@@ -142,12 +142,13 @@ func (s *service) Attach(ctx context.Context, node string, vmid int, storage str
 	if len(userData) > 0 {
 		filename := fmt.Sprintf("user-data-vm-%d.yaml", vmid)
 
+		// PVE returns HTTP 400 when "filename" is sent both as a form field
+		// and as the multipart part name; pass it only as the part name.
 		fields := map[string]string{
-			"content":  "snippets",
-			"filename": filename,
+			"content": "snippets",
 		}
 
-		_, err := s.c.UploadCtx(ctx, fmt.Sprintf("/nodes/%s/storage/%s/upload", node, storage), fields, "file", filename, bytes.NewReader(userData))
+		_, err := s.c.UploadCtx(ctx, fmt.Sprintf("/nodes/%s/storage/%s/upload", node, storage), fields, "filename", filename, bytes.NewReader(userData))
 		if err != nil {
 			return fmt.Errorf("failed to upload user-data file: %w", err)
 		}
@@ -178,12 +179,13 @@ func (s *service) AttachWithNetwork(ctx context.Context, node string, vmid int, 
 
 	netFilename := fmt.Sprintf("network-data-vm-%d.yaml", vmid)
 
+	// PVE returns HTTP 400 when "filename" is sent both as a form field
+	// and as the multipart part name; pass it only as the part name.
 	fields := map[string]string{
-		"content":  "snippets",
-		"filename": netFilename,
+		"content": "snippets",
 	}
 
-	_, err = s.c.UploadCtx(ctx, fmt.Sprintf("/nodes/%s/storage/%s/upload", node, storage), fields, "file", netFilename, bytes.NewReader(networkData))
+	_, err = s.c.UploadCtx(ctx, fmt.Sprintf("/nodes/%s/storage/%s/upload", node, storage), fields, "filename", netFilename, bytes.NewReader(networkData))
 	if err != nil {
 		return fmt.Errorf("failed to upload network-data file: %w", err)
 	}
