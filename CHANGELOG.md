@@ -5,6 +5,12 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v3.1.4] — 2026-05-19
+
+### Fixed
+
+- `Storage().Upload` no longer sends `filename` as a duplicate form field. PVE rejects the request with HTTP 400 when `filename` appears both as a form field and as the multipart file part name; the file part already carries the destination name via its `filename` attribute.
+
 ## [v3.1.3] — 2026-05-19
 
 ### Added

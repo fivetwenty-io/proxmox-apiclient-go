@@ -122,10 +122,11 @@ func (s *service) DeleteVolumeIfExists(ctx context.Context, node, storage, volum
 }
 
 func (s *service) Upload(ctx context.Context, node, storage, content, filename string, body io.Reader) (string, error) {
-	fields := map[string]string{
-		"content":  content,
-		"filename": filename,
-	}
+	// PVE upload semantics: `content` is a form field; the file part is named
+	// `filename` whose filename attribute carries the destination name. Do NOT
+	// also pass `filename` as a form field — PVE rejects (HTTP 400) when the
+	// same multipart part name appears twice.
+	fields := map[string]string{"content": content}
 
 	resp, err := s.c.UploadCtx(ctx, fmt.Sprintf("/nodes/%s/storage/%s/upload", node, storage), fields, "filename", filename, body)
 	if err != nil {

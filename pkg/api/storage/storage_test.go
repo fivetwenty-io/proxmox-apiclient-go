@@ -168,7 +168,17 @@ func TestUploadHappyPath(t *testing.T) {
 		}
 
 		capturedContent = r.FormValue("content")
-		capturedFile = r.FormValue("filename")
+		// PVE rejects with 400 when "filename" appears both as a form field
+		// AND as the multipart file part name. Assert that "filename" is
+		// transmitted ONLY as the file part filename attribute (not as a
+		// duplicate form field) by reading r.MultipartForm.File directly.
+		if files, ok := r.MultipartForm.File["filename"]; ok && len(files) > 0 {
+			capturedFile = files[0].Filename
+		}
+		if r.MultipartForm.Value["filename"] != nil {
+			http.Error(w, "duplicate filename field rejected by PVE", http.StatusBadRequest)
+			return
+		}
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
