@@ -5,6 +5,18 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v3.1.6] — 2026-05-20
+
+### Added
+
+- `Storage().DeleteVolumeAsync(ctx, node, storage, volume) (upid, err)` and `Storage().DeleteVolumeIfExistsAsync(ctx, node, storage, volume) (existed, upid, err)` — return the queued `imgdel` task UPID so callers can await completion via `Tasks()` before re-uploading to the same volume name. Existing `DeleteVolume` and `DeleteVolumeIfExists` are unchanged (they now delegate to the async variants and discard the UPID); their doc comments now warn that under per-storage lock contention, the queued `imgdel` task can run *after* the call returns, silently removing a subsequently-uploaded replacement. Any caller pattern of *delete-then-immediately-upload-same-name* must migrate to the async variant.
+
+## [v3.1.5] — 2026-05-19
+
+### Fixed
+
+- `Cloudinit().Attach` and `Cloudinit().AttachWithNetwork` no longer send `filename` as a duplicate form field. Same root cause and fix as the `Storage().Upload` change in v3.1.4.
+
 ## [v3.1.4] — 2026-05-19
 
 ### Fixed

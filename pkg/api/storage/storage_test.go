@@ -148,6 +148,142 @@ func TestDeleteVolumeIfExistsServerError(t *testing.T) {
 	}
 }
 
+func TestDeleteVolumeAsyncReturnsUPID(t *testing.T) {
+	t.Parallel()
+
+	const wantUPID = "UPID:node1:0000ABCD:DEADBEEF:67890ABC:imgdel:local:root@pam:"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"data":"` + wantUPID + `"}`))
+	}))
+	defer srv.Close()
+
+	cli, err := pveclient.NewClient(optsFromServerURL(srv.URL))
+	if err != nil {
+		t.Fatalf("client: %v", err)
+	}
+
+	svc := storage.New(cli)
+
+	upid, err := svc.DeleteVolumeAsync(context.Background(), "node1", "local", "local:iso/vm-117-config.iso")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if upid != wantUPID {
+		t.Fatalf("upid = %q, want %q", upid, wantUPID)
+	}
+}
+
+func TestDeleteVolumeAsyncSyncResponse(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"data":null}`))
+	}))
+	defer srv.Close()
+
+	cli, err := pveclient.NewClient(optsFromServerURL(srv.URL))
+	if err != nil {
+		t.Fatalf("client: %v", err)
+	}
+
+	svc := storage.New(cli)
+
+	upid, err := svc.DeleteVolumeAsync(context.Background(), "node1", "local", "local:vm-100-disk-0")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if upid != "" {
+		t.Fatalf("expected empty upid for sync response, got %q", upid)
+	}
+}
+
+func TestDeleteVolumeAsyncNotFound(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+
+	cli, err := pveclient.NewClient(optsFromServerURL(srv.URL))
+	if err != nil {
+		t.Fatalf("client: %v", err)
+	}
+
+	svc := storage.New(cli)
+
+	upid, err := svc.DeleteVolumeAsync(context.Background(), "node1", "local", "does/not/exist")
+	if err != nil {
+		t.Fatalf("expected nil error on 404, got: %v", err)
+	}
+	if upid != "" {
+		t.Fatalf("expected empty upid on 404, got %q", upid)
+	}
+}
+
+func TestDeleteVolumeIfExistsAsyncHappyPath(t *testing.T) {
+	t.Parallel()
+
+	const wantUPID = "UPID:node1:0000BEEF:DEADBEEF:67890ABC:imgdel:local:root@pam:"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"data":"` + wantUPID + `"}`))
+	}))
+	defer srv.Close()
+
+	cli, err := pveclient.NewClient(optsFromServerURL(srv.URL))
+	if err != nil {
+		t.Fatalf("client: %v", err)
+	}
+
+	svc := storage.New(cli)
+
+	existed, upid, err := svc.DeleteVolumeIfExistsAsync(context.Background(), "node1", "local", "local:iso/vm-117-config.iso")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !existed {
+		t.Fatalf("expected existed=true on 200, got false")
+	}
+	if upid != wantUPID {
+		t.Fatalf("upid = %q, want %q", upid, wantUPID)
+	}
+}
+
+func TestDeleteVolumeIfExistsAsyncNotFound(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+
+	cli, err := pveclient.NewClient(optsFromServerURL(srv.URL))
+	if err != nil {
+		t.Fatalf("client: %v", err)
+	}
+
+	svc := storage.New(cli)
+
+	existed, upid, err := svc.DeleteVolumeIfExistsAsync(context.Background(), "node1", "local", "does/not/exist")
+	if err != nil {
+		t.Fatalf("expected nil error on 404, got: %v", err)
+	}
+	if existed {
+		t.Fatalf("expected existed=false on 404, got true")
+	}
+	if upid != "" {
+		t.Fatalf("expected empty upid on 404, got %q", upid)
+	}
+}
+
 func TestUploadHappyPath(t *testing.T) {
 	t.Parallel()
 
