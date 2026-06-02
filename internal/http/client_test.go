@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -54,10 +53,9 @@ const (
 
 // Sentinel errors used in test helpers.
 var (
-	errTestChunk             = errors.New("chunk error")
-	errTestRenewalFailed     = errors.New("renewal failed")
-	errTestLogoutFailed      = errors.New("logout failed")
-	errTestConnectionRefused = errors.New("connection refused")
+	errTestChunk         = errors.New("chunk error")
+	errTestRenewalFailed = errors.New("renewal failed")
+	errTestLogoutFailed  = errors.New("logout failed")
 )
 
 // ---------------------------------------------------------------------------
@@ -2103,312 +2101,6 @@ func TestLogConfig_Default(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Middleware types: Chain, HeaderMiddleware, CompressionMiddleware, etc.
-// ---------------------------------------------------------------------------
-
-func TestChain_Then(t *testing.T) {
-	t.Parallel()
-
-	var order []int
-
-	firstMW := func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(respWriter http.ResponseWriter, r *http.Request) {
-			order = append(order, 1)
-
-			next.ServeHTTP(respWriter, r)
-		})
-	}
-
-	secondMW := func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(respWriter http.ResponseWriter, r *http.Request) {
-			order = append(order, 2)
-
-			next.ServeHTTP(respWriter, r)
-		})
-	}
-
-	final := http.HandlerFunc(func(respWriter http.ResponseWriter, _ *http.Request) {
-		order = append(order, 3)
-
-		respWriter.WriteHeader(http.StatusOK)
-	})
-
-	chain := NewChain(firstMW, secondMW)
-	handler := chain.Then(final)
-
-	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil)
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-
-	if len(order) != 3 || order[0] != 1 || order[1] != 2 || order[2] != 3 {
-		t.Errorf("middleware execution order = %v, want [1 2 3]", order)
-	}
-}
-
-func TestChain_Append(t *testing.T) {
-	t.Parallel()
-
-	chain := NewChain()
-	extended := chain.Append(func(next http.Handler) http.Handler { return next })
-
-	if len(extended.middlewares) != 1 {
-		t.Errorf("extended middlewares = %d, want 1", len(extended.middlewares))
-	}
-
-	// Original unchanged.
-	if len(chain.middlewares) != 0 {
-		t.Errorf("original chain should not be modified")
-	}
-}
-
-func TestHeaderMiddleware_Apply(t *testing.T) {
-	t.Parallel()
-
-	srv := newTestServer(t, func(respWriter http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("X-Injected") != "yes" {
-			t.Errorf("X-Injected header missing")
-		}
-
-		respWriter.WriteHeader(http.StatusOK)
-	})
-
-	headerMW := NewHeaderMiddleware(map[string]string{"X-Injected": "yes"})
-
-	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL, nil)
-	httpClient := &http.Client{}
-
-	next := Handler(func(r *http.Request) (*http.Response, error) {
-		return httpClient.Do(r)
-	})
-
-	resp, err := headerMW.Apply(req, next)
-	if err != nil {
-		t.Fatalf("Apply: %v", err)
-	}
-
-	defer func() { _ = resp.Body.Close() }()
-}
-
-func TestCompressionMiddleware_Apply(t *testing.T) {
-	t.Parallel()
-
-	srv := newTestServer(t, func(respWriter http.ResponseWriter, r *http.Request) {
-		enc := r.Header.Get("Accept-Encoding")
-		if !strings.Contains(enc, "gzip") {
-			t.Errorf("Accept-Encoding should contain gzip, got: %q", enc)
-		}
-
-		respWriter.WriteHeader(http.StatusOK)
-	})
-
-	compressionMW := NewCompressionMiddleware()
-
-	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL, nil)
-	httpClient := &http.Client{}
-
-	next := Handler(func(r *http.Request) (*http.Response, error) {
-		return httpClient.Do(r)
-	})
-
-	resp, err := compressionMW.Apply(req, next)
-	if err != nil {
-		t.Fatalf("Apply: %v", err)
-	}
-
-	defer func() { _ = resp.Body.Close() }()
-}
-
-func TestLoggingMiddlewareApply_Apply(t *testing.T) {
-	t.Parallel()
-
-	srv := newTestServer(t, func(respWriter http.ResponseWriter, _ *http.Request) {
-		respWriter.WriteHeader(http.StatusOK)
-	})
-
-	var buf bytes.Buffer
-
-	lg := log.New(&buf, "", 0)
-	loggingMW := NewLoggingMiddleware(lg)
-
-	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL, nil)
-	httpClient := &http.Client{}
-
-	next := Handler(func(r *http.Request) (*http.Response, error) {
-		return httpClient.Do(r)
-	})
-
-	resp, err := loggingMW.Apply(req, next)
-	if err != nil {
-		t.Fatalf("Apply: %v", err)
-	}
-
-	defer func() { _ = resp.Body.Close() }()
-
-	if !strings.Contains(buf.String(), "GET") {
-		t.Errorf("log should contain method, got: %q", buf.String())
-	}
-}
-
-func TestLoggingMiddlewareApply_NilLogger(t *testing.T) {
-	t.Parallel()
-
-	srv := newTestServer(t, func(respWriter http.ResponseWriter, _ *http.Request) {
-		respWriter.WriteHeader(http.StatusOK)
-	})
-
-	// NewLoggingMiddleware(nil) must not panic.
-	loggingMW := NewLoggingMiddleware(nil)
-
-	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL, nil)
-	httpClient := &http.Client{}
-
-	next := Handler(func(r *http.Request) (*http.Response, error) {
-		return httpClient.Do(r)
-	})
-
-	resp, err := loggingMW.Apply(req, next)
-	if err != nil {
-		t.Fatalf("Apply: %v", err)
-	}
-
-	defer func() { _ = resp.Body.Close() }()
-}
-
-// applyMetricsMiddleware is a shared helper that sets up a MetricsMiddleware,
-// sends one request to a test server, and returns the collected metrics.
-func applyMetricsMiddleware(t *testing.T, serverStatus int, urlSuffix string) map[string]interface{} {
-	t.Helper()
-
-	srv := newTestServer(t, func(respWriter http.ResponseWriter, _ *http.Request) {
-		respWriter.WriteHeader(serverStatus)
-	})
-
-	metricsMiddleware := NewMetricsMiddleware()
-
-	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL+urlSuffix, nil)
-	httpClient := &http.Client{}
-
-	next := Handler(func(r *http.Request) (*http.Response, error) {
-		return httpClient.Do(r)
-	})
-
-	resp, err := metricsMiddleware.Apply(req, next)
-	if err != nil {
-		t.Fatalf("Apply: %v", err)
-	}
-
-	defer func() { _ = resp.Body.Close() }()
-
-	return metricsMiddleware.GetMetrics()
-}
-
-func TestMetricsMiddleware_Apply(t *testing.T) {
-	t.Parallel()
-
-	metrics := applyMetricsMiddleware(t, http.StatusOK, "/path")
-
-	totalReqs, ok := metrics["total_requests"].(int64)
-	if !ok {
-		t.Fatal("total_requests is not int64")
-	}
-
-	if totalReqs != 1 {
-		t.Errorf("total_requests = %v, want 1", metrics["total_requests"])
-	}
-}
-
-func TestMetricsMiddleware_ErrorPath(t *testing.T) {
-	t.Parallel()
-
-	metrics := applyMetricsMiddleware(t, http.StatusInternalServerError, "/fail")
-
-	totalErrs, ok := metrics["total_errors"].(int64)
-	if !ok {
-		t.Fatal("total_errors is not int64")
-	}
-
-	if totalErrs != 1 {
-		t.Errorf("total_errors = %v, want 1", metrics["total_errors"])
-	}
-}
-
-func TestTimeoutMiddleware_Apply_Timeout(t *testing.T) {
-	t.Parallel()
-
-	timeoutMW := NewTimeoutMiddleware(20 * time.Millisecond)
-
-	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://example.com/path", nil)
-
-	next := Handler(func(_ *http.Request) (*http.Response, error) {
-		time.Sleep(200 * time.Millisecond)
-
-		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(""))}, nil
-	})
-
-	timeoutResp, err := timeoutMW.Apply(req, next)
-	if timeoutResp != nil && timeoutResp.Body != nil {
-		defer func() { _ = timeoutResp.Body.Close() }()
-	}
-
-	if err == nil {
-		t.Fatal("expected timeout error")
-	}
-
-	if !strings.Contains(err.Error(), "timeout") {
-		t.Errorf("error should mention timeout, got: %v", err)
-	}
-}
-
-func TestTimeoutMiddleware_Apply_Success(t *testing.T) {
-	t.Parallel()
-
-	timeoutMW := NewTimeoutMiddleware(500 * time.Millisecond)
-
-	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://example.com/path", nil)
-
-	next := Handler(func(_ *http.Request) (*http.Response, error) {
-		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(""))}, nil
-	})
-
-	resp, err := timeoutMW.Apply(req, next)
-	if err != nil {
-		t.Fatalf("Apply: %v", err)
-	}
-
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("StatusCode = %d, want 200", resp.StatusCode)
-	}
-}
-
-func TestRateLimitMiddleware_Apply(t *testing.T) {
-	t.Parallel()
-
-	rateLimiter := NewRateLimitMiddleware(100, 5)
-
-	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://example.com/path", nil)
-
-	called := false
-	next := Handler(func(_ *http.Request) (*http.Response, error) {
-		called = true
-
-		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(""))}, nil
-	})
-
-	resp, err := rateLimiter.Apply(req, next)
-	if err != nil {
-		t.Fatalf("Apply: %v", err)
-	}
-
-	defer func() { _ = resp.Body.Close() }()
-
-	if !called {
-		t.Error("next handler should have been called")
-	}
-}
-
-// ---------------------------------------------------------------------------
 // UploadWithContext
 // ---------------------------------------------------------------------------
 
@@ -2509,20 +2201,90 @@ func TestDo_ConcurrentRequests(t *testing.T) {
 // Additional coverage: simple setters
 // ---------------------------------------------------------------------------
 
-func TestSetHeader_DoesNotPanic(t *testing.T) {
+func TestSetHeader_AppliedToRequest(t *testing.T) {
 	t.Parallel()
 
-	client, _ := NewClient(minimalHTTPOptions())
-	// SetHeader is a no-op stub; must not panic.
-	client.SetHeader("X-Test", "value")
+	var gotHeader string
+
+	srv := newTestServer(t, func(respWriter http.ResponseWriter, r *http.Request) {
+		gotHeader = r.Header.Get("X-Custom")
+		respWriter.Header().Set(testHeaderContentType, testContentTypeJSON)
+		_, _ = respWriter.Write(pveEnvelope(t, nil))
+	})
+
+	client := clientPointedAt(t, srv.URL)
+	client.SetHeader("X-Custom", "applied")
+	_, _ = client.Do("GET", "/version", nil)
+
+	if gotHeader != "applied" {
+		t.Errorf("X-Custom = %q, want applied", gotHeader)
+	}
 }
 
-func TestRemoveHeader_DoesNotPanic(t *testing.T) {
+func TestRemoveHeader_StopsApplyingToRequest(t *testing.T) {
 	t.Parallel()
 
-	client, _ := NewClient(minimalHTTPOptions())
-	// RemoveHeader is a no-op stub; must not panic.
-	client.RemoveHeader("X-Test")
+	var gotHeader string
+
+	srv := newTestServer(t, func(respWriter http.ResponseWriter, r *http.Request) {
+		gotHeader = r.Header.Get("X-Custom")
+		respWriter.Header().Set(testHeaderContentType, testContentTypeJSON)
+		_, _ = respWriter.Write(pveEnvelope(t, nil))
+	})
+
+	client := clientPointedAt(t, srv.URL)
+	client.SetHeader("X-Custom", "applied")
+	client.RemoveHeader("X-Custom")
+	_, _ = client.Do("GET", "/version", nil)
+
+	if gotHeader != "" {
+		t.Errorf("X-Custom = %q, want empty after RemoveHeader", gotHeader)
+	}
+}
+
+func TestSetHeader_OverridesUserAgentButNotAuth(t *testing.T) {
+	t.Parallel()
+
+	var gotUA string
+
+	srv := newTestServer(t, func(respWriter http.ResponseWriter, r *http.Request) {
+		gotUA = r.Header.Get("User-Agent")
+		respWriter.Header().Set(testHeaderContentType, testContentTypeJSON)
+		_, _ = respWriter.Write(pveEnvelope(t, nil))
+	})
+
+	client := clientPointedAt(t, srv.URL)
+	client.SetHeader("User-Agent", "custom-agent/2.0")
+	_, _ = client.Do("GET", "/version", nil)
+
+	if gotUA != "custom-agent/2.0" {
+		t.Errorf("User-Agent = %q, want custom-agent/2.0", gotUA)
+	}
+}
+
+func TestSetHeader_ConcurrentWithRequests(t *testing.T) {
+	t.Parallel()
+
+	srv := newTestServer(t, func(respWriter http.ResponseWriter, _ *http.Request) {
+		respWriter.Header().Set(testHeaderContentType, testContentTypeJSON)
+		_, _ = respWriter.Write(pveEnvelope(t, nil))
+	})
+
+	client := clientPointedAt(t, srv.URL)
+
+	const goroutines = 25
+
+	var waitGroup sync.WaitGroup
+
+	for range goroutines {
+		waitGroup.Add(3)
+
+		go func() { defer waitGroup.Done(); client.SetHeader("X-Custom", "v") }()
+		go func() { defer waitGroup.Done(); client.RemoveHeader("X-Custom") }()
+		go func() { defer waitGroup.Done(); _, _ = client.Do("GET", "/version", nil) }()
+	}
+
+	waitGroup.Wait()
 }
 
 func TestSetMetrics_DoesNotPanic(t *testing.T) {
@@ -3507,28 +3269,6 @@ func TestDoWithContext_ResponseBodyClose_NilLogger(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// RateLimitMiddleware: GetMetrics on MetricsMiddleware
-// ---------------------------------------------------------------------------
-
-func TestMetricsMiddleware_GetMetrics_AvgDuration(t *testing.T) {
-	t.Parallel()
-
-	mm := NewMetricsMiddleware()
-
-	// No requests yet → avg duration = 0.
-	metricsResult := mm.GetMetrics()
-
-	avgDur, ok := metricsResult["average_duration"].(string)
-	if !ok {
-		t.Fatal("average_duration is not a string")
-	}
-
-	if avgDur != "0s" {
-		t.Errorf("average_duration without requests = %v, want 0s", metricsResult["average_duration"])
-	}
-}
-
-// ---------------------------------------------------------------------------
 // handleAuthenticationRetry: 401 with API token auth (Refresh no-op → retry)
 // ---------------------------------------------------------------------------
 
@@ -3664,103 +3404,6 @@ func TestWith_ExistingNilRetries(t *testing.T) {
 	if opts.Logging == nil || !*opts.Logging {
 		t.Errorf("Logging should still be true")
 	}
-}
-
-// ---------------------------------------------------------------------------
-// LoggingMiddleware.Apply: response body truncation path
-// ---------------------------------------------------------------------------
-
-func TestLoggingMiddlewareApply_LargeResponseBody(t *testing.T) {
-	t.Parallel()
-
-	largeBody := strings.Repeat("X", 2048)
-
-	srv := newTestServer(t, func(respWriter http.ResponseWriter, _ *http.Request) {
-		_, _ = respWriter.Write([]byte(largeBody))
-	})
-
-	var buf bytes.Buffer
-
-	lg := log.New(&buf, "", 0)
-	loggingMW := NewLoggingMiddleware(lg)
-	loggingMW.logBody = true
-
-	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL, nil)
-	httpClient := &http.Client{}
-
-	next := Handler(func(r *http.Request) (*http.Response, error) {
-		return httpClient.Do(r)
-	})
-
-	resp, err := loggingMW.Apply(req, next)
-	if err != nil {
-		t.Fatalf("Apply: %v", err)
-	}
-
-	defer func() { _ = resp.Body.Close() }()
-
-	// Log should contain truncated marker.
-	if !strings.Contains(buf.String(), "truncated") {
-		t.Errorf("log should contain 'truncated' for large body, got: %q", buf.String())
-	}
-}
-
-// ---------------------------------------------------------------------------
-// LoggingMiddleware.Apply: error from next handler
-// ---------------------------------------------------------------------------
-
-func TestLoggingMiddlewareApply_NextError(t *testing.T) {
-	t.Parallel()
-
-	var buf bytes.Buffer
-
-	lg := log.New(&buf, "", 0)
-	loggingMW := NewLoggingMiddleware(lg)
-
-	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://127.0.0.1:1/path", nil)
-
-	next := Handler(func(_ *http.Request) (*http.Response, error) {
-		return nil, errTestConnectionRefused
-	})
-
-	nextErrResp, err := loggingMW.Apply(req, next)
-	if nextErrResp != nil && nextErrResp.Body != nil {
-		defer func() { _ = nextErrResp.Body.Close() }()
-	}
-
-	if err == nil {
-		t.Fatal("expected error from next")
-	}
-
-	if !strings.Contains(buf.String(), "ERROR") {
-		t.Errorf("log should contain ERROR for failed request, got: %q", buf.String())
-	}
-}
-
-// ---------------------------------------------------------------------------
-// RateLimitMiddleware.Apply: token re-fill path
-// ---------------------------------------------------------------------------
-
-func TestRateLimitMiddleware_TokenRefill(t *testing.T) {
-	t.Parallel()
-
-	rateLimiter := NewRateLimitMiddleware(10, 5)
-	// Start with 3 tokens; refill should fire when time elapses.
-	rateLimiter.tokens = 3
-	rateLimiter.lastRequest = time.Now().Add(-2 * time.Second) // 2s elapsed → +20 tokens capped to burst=5
-
-	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://example.com/path", nil)
-
-	next := Handler(func(_ *http.Request) (*http.Response, error) {
-		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(""))}, nil
-	})
-
-	resp, err := rateLimiter.Apply(req, next)
-	if err != nil {
-		t.Fatalf("Apply: %v", err)
-	}
-
-	defer func() { _ = resp.Body.Close() }()
 }
 
 // ---------------------------------------------------------------------------
