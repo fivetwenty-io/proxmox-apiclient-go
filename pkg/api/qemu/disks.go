@@ -121,7 +121,8 @@ func (s *service) DetachDisk(ctx context.Context, node string, vmid int, diskID 
 
 	configPath := fmt.Sprintf("/nodes/%s/qemu/%d/config", node, vmid)
 
-	if _, err = s.c.PutCtx(ctx, configPath, map[string]interface{}{"delete": diskID}); err != nil {
+	_, err = s.c.PutCtx(ctx, configPath, map[string]interface{}{"delete": diskID})
+	if err != nil {
 		return fmt.Errorf("failed to detach disk %q from VM %d on node %q: %w", diskID, vmid, node, err)
 	}
 
@@ -131,6 +132,13 @@ func (s *service) DetachDisk(ctx context.Context, node string, vmid int, diskID 
 		return nil
 	}
 
+	return s.clearAutoUnusedSlot(ctx, node, vmid, diskID, volid, configPath)
+}
+
+// clearAutoUnusedSlot removes the unusedN slot PVE auto-creates when a disk
+// is detached from its bus slot. This prevents a subsequent VM destroy from
+// silently deleting the volume that was intentionally detached.
+func (s *service) clearAutoUnusedSlot(ctx context.Context, node string, vmid int, diskID, volid, configPath string) error {
 	// Sweep the unusedN slot PVE auto-creates for the bare volid prefix
 	// (config values may be "<volid>" or "<volid>,options").
 	bareVolid := volid
@@ -162,7 +170,8 @@ func (s *service) DetachDisk(ctx context.Context, node string, vmid int, diskID 
 			continue
 		}
 
-		if _, err := s.c.PutCtx(ctx, configPath, map[string]interface{}{"delete": key}); err != nil {
+		_, err = s.c.PutCtx(ctx, configPath, map[string]interface{}{"delete": key})
+		if err != nil {
 			return fmt.Errorf("failed to remove unused slot %q for volid %q on VM %d node %q: %w", key, bareVolid, vmid, node, err)
 		}
 

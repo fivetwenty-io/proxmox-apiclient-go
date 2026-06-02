@@ -140,7 +140,12 @@ func (c *Conn) ReadMessage() (int, []byte, error) {
 		return 0, nil, ErrWriteAfterClose
 	}
 
-	return c.ws.ReadMessage()
+	msgType, data, err := c.ws.ReadMessage()
+	if err != nil {
+		return 0, nil, fmt.Errorf("read message: %w", err)
+	}
+
+	return msgType, data, nil
 }
 
 // WriteMessage writes a message to the connection.
@@ -149,7 +154,12 @@ func (c *Conn) WriteMessage(messageType int, data []byte) error {
 		return ErrWriteAfterClose
 	}
 
-	return c.ws.WriteMessage(messageType, data)
+	err := c.ws.WriteMessage(messageType, data)
+	if err != nil {
+		return fmt.Errorf("write message: %w", err)
+	}
+
+	return nil
 }
 
 // Close closes the WebSocket connection gracefully.
@@ -165,7 +175,12 @@ func (c *Conn) Close() error {
 		websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""),
 	)
 
-	return c.ws.Close()
+	err := c.ws.Close()
+	if err != nil {
+		return fmt.Errorf("close connection: %w", err)
+	}
+
+	return nil
 }
 
 // Underlying returns the raw gorilla websocket.Conn for callers that need it.
@@ -454,7 +469,8 @@ func (p *ProxyClient) postVNCSession(
 
 	var session VNCSession
 
-	if err := json.Unmarshal(raw, &session); err != nil {
+	err = json.Unmarshal(raw, &session)
+	if err != nil {
 		return nil, fmt.Errorf("decode vncproxy response: %w", err)
 	}
 
@@ -471,7 +487,8 @@ func (p *ProxyClient) postTermSession(
 
 	var session TermSession
 
-	if err := json.Unmarshal(raw, &session); err != nil {
+	err = json.Unmarshal(raw, &session)
+	if err != nil {
 		return nil, fmt.Errorf("decode termproxy response: %w", err)
 	}
 
@@ -488,7 +505,8 @@ func (p *ProxyClient) postSpiceSession(
 
 	var session SpiceSession
 
-	if err := json.Unmarshal(raw, &session); err != nil {
+	err = json.Unmarshal(raw, &session)
+	if err != nil {
 		return nil, fmt.Errorf("decode spiceproxy response: %w", err)
 	}
 
@@ -505,7 +523,7 @@ func (p *ProxyClient) httpPost(
 
 		err := p.cfg.HTTPClient.PostJSON(ctx, apiPath, params, &envelope)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("PostJSON %s: %w", apiPath, err)
 		}
 
 		return envelope.Data, nil
@@ -561,7 +579,8 @@ func (p *ProxyClient) directHTTPPost(
 
 	var envelope pveDataEnvelope
 
-	if err := json.Unmarshal(body, &envelope); err != nil {
+	err = json.Unmarshal(body, &envelope)
+	if err != nil {
 		return nil, fmt.Errorf("decode PVE response envelope: %w", err)
 	}
 
@@ -572,7 +591,7 @@ func (p *ProxyClient) directHTTPPost(
 func (p *ProxyClient) buildHTTPClient() *http.Client {
 	tlsCfg := p.cfg.TLSConfig
 	if tlsCfg == nil && p.cfg.Insecure {
-		tlsCfg = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // intentional; caller-controlled
+		tlsCfg = &tls.Config{InsecureSkipVerify: true}
 	}
 
 	transport := &http.Transport{TLSClientConfig: tlsCfg}
@@ -624,7 +643,7 @@ func (p *ProxyClient) dial(ctx context.Context, apiPath string, query url.Values
 
 	tlsCfg := p.cfg.TLSConfig
 	if tlsCfg == nil && p.cfg.Insecure {
-		tlsCfg = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // intentional; caller-controlled
+		tlsCfg = &tls.Config{InsecureSkipVerify: true}
 	}
 
 	dialer := websocket.Dialer{
@@ -646,24 +665,27 @@ func (p *ProxyClient) dial(ctx context.Context, apiPath string, query url.Values
 	return &Conn{ws: conn}, nil
 }
 
+// minVMID is the minimum valid PVE virtual machine/container ID.
+const minVMID = 100
+
 // applyAuthHeaders sets Cookie and CSRFPreventionToken headers when values present.
-func applyAuthHeaders(h http.Header, ticket, csrf string) {
+func applyAuthHeaders(headers http.Header, ticket, csrf string) {
 	if ticket != "" {
-		h.Set("Cookie", "PVEAuthCookie="+ticket)
+		headers.Set("Cookie", "PVEAuthCookie="+ticket)
 	}
 
 	if csrf != "" {
-		h.Set("Csrfpreventiontoken", csrf)
+		headers.Set("Csrfpreventiontoken", csrf)
 	}
 }
 
-// validateNodeVMID returns an error if node is empty or vmid < 100.
+// validateNodeVMID returns an error if node is empty or vmid < minVMID.
 func validateNodeVMID(node string, vmid int) error {
 	if node == "" {
 		return ErrNodeRequired
 	}
 
-	if vmid < 100 {
+	if vmid < minVMID {
 		return ErrVMIDInvalid
 	}
 

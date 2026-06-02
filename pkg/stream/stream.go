@@ -16,6 +16,8 @@ import (
 	"github.com/fivetwenty-io/pve-apiclient-go/v3/internal/constants"
 )
 
+const formatJSONLines = "jsonlines"
+
 var (
 	ErrStreamClosed           = errors.New("stream is closed")
 	ErrItemSizeExceedsMaximum = errors.New("item size exceeds maximum")
@@ -60,7 +62,7 @@ func DefaultConfig() *Config {
 		BufferSize:  constants.LargeBufferSize,
 		MaxItemSize: constants.StreamMaxItemSize, // 1MB
 		ReadTimeout: constants.DefaultClientTimeout(),
-		Format:      "jsonlines",
+		Format:      formatJSONLines,
 		Delimiter:   "\n",
 	}
 }
@@ -135,7 +137,7 @@ func New(reader io.ReadCloser, config *Config) *Stream {
 	switch config.Format {
 	case "json":
 		decoder = &JSONDecoder{}
-	case "jsonlines":
+	case formatJSONLines:
 		decoder = &JSONLinesDecoder{}
 	default:
 		decoder = &JSONLinesDecoder{}
@@ -410,31 +412,39 @@ func (s *Stream) updateReadMetrics(start time.Time) {
 }
 
 func (s *Stream) readStreamData() ([]byte, error) {
-	var (
-		data []byte
-		err  error
-	)
+	if s.config.Format == formatJSONLines || s.decoder.SupportsPartial() {
+		return s.readStreamLine()
+	}
 
-	if s.config.Format == "jsonlines" || s.decoder.SupportsPartial() {
-		data, err = s.buffer.ReadBytes('\n')
-		if err != nil {
-			if !errors.Is(err, io.EOF) {
-				s.recordError(err)
+	return s.readStreamAll()
+}
 
-				return nil, fmt.Errorf("failed to read stream line: %w", err)
-			}
-			// io.EOF with no data means the stream is exhausted.
-			if len(data) == 0 {
-				return nil, io.EOF
-			}
-		}
-	} else {
-		data, err = io.ReadAll(s.buffer)
-		if err != nil {
-			s.recordError(err)
+func (s *Stream) readStreamLine() ([]byte, error) {
+	data, err := s.buffer.ReadBytes('\n')
+	if err == nil {
+		return data, nil
+	}
 
-			return nil, fmt.Errorf("failed to read stream content: %w", err)
-		}
+	if !errors.Is(err, io.EOF) {
+		s.recordError(err)
+
+		return nil, fmt.Errorf("failed to read stream line: %w", err)
+	}
+
+	// io.EOF with no data means the stream is exhausted.
+	if len(data) == 0 {
+		return nil, io.EOF
+	}
+
+	return data, nil
+}
+
+func (s *Stream) readStreamAll() ([]byte, error) {
+	data, err := io.ReadAll(s.buffer)
+	if err != nil {
+		s.recordError(err)
+
+		return nil, fmt.Errorf("failed to read stream content: %w", err)
 	}
 
 	return data, nil

@@ -63,7 +63,7 @@ type Handler func(*http.Request) (*http.Response, error)
 func NewClient(options *Options) (*Client, error) {
 	transport := createHTTPTransport(options)
 
-	if options.Protocol == "https" {
+	if options.Protocol == protoHTTPS {
 		tlsConfig, err := configureTLS(options)
 		if err != nil {
 			return nil, err
@@ -218,7 +218,8 @@ func configureVerifierCallbacks(verifier *issl.FingerprintVerifier, options *Opt
 }
 
 func createAuthenticator(options *Options, httpClient *http.Client) auth.Authenticator { //nolint:ireturn // Factory function pattern
-	if options.APIToken != "" {
+	switch {
+	case options.APIToken != "":
 		token, err := auth.ParseAPIToken(options.APIToken)
 		if err != nil {
 			// Caller cannot receive this error through NewClient currently; surface it via a
@@ -229,7 +230,8 @@ func createAuthenticator(options *Options, httpClient *http.Client) auth.Authent
 		}
 
 		return auth.NewAPITokenAuthenticator(token, options.APITokenName)
-	} else if options.Username != "" {
+
+	case options.Username != "":
 		credentials := &auth.Credentials{
 			Username: options.Username,
 			Password: options.Password,
@@ -242,7 +244,8 @@ func createAuthenticator(options *Options, httpClient *http.Client) auth.Authent
 		}
 
 		return auth.NewTicketAuthenticator(options.BaseURL(), credentials, httpClient, options.CookieName, options.PVENewFormat)
-	} else if options.Ticket != "" {
+
+	case options.Ticket != "":
 		// A pre-existing ticket was supplied without a token or username. Build a
 		// ticket authenticator seeded with it so requests are authenticated and
 		// the ticket can later be updated via SetTicket / renewed if it ages out.
@@ -376,7 +379,7 @@ func (c *Client) DoWithContext(ctx context.Context, method, path string, params 
 		if closeErr != nil {
 			if c.logger != nil && c.logConfig.Enabled {
 				c.logger.Warn("failed to close response body", map[string]interface{}{
-					"error": closeErr.Error(),
+					logFieldError: closeErr.Error(),
 				})
 			}
 		}
@@ -411,7 +414,7 @@ func (c *Client) UploadWithContext(ctx context.Context, path string, fields map[
 		if closeErr != nil {
 			if c.logger != nil && c.logConfig.Enabled {
 				c.logger.Warn("failed to close response body", map[string]interface{}{
-					"error": closeErr.Error(),
+					logFieldError: closeErr.Error(),
 				})
 			}
 		}
@@ -635,10 +638,10 @@ func (c *Client) logResponse(req *http.Request, resp *http.Response, bodyBytes [
 	}
 
 	fields := map[string]interface{}{
-		"method":   req.Method,
-		"url":      req.URL.String(),
-		"status":   resp.StatusCode,
-		"duration": int64(time.Since(start) / time.Millisecond),
+		logFieldMethod: req.Method,
+		logFieldURL:    req.URL.String(),
+		"status":       resp.StatusCode,
+		"duration":     int64(time.Since(start) / time.Millisecond),
 	}
 
 	if c.logConfig.LogResponseHeader {
@@ -695,7 +698,7 @@ func (c *Client) buildRequestWithContext(ctx context.Context, method, path strin
 			}
 
 			body = strings.NewReader(formData.Encode())
-			contentType = "application/x-www-form-urlencoded"
+			contentType = contentTypeFormURLEncoded
 		}
 	}
 
@@ -1254,10 +1257,10 @@ func (c *Client) loggingMiddleware(req *http.Request, next Handler) (*http.Respo
 
 	if c.logger != nil && c.logConfig.Enabled {
 		fields := map[string]interface{}{
-			"method":   event.Method,
-			"url":      event.URL,
-			"status":   event.Status,
-			"duration": int64(event.Duration / time.Millisecond),
+			logFieldMethod: event.Method,
+			logFieldURL:    event.URL,
+			"status":       event.Status,
+			"duration":     int64(event.Duration / time.Millisecond),
 		}
 		// propagate request fields
 		for k, v := range opts.Fields {

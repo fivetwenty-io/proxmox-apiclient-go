@@ -44,7 +44,7 @@ func NewTicketAuthenticator(
 	pveNewFormat bool,
 ) *TicketAuthenticator {
 	if credentials.Realm == "" {
-		credentials.Realm = "pam"
+		credentials.Realm = realmPAM
 	}
 
 	return &TicketAuthenticator{
@@ -80,7 +80,7 @@ func NewTicketAuthenticatorFromTicket(
 	}
 
 	if credentials.Realm == "" {
-		credentials.Realm = "pam"
+		credentials.Realm = realmPAM
 	}
 
 	ticketAuth := &TicketAuthenticator{

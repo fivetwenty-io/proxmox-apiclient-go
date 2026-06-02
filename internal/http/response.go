@@ -231,14 +231,14 @@ func (rp *ResponseParser) tryStringConversion(str string, targetElem reflect.Val
 
 // isJSONContent checks if the content type is JSON.
 func isJSONContent(contentType string) bool {
-	return contentType == "application/json" ||
+	return contentType == contentTypeJSON ||
 		contentType == "application/json; charset=utf-8" ||
 		contentType == "text/json"
 }
 
 // isTextContent checks if the content type is text.
 func isTextContent(contentType string) bool {
-	return contentType == "text/plain" ||
+	return contentType == contentTypeTextPlain ||
 		contentType == "text/plain; charset=utf-8" ||
 		contentType == "text/html" ||
 		contentType == "text/html; charset=utf-8"
