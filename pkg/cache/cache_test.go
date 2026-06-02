@@ -30,7 +30,7 @@ func TestCache_BasicGetSet(t *testing.T) {
 	}
 
 	// Test Get non-existent key
-	_, found =	testCache.Get("nonexistent")
+	_, found = testCache.Get("nonexistent")
 	if found {
 		t.Error("Expected not to find nonexistent key")
 	}
@@ -50,7 +50,7 @@ func TestCache_TTLExpiration(t *testing.T) {
 	testCache.Set("expire-key", "expire-value", 50*time.Millisecond)
 
 	// Should be available immediately
-	val, found :=	testCache.Get("expire-key")
+	val, found := testCache.Get("expire-key")
 	if !found {
 		t.Fatal("Expected to find expire-key immediately")
 	}
@@ -63,13 +63,13 @@ func TestCache_TTLExpiration(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Should be expired
-	_, found =	testCache.Get("expire-key")
+	_, found = testCache.Get("expire-key")
 	if found {
 		t.Error("Expected expire-key to be expired")
 	}
 
 	// Check that miss counter increased
-	stats :=	testCache.Stats()
+	stats := testCache.Stats()
 	if stats.Misses != 1 {
 		t.Errorf("Expected 1 miss, got %d", stats.Misses)
 	}
@@ -91,15 +91,15 @@ func TestCache_LRUEviction(t *testing.T) {
 	testCache.Set("key3", "value3", 1*time.Minute)
 
 	// Access in order: key1, key2, key3 (key1 becomes LRU)
-	if _, found :=	testCache.Get("key1"); !found {
+	if _, found := testCache.Get("key1"); !found {
 		t.Error("Expected key1 to be present")
 	}
 
-	if _, found :=	testCache.Get("key2"); !found {
+	if _, found := testCache.Get("key2"); !found {
 		t.Error("Expected key2 to be present")
 	}
 
-	if _, found :=	testCache.Get("key3"); !found {
+	if _, found := testCache.Get("key3"); !found {
 		t.Error("Expected key3 to be present")
 	}
 
@@ -107,24 +107,24 @@ func TestCache_LRUEviction(t *testing.T) {
 	testCache.Set("key4", "value4", 1*time.Minute)
 
 	// key1 should be evicted (it's the LRU)
-	if _, found :=	testCache.Get("key1"); found {
+	if _, found := testCache.Get("key1"); found {
 		t.Error("Expected key1 to be evicted")
 	}
 
 	// Others should still be present
-	if _, found :=	testCache.Get("key2"); !found {
+	if _, found := testCache.Get("key2"); !found {
 		t.Error("Expected key2 to be present after eviction")
 	}
 
-	if _, found :=	testCache.Get("key3"); !found {
+	if _, found := testCache.Get("key3"); !found {
 		t.Error("Expected key3 to be present after eviction")
 	}
 
-	if _, found :=	testCache.Get("key4"); !found {
+	if _, found := testCache.Get("key4"); !found {
 		t.Error("Expected key4 to be present after eviction")
 	}
 
-	stats :=	testCache.Stats()
+	stats := testCache.Stats()
 	if stats.Evictions < 1 {
 		t.Errorf("Expected at least 1 eviction, got %d", stats.Evictions)
 	}
@@ -178,7 +178,7 @@ func TestCache_ConcurrentAccess(t *testing.T) {
 	waitGroup.Wait()
 
 	// Should have entries
-	stats :=	testCache.Stats()
+	stats := testCache.Stats()
 	if stats.Entries == 0 {
 		t.Error("Expected some entries after concurrent access")
 	}
@@ -200,26 +200,26 @@ func TestCache_PatternInvalidation(t *testing.T) {
 	testCache.Set("/version", "data4", 1*time.Minute)
 
 	// Invalidate all /nodes/* entries
-	removed :=	testCache.Invalidate("/nodes/*")
+	removed := testCache.Invalidate("/nodes/*")
 	if removed != 2 {
 		t.Errorf("Expected to invalidate 2 entries, got %d", removed)
 	}
 
 	// /nodes entries should be gone
-	if _, found :=	testCache.Get("/nodes/node1/status"); found {
+	if _, found := testCache.Get("/nodes/node1/status"); found {
 		t.Error("Expected /nodes/node1/status to be invalidated")
 	}
 
-	if _, found :=	testCache.Get("/nodes/node2/status"); found {
+	if _, found := testCache.Get("/nodes/node2/status"); found {
 		t.Error("Expected /nodes/node2/status to be invalidated")
 	}
 
 	// Others should remain
-	if _, found :=	testCache.Get("/storage/local/status"); !found {
+	if _, found := testCache.Get("/storage/local/status"); !found {
 		t.Error("Expected /storage/local/status to remain")
 	}
 
-	if _, found :=	testCache.Get("/version"); !found {
+	if _, found := testCache.Get("/version"); !found {
 		t.Error("Expected /version to remain")
 	}
 }
@@ -237,16 +237,16 @@ func TestCache_ExactInvalidation(t *testing.T) {
 	testCache.Set("exact-key-other", "value2", 1*time.Minute)
 
 	// Exact match invalidation (no wildcard)
-	removed :=	testCache.Invalidate("exact-key")
+	removed := testCache.Invalidate("exact-key")
 	if removed != 1 {
 		t.Errorf("Expected to invalidate 1 entry, got %d", removed)
 	}
 
-	if _, found :=	testCache.Get("exact-key"); found {
+	if _, found := testCache.Get("exact-key"); found {
 		t.Error("Expected exact-key to be invalidated")
 	}
 
-	if _, found :=	testCache.Get("exact-key-other"); !found {
+	if _, found := testCache.Get("exact-key-other"); !found {
 		t.Error("Expected exact-key-other to remain")
 	}
 }
@@ -265,7 +265,7 @@ func TestCache_Clear(t *testing.T) {
 	testCache.Set("key2", "value2", 1*time.Minute)
 	testCache.Set("key3", "value3", 1*time.Minute)
 
-	stats :=	testCache.Stats()
+	stats := testCache.Stats()
 	if stats.Entries != 3 {
 		t.Errorf("Expected 3 entries, got %d", stats.Entries)
 	}
@@ -273,7 +273,7 @@ func TestCache_Clear(t *testing.T) {
 	// Clear all
 	testCache.Clear()
 
-	stats =	testCache.Stats()
+	stats = testCache.Stats()
 	if stats.Entries != 0 {
 		t.Errorf("Expected 0 entries after Clear, got %d", stats.Entries)
 	}
@@ -293,7 +293,7 @@ func TestCache_Stats(t *testing.T) {
 	defer testCache.Close()
 
 	// Initial stats
-	stats :=	testCache.Stats()
+	stats := testCache.Stats()
 	if stats.Hits != 0 || stats.Misses != 0 || stats.Evictions != 0 {
 		t.Error("Expected all stats to be 0 initially")
 	}
@@ -303,7 +303,7 @@ func TestCache_Stats(t *testing.T) {
 	testCache.Get("key1") // hit
 	testCache.Get("key1") // hit
 
-	stats =	testCache.Stats()
+	stats = testCache.Stats()
 	if stats.Hits != 2 {
 		t.Errorf("Expected 2 hits, got %d", stats.Hits)
 	}
@@ -315,7 +315,7 @@ func TestCache_Stats(t *testing.T) {
 	// Miss
 	testCache.Get("nonexistent")
 
-	stats =	testCache.Stats()
+	stats = testCache.Stats()
 	if stats.Misses != 1 {
 		t.Errorf("Expected 1 miss, got %d", stats.Misses)
 	}
@@ -338,12 +338,12 @@ func TestCache_Disabled(t *testing.T) {
 	// Operations should be no-ops
 	testCache.Set("key1", "value1", 1*time.Minute)
 
-	_, found :=	testCache.Get("key1")
+	_, found := testCache.Get("key1")
 	if found {
 		t.Error("Expected cache to be disabled, but Get returned found=true")
 	}
 
-	stats :=	testCache.Stats()
+	stats := testCache.Stats()
 	if stats.Entries != 0 {
 		t.Error("Expected 0 entries when cache is disabled")
 	}
@@ -361,7 +361,7 @@ func TestCache_UpdateExisting(t *testing.T) {
 	// Set initial value
 	testCache.Set("key1", "value1", 1*time.Minute)
 
-	val, found :=	testCache.Get("key1")
+	val, found := testCache.Get("key1")
 
 	valStr, ok := val.(string)
 	if !found || !ok || valStr != "value1" {
@@ -371,7 +371,7 @@ func TestCache_UpdateExisting(t *testing.T) {
 	// Update with new value
 	testCache.Set("key1", "value2", 1*time.Minute)
 
-	val, found =	testCache.Get("key1")
+	val, found = testCache.Get("key1")
 	if !found {
 		t.Fatal("Expected to find updated value")
 	}
@@ -381,7 +381,7 @@ func TestCache_UpdateExisting(t *testing.T) {
 	}
 
 	// Should still have only 1 entry
-	stats :=	testCache.Stats()
+	stats := testCache.Stats()
 	if stats.Entries != 1 {
 		t.Errorf("Expected 1 entry after update, got %d", stats.Entries)
 	}
@@ -406,16 +406,16 @@ func TestCache_CleanupLoop(t *testing.T) {
 	time.Sleep(150 * time.Millisecond)
 
 	// Expired entries should be cleaned up
-	if _, found :=	testCache.Get("cleanup1"); found {
+	if _, found := testCache.Get("cleanup1"); found {
 		t.Error("Expected cleanup1 to be cleaned up")
 	}
 
-	if _, found :=	testCache.Get("cleanup2"); found {
+	if _, found := testCache.Get("cleanup2"); found {
 		t.Error("Expected cleanup2 to be cleaned up")
 	}
 
 	// Non-expired should remain
-	if _, found :=	testCache.Get("cleanup3"); !found {
+	if _, found := testCache.Get("cleanup3"); !found {
 		t.Error("Expected cleanup3 to remain")
 	}
 }
@@ -505,4 +505,3 @@ func TestShouldCache(t *testing.T) {
 		})
 	}
 }
-

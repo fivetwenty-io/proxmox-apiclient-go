@@ -125,6 +125,7 @@ func TestDetachDiskClearsUnusedSlot(t *testing.T) {
 			for k, v := range state {
 				data[k] = v
 			}
+
 			_ = json.NewEncoder(writer).Encode(map[string]any{"data": data, "success": 1})
 
 		case http.MethodPut:
@@ -136,6 +137,7 @@ func TestDetachDiskClearsUnusedSlot(t *testing.T) {
 			if deletes == "scsi1" {
 				state["unused0"] = volid
 			}
+
 			_ = json.NewEncoder(writer).Encode(map[string]any{"data": map[string]any{"ok": true}, "success": 1})
 
 		default:
@@ -150,6 +152,7 @@ func TestDetachDiskClearsUnusedSlot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("client: %v", err)
 	}
+
 	svc := qemu.New(cli)
 
 	if err := svc.DetachDisk(context.Background(), "testnode", 123, "scsi1"); err != nil {
@@ -159,12 +162,15 @@ func TestDetachDiskClearsUnusedSlot(t *testing.T) {
 	if len(deleteCalls) != 2 {
 		t.Fatalf("expected 2 PUT delete calls, got %d (%v)", len(deleteCalls), deleteCalls)
 	}
+
 	if deleteCalls[0] != "scsi1" {
 		t.Fatalf("first delete should target scsi1, got %q", deleteCalls[0])
 	}
+
 	if deleteCalls[1] != "unused0" {
 		t.Fatalf("second delete should target unused0, got %q", deleteCalls[1])
 	}
+
 	if _, ok := state["unused0"]; ok {
 		t.Fatalf("unused0 should have been cleared, state=%v", state)
 	}
@@ -189,6 +195,7 @@ func TestDetachDiskUnusedSlotIdempotent(t *testing.T) {
 			for k, v := range state {
 				data[k] = v
 			}
+
 			_ = json.NewEncoder(writer).Encode(map[string]any{"data": data, "success": 1})
 
 		case http.MethodPut:
@@ -196,6 +203,7 @@ func TestDetachDiskUnusedSlotIdempotent(t *testing.T) {
 			deletes := request.PostForm.Get("delete")
 			deleteCalls = append(deleteCalls, deletes)
 			delete(state, deletes)
+
 			_ = json.NewEncoder(writer).Encode(map[string]any{"data": map[string]any{"ok": true}, "success": 1})
 
 		default:
@@ -210,6 +218,7 @@ func TestDetachDiskUnusedSlotIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("client: %v", err)
 	}
+
 	svc := qemu.New(cli)
 
 	if err := svc.DetachDisk(context.Background(), "testnode", 123, "unused0"); err != nil {
@@ -219,6 +228,7 @@ func TestDetachDiskUnusedSlotIdempotent(t *testing.T) {
 	if len(deleteCalls) != 1 {
 		t.Fatalf("expected exactly one PUT delete, got %d (%v)", len(deleteCalls), deleteCalls)
 	}
+
 	if deleteCalls[0] != "unused0" {
 		t.Fatalf("delete should target unused0, got %q", deleteCalls[0])
 	}

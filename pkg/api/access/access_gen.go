@@ -323,6 +323,8 @@ func (s *service) ListDomains(ctx context.Context) (*ListDomainsResponse, error)
 type CreateDomainsParams struct {
 	// AcrValues Specifies the Authentication Context Class Reference values that theAuthorization Server is being requested to use for the Auth Request.
 	AcrValues *string `json:"acr-values,omitempty"`
+	// Audiences A list of audiences that the OpenID Issuer may include that are accepted in addition to 'client-id'.
+	Audiences *string `json:"audiences,omitempty"`
 	// Autocreate Automatically create users if they do not exist.
 	Autocreate *bool `json:"autocreate,omitempty"`
 	// BaseDn LDAP base domain name
@@ -490,6 +492,8 @@ func (s *service) GetDomains(ctx context.Context, realm string) (*GetDomainsResp
 type UpdateDomainsParams struct {
 	// AcrValues Specifies the Authentication Context Class Reference values that theAuthorization Server is being requested to use for the Auth Request.
 	AcrValues *string `json:"acr-values,omitempty"`
+	// Audiences A list of audiences that the OpenID Issuer may include that are accepted in addition to 'client-id'.
+	Audiences *string `json:"audiences,omitempty"`
 	// Autocreate Automatically create users if they do not exist.
 	Autocreate *bool `json:"autocreate,omitempty"`
 	// BaseDn LDAP base domain name

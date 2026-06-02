@@ -244,6 +244,7 @@ func TestCollector_SetLabels(t *testing.T) {
 	co.Inc()
 
 	var buf bytes.Buffer
+
 	err := c.Export(&buf)
 	if err != nil {
 		t.Fatalf("Export: %v", err)
@@ -263,6 +264,7 @@ func TestCollector_Export_Counters(t *testing.T) {
 	co.Add(42)
 
 	var buf bytes.Buffer
+
 	err := c.Export(&buf)
 	if err != nil {
 		t.Fatalf("Export: %v", err)
@@ -290,6 +292,7 @@ func TestCollector_Export_Gauges(t *testing.T) {
 	g.Set(5)
 
 	var buf bytes.Buffer
+
 	err := c.Export(&buf)
 	if err != nil {
 		t.Fatalf("Export: %v", err)
@@ -314,6 +317,7 @@ func TestCollector_Export_Histograms(t *testing.T) {
 	h.Observe(0.4)
 
 	var buf bytes.Buffer
+
 	err := c.Export(&buf)
 	if err != nil {
 		t.Fatalf("Export: %v", err)
@@ -342,6 +346,7 @@ func TestCollector_Export_Summaries(t *testing.T) {
 	s.Observe(0.5)
 
 	var buf bytes.Buffer
+
 	err := c.Export(&buf)
 	if err != nil {
 		t.Fatalf("Export: %v", err)
@@ -405,6 +410,7 @@ func TestNewDefaultMetrics(t *testing.T) {
 	m.BytesReceived.Add(512)
 
 	var buf bytes.Buffer
+
 	err := m.Export(&buf)
 	if err != nil {
 		t.Fatalf("DefaultMetrics.Export: %v", err)

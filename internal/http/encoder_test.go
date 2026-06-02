@@ -496,6 +496,202 @@ func TestEncodeParams_MapIterationDeterminism(t *testing.T) {
 	}
 }
 
+// ---- OptionString (ordered, positional) -------------------------------------
+
+// TestOptionString_DiskRoundTrip captures F4: a disk spec has a positional
+// leading token followed by ordered key=value options. A sorted map cannot do this.
+func TestOptionString_DiskRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	optStr := NewOptionString().Positional("local-lvm:32").Set("size", "64G").Set("ssd", true)
+
+	want := "local-lvm:32,size=64G,ssd=1"
+	if got := optStr.Encode(); got != want {
+		t.Errorf("disk: got %q, want %q", got, want)
+	}
+
+	got := encodeParams(map[string]interface{}{"scsi0": *optStr})
+	if got.Get("scsi0") != want {
+		t.Errorf("disk via encodeParams: got %q, want %q", got.Get("scsi0"), want)
+	}
+}
+
+// TestOptionString_NetRoundTrip captures F4 for a NIC spec with a positional model.
+func TestOptionString_NetRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	optStr := OptionStringOf(
+		KV{Value: "virtio"},
+		KV{Key: "bridge", Value: "vmbr0"},
+		KV{Key: "firewall", Value: true},
+	)
+
+	want := "virtio,bridge=vmbr0,firewall=1"
+	if got := optStr.Encode(); got != want {
+		t.Errorf("net: got %q, want %q", got, want)
+	}
+
+	got := encodeParams(map[string]interface{}{"net0": optStr})
+	if got.Get("net0") != want {
+		t.Errorf("net via encodeParams: got %q, want %q", got.Get("net0"), want)
+	}
+}
+
+// TestOptionString_OrderPreserved proves insertion order is kept (not sorted).
+func TestOptionString_OrderPreserved(t *testing.T) {
+	t.Parallel()
+
+	os := NewOptionString().Set("z", "1").Set("a", "2").Set("m", "3")
+
+	want := "z=1,a=2,m=3" // NOT sorted
+	if got := os.Encode(); got != want {
+		t.Errorf("order: got %q, want %q (must preserve insertion order)", got, want)
+	}
+}
+
+// TestOptionString_BoolEncoding verifies bool → 1/0 inside option-strings.
+func TestOptionString_BoolEncoding(t *testing.T) {
+	t.Parallel()
+
+	os := NewOptionString().Set("on", true).Set("off", false)
+
+	if got := os.Encode(); got != "on=1,off=0" {
+		t.Errorf("bool: got %q, want %q", got, "on=1,off=0")
+	}
+}
+
+// TestOptionString_Empty encodes to empty string.
+func TestOptionString_Empty(t *testing.T) {
+	t.Parallel()
+
+	if got := NewOptionString().Encode(); got != "" {
+		t.Errorf("empty: got %q, want empty", got)
+	}
+
+	if got := OptionStringOf().Encode(); got != "" {
+		t.Errorf("empty OptionStringOf: got %q, want empty", got)
+	}
+}
+
+// TestOptionString_StringerAndLen exercises String and Len.
+func TestOptionString_StringerAndLen(t *testing.T) {
+	t.Parallel()
+
+	optStr := NewOptionString().Positional("x").Set("a", 1)
+	if optStr.Len() != 2 {
+		t.Errorf("Len: got %d, want 2", optStr.Len())
+	}
+
+	if optStr.String() != "x,a=1" {
+		t.Errorf("String: got %q, want %q", optStr.String(), "x,a=1")
+	}
+}
+
+// TestOptionString_EmptyKeyTreatedPositional ensures Set("", v) does not emit "=v".
+func TestOptionString_EmptyKeyTreatedPositional(t *testing.T) {
+	t.Parallel()
+
+	os := NewOptionString().Set("", "lead").Set("k", "v")
+	if got := os.Encode(); got != "lead,k=v" {
+		t.Errorf("empty key: got %q, want %q", got, "lead,k=v")
+	}
+}
+
+// ---- IndexedSlice (indexed vs repeated) -------------------------------------
+
+// TestIndexedSlice_Indexed captures F8: indexed-key encoding (key0,key1,...).
+func TestIndexedSlice_Indexed(t *testing.T) {
+	t.Parallel()
+
+	got := encodeParams(map[string]interface{}{
+		"ip": IndexedSliceOf(ArrayIndexed, "10.0.0.1", "10.0.0.2", "10.0.0.3"),
+	})
+
+	for i, want := range []string{"10.0.0.1", "10.0.0.2", "10.0.0.3"} {
+		key := "ip" + strconv.Itoa(i)
+		if got.Get(key) != want {
+			t.Errorf("%s = %q, want %q", key, got.Get(key), want)
+		}
+	}
+
+	if _, found := got["ip"]; found {
+		t.Errorf("indexed mode must not emit bare repeated key 'ip'")
+	}
+}
+
+// TestIndexedSlice_Repeated verifies repeated-key mode (key=a&key=b).
+func TestIndexedSlice_Repeated(t *testing.T) {
+	t.Parallel()
+
+	got := encodeParams(map[string]interface{}{
+		"ip": IndexedSliceOf(ArrayRepeated, "a", "b", "c"),
+	})
+
+	vals := got["ip"]
+	if len(vals) != 3 {
+		t.Fatalf("repeated: want 3 entries, got %d: %v", len(vals), vals)
+	}
+
+	for i, want := range []string{"a", "b", "c"} {
+		if vals[i] != want {
+			t.Errorf("ip[%d] = %q, want %q", i, vals[i], want)
+		}
+	}
+}
+
+// TestIndexedSlice_BoolEncoding verifies bool elements encode as 1/0 in both modes.
+func TestIndexedSlice_BoolEncoding(t *testing.T) {
+	t.Parallel()
+
+	got := encodeParams(map[string]interface{}{
+		"flags": IndexedSliceOf(ArrayIndexed, true, false, true),
+	})
+
+	for i, want := range []string{"1", "0", "1"} {
+		key := "flags" + strconv.Itoa(i)
+		if got.Get(key) != want {
+			t.Errorf("%s = %q, want %q", key, got.Get(key), want)
+		}
+	}
+}
+
+// TestIndexedSlice_Empty adds no entries.
+func TestIndexedSlice_Empty(t *testing.T) {
+	t.Parallel()
+
+	got := encodeParams(map[string]interface{}{
+		"x": IndexedSliceOf(ArrayIndexed),
+	})
+
+	for k := range got {
+		t.Errorf("empty IndexedSlice produced key %q", k)
+	}
+}
+
+// TestIndexedSlice_ModeAndLen exercises the accessors.
+func TestIndexedSlice_ModeAndLen(t *testing.T) {
+	t.Parallel()
+
+	slice := IndexedSliceOf(ArrayIndexed, 1, 2)
+	if slice.Mode() != ArrayIndexed {
+		t.Errorf("Mode: got %v, want ArrayIndexed", slice.Mode())
+	}
+
+	if slice.Len() != 2 {
+		t.Errorf("Len: got %d, want 2", slice.Len())
+	}
+}
+
+// TestPlainSliceStillRepeated proves the default plain-slice path is unchanged.
+func TestPlainSliceStillRepeated(t *testing.T) {
+	t.Parallel()
+
+	got := encodeParams(map[string]interface{}{"t": []string{"a", "b"}})
+	if len(got["t"]) != 2 || got["t"][0] != "a" || got["t"][1] != "b" {
+		t.Errorf("plain slice changed: %v", got["t"])
+	}
+}
+
 // ---- Fuzz test --------------------------------------------------------------
 
 // FuzzEncodeParam fuzzes addEncodedParam with arbitrary string keys and values,

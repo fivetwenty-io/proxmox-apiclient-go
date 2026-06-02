@@ -116,6 +116,7 @@ func (s *service) DetachDisk(ctx context.Context, node string, vmid int, diskID 
 	if !ok {
 		return nil
 	}
+
 	volid, _ := rawVal.(string)
 
 	configPath := fmt.Sprintf("/nodes/%s/qemu/%d/config", node, vmid)
@@ -141,24 +142,30 @@ func (s *service) DetachDisk(ctx context.Context, node string, vmid int, diskID 
 	if err != nil {
 		return fmt.Errorf("failed to refresh config after detaching disk %q from VM %d on node %q: %w", diskID, vmid, node, err)
 	}
+
 	for key, raw := range cfg2 {
 		if !strings.HasPrefix(key, "unused") {
 			continue
 		}
+
 		val, ok := raw.(string)
 		if !ok || val == "" {
 			continue
 		}
+
 		valBare := val
 		if comma := strings.Index(val, ","); comma >= 0 {
 			valBare = val[:comma]
 		}
+
 		if valBare != bareVolid {
 			continue
 		}
+
 		if _, err := s.c.PutCtx(ctx, configPath, map[string]interface{}{"delete": key}); err != nil {
 			return fmt.Errorf("failed to remove unused slot %q for volid %q on VM %d node %q: %w", key, bareVolid, vmid, node, err)
 		}
+
 		break
 	}
 
@@ -182,13 +189,16 @@ func (s *service) ResizeDisk(ctx context.Context, node string, vmid int, diskID 
 	if err != nil {
 		return "", fmt.Errorf("failed to execute QEMU operation: %w", err)
 	}
+
 	if upid, ok := data.(string); ok {
 		return upid, nil
 	}
+
 	if m, ok := data.(map[string]interface{}); ok {
 		if v, ok := m["upid"].(string); ok {
 			return v, nil
 		}
 	}
+
 	return "", nil
 }

@@ -5,6 +5,34 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v3.2.0] — 2026-06-01
+
+### Added
+
+- Full Proxmox VE 9.2 API surface. Bindings regenerated from the official 9.2 `apidoc`. New operations: cluster-wide QEMU listing (`Cluster().ListQemu`), QEMU CPU flags (`Cluster().ListQemuCpuFlags`), custom CPU model CRUD (`Cluster().ListQemuCustomCpuModels`, `CreateQemuCustomCpuModels`, `GetQemuCustomCpuModels`, `UpdateQemuCustomCpuModels`, `DeleteQemuCustomCpuModels`), and `Nodes().DeleteCephFs`. New optional parameters for SDN fabrics, controllers, and zones (`Redistribute`, `BgpMode`, `Nodes`, `PeerGroupName`, `SecondaryControllers`) and for access domains (`Audiences`). All additions are backward compatible — no exported symbols were removed or renamed.
+
+- `Tasks().WaitForUPID(ctx, upid, opts)`, `ParseUPID`, and a typed `UPID` struct for awaiting asynchronous PVE tasks. Task `Status.Warned` distinguishes a warning-completion (`OK: WARNINGS`) from a clean exit.
+
+- Ordered option-string and indexed-array encoding helpers in the form encoder: `OptionString`, `NewOptionString`, `OptionStringOf`, `IndexedSlice`, and `IndexedSliceOf`. PVE option strings such as `virtio,bridge=vmbr0` and indexed array parameters such as `key0`/`key1` now serialize in the exact order PVE expects, with a positional leading token and booleans encoded as `1`/`0`.
+
+- Ticket-only authentication via `NewTicketAuthenticatorFromTicket`. `Client.UpdateTicket` and `Client.UpdateCSRFToken` now propagate to the active authenticator.
+
+### Fixed
+
+- Write requests (POST, PUT, DELETE) are no longer silently auto-retried. Only idempotent methods (GET, HEAD, OPTIONS) retry automatically; opt a non-idempotent call into retry explicitly with `WithForceRetry`. This prevents duplicate side effects — for example, duplicate VM creation — when a write succeeds on the server but the response is lost to a transient failure.
+
+- A retried request now re-buffers its body correctly via `Request.GetBody`, so second and later attempts resend the original payload instead of an empty body.
+
+- An HTTP 401 response now forces re-authentication and a single retry of the original request.
+
+- A 2xx response carrying a non-empty `errors` map is now surfaced as an `APIError` instead of being treated as success.
+
+- `IsRetryableCode` no longer treats HTTP 423 (Locked) as retryable. 429, 502, 503, and 504 still retry.
+
+### Changed
+
+- `_data/apidoc.json` refreshed to the Proxmox VE 9.2 specification (444 endpoints / 675 method-operations).
+
 ## [v3.1.6] — 2026-05-20
 
 ### Added

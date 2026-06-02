@@ -42,6 +42,23 @@ func newTestClient(t *testing.T, srv *httptest.Server) pveclient.Client {
 	return cli
 }
 
+// newTestHTTPServer starts an httptest.Server with handler and registers cleanup.
+// A nil handler uses http.DefaultServeMux (responds 404 to everything useful).
+func newTestHTTPServer(t *testing.T, handler http.Handler) *httptest.Server {
+	t.Helper()
+
+	if handler == nil {
+		handler = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, "no handler", http.StatusNotFound)
+		})
+	}
+
+	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
+
+	return srv
+}
+
 const (
 	taskStatusKey  = "status"
 	taskStoppedVal = "stopped"

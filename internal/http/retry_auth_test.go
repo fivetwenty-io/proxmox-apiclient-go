@@ -1,0 +1,215 @@
+package http
+
+import (
+	"context"
+	"errors"
+	"io"
+	"net/http"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/auth"
+	apierrors "github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/errors"
+)
+
+// errorsAs is a thin wrapper so the test reads clearly.
+func errorsAs(err error, target interface{}) bool {
+	return errors.As(err, target)
+}
+
+// TestRetryMiddleware_NoAutoRetryPOSTOn5xx verifies that non-idempotent methods
+// (POST) are NOT auto-retried on retryable status codes. Auto-retrying a POST
+// could duplicate side effects such as VM create/clone.
+func TestRetryMiddleware_NoAutoRetryPOSTOn5xx(t *testing.T) {
+	t.Parallel()
+
+	var calls int32
+
+	srv := newTestServer(t, func(writer http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		writer.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = writer.Write([]byte(`{"message":"unavailable"}`))
+	})
+
+	client := clientPointedAt(t, srv.URL)
+	client.maxRetries = 3
+	client.retryDelay = time.Millisecond
+
+	_, _ = client.Do("POST", "/nodes/n1/qemu", map[string]interface{}{keyVMID: 100})
+
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Errorf("calls = %d, want 1 (POST must not auto-retry on 5xx)", got)
+	}
+}
+
+// TestRetryMiddleware_NoAutoRetryPOSTOnNetworkError verifies that a POST is not
+// retried when the underlying transport returns a network error.
+func TestRetryMiddleware_NoAutoRetryPOSTOnNetworkError(t *testing.T) {
+	t.Parallel()
+
+	var calls int32
+
+	client := clientPointedAt(t, "http://127.0.0.1:1") // unroutable port -> connection refused
+	client.maxRetries = 3
+	client.retryDelay = time.Millisecond
+	// Wrap the chain so we can count next() invocations deterministically.
+	client.middleware = []Middleware{
+		func(r *http.Request, next Handler) (*http.Response, error) {
+			atomic.AddInt32(&calls, 1)
+
+			return next(r)
+		},
+		client.retryMiddleware,
+	}
+
+	_, _ = client.Do("POST", "/nodes/n1/qemu", map[string]interface{}{keyVMID: 100})
+
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Errorf("calls = %d, want 1 (POST must not auto-retry on network error)", got)
+	}
+}
+
+// TestRetryMiddleware_POSTOptInRetryResendsBody verifies that when a caller
+// explicitly opts in to retrying a POST, the request body is resent intact on
+// each attempt (not drained to empty after the first send).
+func TestRetryMiddleware_POSTOptInRetryResendsBody(t *testing.T) {
+	t.Parallel()
+
+	var (
+		calls    int32
+		bodies   = make([]string, 0, 4)
+		bodiesMu = make(chan struct{}, 1)
+	)
+
+	bodiesMu <- struct{}{}
+
+	srv := newTestServer(t, func(writer http.ResponseWriter, r *http.Request) {
+		callNum := atomic.AddInt32(&calls, 1)
+
+		b, _ := io.ReadAll(r.Body)
+
+		<-bodiesMu
+
+		bodies = append(bodies, string(b))
+
+		bodiesMu <- struct{}{}
+
+		if callNum < 2 {
+			writer.WriteHeader(http.StatusServiceUnavailable)
+
+			return
+		}
+
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write(pveEnvelope(t, "ok"))
+	})
+
+	client := clientPointedAt(t, srv.URL)
+	client.maxRetries = 0
+	client.retryDelay = time.Millisecond
+
+	ctx := WithForceRetry(context.Background(), true)
+	ctx = WithRetries(ctx, 3)
+	ctx = WithRetryDelay(ctx, time.Millisecond)
+
+	_, err := client.DoWithContext(ctx, "POST", "/nodes/n1/qemu", map[string]interface{}{keyVMID: 100})
+	if err != nil {
+		t.Fatalf("expected success after opt-in retry, got: %v", err)
+	}
+
+	if got := atomic.LoadInt32(&calls); got < 2 {
+		t.Fatalf("calls = %d, want >= 2 (opt-in retry of POST)", got)
+	}
+
+	<-bodiesMu
+	defer func() { bodiesMu <- struct{}{} }()
+
+	for i, b := range bodies {
+		if b == "" {
+			t.Errorf("attempt %d sent empty body; want intact form body", i)
+		}
+	}
+}
+
+// TestRetryMiddleware_596MappedToConnectionError verifies the PVE 596 pseudo
+// status is surfaced as a connection error rather than looped on. An idempotent
+// GET with no retries should fail immediately with a ConnectionError.
+func TestRetryMiddleware_596MappedToConnectionError(t *testing.T) {
+	t.Parallel()
+
+	var calls int32
+
+	srv := newTestServer(t, func(writer http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		writer.WriteHeader(596)
+	})
+
+	client := clientPointedAt(t, srv.URL)
+	client.maxRetries = 0
+	client.retryDelay = time.Millisecond
+
+	_, err := client.Do("GET", "/version", nil)
+	if err == nil {
+		t.Fatal("expected error for 596")
+	}
+
+	var connErr *apierrors.ConnectionError
+	if !errorsAs(err, &connErr) {
+		t.Errorf("error = %v, want *apierrors.ConnectionError", err)
+	}
+
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Errorf("calls = %d, want 1 (596 not looped at maxRetries=0)", got)
+	}
+}
+
+// TestNewClient_TicketOnly_BuildsAuthenticator verifies that providing only a
+// pre-existing Ticket (no API token or username) yields a working authenticator
+// so requests are authenticated.
+func TestNewClient_TicketOnly_BuildsAuthenticator(t *testing.T) {
+	t.Parallel()
+
+	opts := minimalHTTPOptions()
+	opts.Ticket = "PVE:root@pam:000000::deadbeef"
+
+	client, err := NewClient(opts)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+
+	if client.authenticator == nil {
+		t.Fatal("authenticator must not be nil when a ticket is provided")
+	}
+
+	headers := client.authenticator.GetHeaders()
+	if headers["Cookie"] == "" {
+		t.Errorf("expected Cookie header from seeded ticket, got %v", headers)
+	}
+}
+
+// TestSetTicket_PropagatesToAuthenticator verifies the inner client exposes a
+// way to update the ticket on the live authenticator (used by UpdateTicket).
+func TestSetTicket_PropagatesToAuthenticator(t *testing.T) {
+	t.Parallel()
+
+	opts := minimalHTTPOptions()
+	opts.Ticket = "PVE:root@pam:000000::initial"
+
+	client, err := NewClient(opts)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+
+	client.SetTicketValue("PVE:root@pam:000000::updated", "csrf-123")
+
+	ticketAuth, ok := client.authenticator.(*auth.TicketAuthenticator)
+	if !ok {
+		t.Fatalf("authenticator is %T, want *auth.TicketAuthenticator", client.authenticator)
+	}
+
+	tkt := ticketAuth.GetTicket()
+	if tkt == nil || tkt.Value != "PVE:root@pam:000000::updated" || tkt.CSRFToken != "csrf-123" {
+		t.Errorf("ticket not propagated: %+v", tkt)
+	}
+}

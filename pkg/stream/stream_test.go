@@ -491,6 +491,7 @@ func TestStream_Close_Idempotent(t *testing.T) {
 	r := newJSONLinesReader(`{"z":1}`)
 
 	s := stream.New(r, nil)
+
 	err := s.Close()
 	if err != nil {
 		t.Fatalf("first Close: %v", err)

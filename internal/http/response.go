@@ -110,8 +110,12 @@ func (rp *ResponseParser) parseJSON(body []byte, target interface{}) error {
 		return nil
 	}
 
-	// Check for API-level errors
-	if envelope.Success == 0 && envelope.Message != "" {
+	// Check for API-level errors.
+	// Promote to error when:
+	//   (a) Success==0 with a message (classic PVE failure envelope), or
+	//   (b) errors map is non-empty, regardless of Success/Message values —
+	//       field-level errors on a 2xx must not be silently swallowed.
+	if (envelope.Success == 0 && envelope.Message != "") || len(envelope.Errors) > 0 {
 		return &apierrors.APIError{
 			Message: envelope.Message,
 			Errors:  envelope.Errors,

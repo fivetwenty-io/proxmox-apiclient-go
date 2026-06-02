@@ -77,13 +77,14 @@ func TestFindDiskIDByVolID_OptionStringTolerant(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		c := c
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
+
 			gotID, gotHit := qemu.FindDiskIDByVolID(c.cfg, c.volid)
 			if gotHit != c.wantHit {
 				t.Errorf("hit: got %v, want %v", gotHit, c.wantHit)
 			}
+
 			if gotID != c.wantID {
 				t.Errorf("id:  got %q, want %q", gotID, c.wantID)
 			}

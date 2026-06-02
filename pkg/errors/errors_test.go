@@ -10,10 +10,10 @@ import (
 
 // Repeated string constants used across multiple tests.
 const (
-	testHost      = "pve.example.com"
-	typeAPIErr    = "*pveerr.APIError"
-	typeParamErr  = "*pveerr.ParameterError"
-	testMessage   = "test"
+	testHost     = "pve.example.com"
+	typeAPIErr   = "*pveerr.APIError"
+	typeParamErr = "*pveerr.ParameterError"
+	testMessage  = "test"
 )
 
 func TestAPIError_Error(t *testing.T) {

@@ -15,15 +15,17 @@ typed bindings for all six top-level PVE namespaces:
 
 ## Files
 
-- `apidoc.json` — Recursive endpoint tree extracted from PVE 9.x
+- `apidoc.json` — Recursive endpoint tree extracted from PVE
   (`pve-docs/api-viewer/apidoc.js`). Root is a JSON array of node objects;
   each node has `path`, `text`, `leaf`, `info` (map of HTTP method to
   endpoint definition), and optional `children`.
 
+  **Current pin: PVE 9.2 — 444 endpoints / 675 method-operations.**
+
 ## Provenance
 
-The spec is sourced from a running PVE 9.x deployment (or the published
-`pve.proxmox.com/pve-docs/api-viewer/` static asset). It is the same data
+The spec is sourced from the published `pve.proxmox.com/pve-docs/api-viewer/`
+static asset (or an equivalent running PVE deployment). It is the same data
 the upstream API viewer uses to render its documentation, so it is the
 canonical machine-readable definition of the REST surface.
 
@@ -38,18 +40,32 @@ To refresh against a newer PVE release:
      -o /tmp/apidoc.js
    ```
 
-2. Extract the JSON payload. The JS file assigns a literal to
-   `const apiSchema = [...]` (or similar). Strip the leading JS prefix
-   and trailing semicolon:
+2. Extract the JSON payload. The JS file assigns the schema to
+   `const apiSchema = [ ... ];` and is followed by additional JavaScript
+   (the api-viewer renderer), so a line-oriented `sed` strip will not work —
+   the array must be bracket-matched from the assignment to its closing `]`.
+   Extract and validate it as JSON in one step:
 
    ```sh
-   sed -n 's/^var pveapi *= *//p;s/;$//' /tmp/apidoc.js \
-     | python3 -c 'import json,sys; json.dump(json.loads(sys.stdin.read()), sys.stdout)' \
-     > _data/apidoc.json
+   python3 - <<'PY'
+   import json, re
+   src = open('/tmp/apidoc.js', encoding='utf-8').read()
+   start = src.index('[', src.index('const apiSchema'))
+   depth = 0
+   for i in range(start, len(src)):
+       depth += {'[': 1, ']': -1}.get(src[i], 0)
+       if depth == 0:
+           end = i + 1
+           break
+   schema = json.loads(src[start:end])  # raises if malformed
+   json.dump(schema, open('_data/apidoc.json', 'w'))
+   print(f'wrote {len(schema)} top-level nodes')
+   PY
    ```
 
-   (Adjust the variable name if upstream renames it. Always validate the
-   result parses as JSON before committing.)
+   (Adjust the variable name if upstream renames `apiSchema`. The
+   `json.loads` call fails loudly if the extracted text is not valid JSON,
+   so a clean exit means the payload parsed.)
 
 3. Regenerate Go bindings:
 

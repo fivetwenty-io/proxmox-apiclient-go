@@ -398,6 +398,22 @@ func TestSmoke_Cluster_GeneratedMethods(t *testing.T) {
 		_, err := svc.ListOptions(ctx)
 		_ = err // smoke: any outcome is acceptable; the stub server is permissive
 	})
+	t.Run("ListQemu", func(t *testing.T) {
+		_, err := svc.ListQemu(ctx)
+		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+	})
+	t.Run("ListQemuCpuFlags", func(t *testing.T) {
+		_, err := svc.ListQemuCpuFlags(ctx, nil)
+		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+	})
+	t.Run("ListQemuCustomCpuModels", func(t *testing.T) {
+		_, err := svc.ListQemuCustomCpuModels(ctx)
+		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+	})
+	t.Run("GetQemuCustomCpuModels", func(t *testing.T) {
+		_, err := svc.GetQemuCustomCpuModels(ctx, "stub")
+		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+	})
 	t.Run("ListReplication", func(t *testing.T) {
 		_, err := svc.ListReplication(ctx)
 		_ = err // smoke: any outcome is acceptable; the stub server is permissive

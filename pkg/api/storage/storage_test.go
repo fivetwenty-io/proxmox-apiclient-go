@@ -171,6 +171,7 @@ func TestDeleteVolumeAsyncReturnsUPID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+
 	if upid != wantUPID {
 		t.Fatalf("upid = %q, want %q", upid, wantUPID)
 	}
@@ -197,6 +198,7 @@ func TestDeleteVolumeAsyncSyncResponse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+
 	if upid != "" {
 		t.Fatalf("expected empty upid for sync response, got %q", upid)
 	}
@@ -221,6 +223,7 @@ func TestDeleteVolumeAsyncNotFound(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected nil error on 404, got: %v", err)
 	}
+
 	if upid != "" {
 		t.Fatalf("expected empty upid on 404, got %q", upid)
 	}
@@ -249,9 +252,11 @@ func TestDeleteVolumeIfExistsAsyncHappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+
 	if !existed {
 		t.Fatalf("expected existed=true on 200, got false")
 	}
+
 	if upid != wantUPID {
 		t.Fatalf("upid = %q, want %q", upid, wantUPID)
 	}
@@ -276,9 +281,11 @@ func TestDeleteVolumeIfExistsAsyncNotFound(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected nil error on 404, got: %v", err)
 	}
+
 	if existed {
 		t.Fatalf("expected existed=false on 404, got true")
 	}
+
 	if upid != "" {
 		t.Fatalf("expected empty upid on 404, got %q", upid)
 	}
@@ -298,8 +305,10 @@ func TestUploadHappyPath(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		capturedPath = r.URL.Path
 
-		if err := r.ParseMultipartForm(10 << 20); err != nil {
+		err := r.ParseMultipartForm(10 << 20)
+		if err != nil {
 			http.Error(w, "bad multipart", http.StatusBadRequest)
+
 			return
 		}
 
@@ -311,8 +320,10 @@ func TestUploadHappyPath(t *testing.T) {
 		if files, ok := r.MultipartForm.File["filename"]; ok && len(files) > 0 {
 			capturedFile = files[0].Filename
 		}
+
 		if r.MultipartForm.Value["filename"] != nil {
 			http.Error(w, "duplicate filename field rejected by PVE", http.StatusBadRequest)
+
 			return
 		}
 
@@ -360,8 +371,10 @@ func TestUploadUPIDFromMap(t *testing.T) {
 	const wantUPID = "UPID:node1:00001234:DEADBEEF:67890ABC:upload::root@pam:"
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := r.ParseMultipartForm(10 << 20); err != nil {
+		err := r.ParseMultipartForm(10 << 20)
+		if err != nil {
 			http.Error(w, "bad multipart", http.StatusBadRequest)
+
 			return
 		}
 

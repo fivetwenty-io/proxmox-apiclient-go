@@ -3790,14 +3790,17 @@ func TestDo_PostHotPath_BoolEncodedAs01(t *testing.T) {
 	t.Parallel()
 
 	var gotBody string
+
 	srv := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)
 		gotBody = string(b)
+
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(pveEnvelope(t, "ok"))
 	})
 
 	c := clientPointedAt(t, srv.URL)
+
 	_, err := c.Do("POST", "/nodes/x/qemu/100/config", map[string]interface{}{
 		"onboot":   true,
 		"protect":  false,
@@ -3806,12 +3809,15 @@ func TestDo_PostHotPath_BoolEncodedAs01(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Do POST: %v", err)
 	}
+
 	if !strings.Contains(gotBody, "onboot=1") {
 		t.Errorf("expected onboot=1 in body, got: %q", gotBody)
 	}
+
 	if !strings.Contains(gotBody, "protect=0") {
 		t.Errorf("expected protect=0 in body, got: %q", gotBody)
 	}
+
 	if strings.Contains(gotBody, "onboot=true") || strings.Contains(gotBody, "protect=false") {
 		t.Errorf("found Go-style bool in body, expected 0/1: %q", gotBody)
 	}
@@ -3823,22 +3829,27 @@ func TestDo_GetHotPath_SliceRepeatedKeys(t *testing.T) {
 	t.Parallel()
 
 	var gotQuery string
+
 	srv := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		gotQuery = r.URL.RawQuery
+
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(pveEnvelope(t, "ok"))
 	})
 
 	c := clientPointedAt(t, srv.URL)
+
 	_, err := c.Do("GET", "/cluster/log", map[string]interface{}{
 		"tag": []string{"a", "b"},
 	})
 	if err != nil {
 		t.Fatalf("Do GET: %v", err)
 	}
+
 	if !strings.Contains(gotQuery, "tag=a") || !strings.Contains(gotQuery, "tag=b") {
 		t.Errorf("expected repeated tag=a&tag=b in query, got: %q", gotQuery)
 	}
+
 	if strings.Contains(gotQuery, "%5Ba+b%5D") || strings.Contains(gotQuery, "[a b]") {
 		t.Errorf("found Go-style slice in query, expected repeated keys: %q", gotQuery)
 	}
