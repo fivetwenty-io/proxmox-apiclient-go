@@ -41,6 +41,28 @@ import (
 	"strings"
 )
 
+// File permission constants used when creating directories and output files.
+const (
+	dirPerm  = 0o755
+	filePerm = 0o644
+)
+
+// Schema type and identifier constants used throughout the generator.
+const (
+	schemaTypeObject = "object"
+	schemaTypeArray  = "array"
+	goTypeRawMessage = "json.RawMessage"
+	verbHTTPGet      = "GET"
+	identifierRoot   = "Root"
+)
+
+// Sentinel errors for well-defined failure modes within the generator.
+var (
+	errEmptySpec       = errors.New("spec is empty")
+	errNilSchema       = errors.New("nil schema")
+	errMissingObjProps = errors.New("response schema missing object properties")
+)
+
 // indexedParamRe matches PVE spec param names of the form "word[n]" or
 // "word[%d]". The captured group is the base name (e.g. "net" for "net[n]").
 var indexedParamRe = regexp.MustCompile(`^([a-z][a-z0-9]*)(?:\[n\]|\[%d\])$`)
@@ -51,6 +73,8 @@ var indexedParamRe = regexp.MustCompile(`^([a-z][a-z0-9]*)(?:\[n\]|\[%d\])$`)
 // tail); the version package has hand-written tests that predate the
 // generator and depend on the shorter "Get" name. Keeping those tests
 // stable is cheaper than rewriting them.
+//
+//nolint:gochecknoglobals // intentional package-level lookup table; must be visible to assignMethodNames
 var methodNameOverrides = map[string]string{
 	"GET /version": "Get",
 }
@@ -62,6 +86,8 @@ var methodNameOverrides = map[string]string{
 // package name. Keep this list short — every entry is a deviation
 // from the "namespace name == directory name" convention and needs a
 // note in design.md.
+//
+//nolint:gochecknoglobals // intentional package-level lookup table; must be visible to emitNamespace
 var namespaceOutputDir = map[string]string{
 	// /storage top-level endpoints (datacenter storage config) live in
 	// pkg/api/clusterstorage. pkg/api/storage is owned by hand-written
@@ -138,62 +164,77 @@ func main() {
 
 	endpoints := collectEndpoints(tree)
 	byNS := groupByNamespace(endpoints)
-
-	wantNS := map[string]bool{}
-
-	if len(nsList) == 0 {
-		for ns := range byNS {
-			wantNS[ns] = true
-		}
-	} else {
-		for _, ns := range nsList {
-			if _, ok := byNS[ns]; !ok {
-				fmt.Fprintf(os.Stderr, "pvegen: warning: namespace %q not found in spec (skipped)\n", ns)
-
-				continue
-			}
-
-			wantNS[ns] = true
-		}
-	}
+	wantNS := buildWantNS(nsList, byNS)
 
 	if len(wantNS) == 0 {
 		fmt.Fprintln(os.Stderr, "pvegen: no namespaces selected; nothing to do")
 		os.Exit(0)
 	}
 
-	// Deterministic order for log output.
-	order := make([]string, 0, len(wantNS))
-	for ns := range wantNS {
-		order = append(order, ns)
+	emitNamespaces(*outDir, wantNS, byNS)
+}
+
+// buildWantNS resolves the set of namespaces to emit from the flag list and
+// the namespaces present in the spec. When nsList is empty every namespace in
+// byNS is selected.
+func buildWantNS(nsList stringSlice, byNS map[string][]endpoint) map[string]bool {
+	wantNS := map[string]bool{}
+
+	if len(nsList) == 0 {
+		for namespace := range byNS {
+			wantNS[namespace] = true
+		}
+
+		return wantNS
 	}
 
-	sort.Strings(order)
-
-	for _, ns := range order {
-		eps := byNS[ns]
-		if len(eps) == 0 {
-			fmt.Fprintf(os.Stderr, "pvegen: warning: namespace %q has no endpoints in spec\n", ns)
+	for _, namespace := range nsList {
+		if _, ok := byNS[namespace]; !ok {
+			fmt.Fprintf(os.Stderr, "pvegen: warning: namespace %q not found in spec (skipped)\n", namespace)
 
 			continue
 		}
 
-		err := emitNamespace(*outDir, ns, eps)
+		wantNS[namespace] = true
+	}
+
+	return wantNS
+}
+
+// emitNamespaces iterates over wantNS in deterministic order and calls
+// emitNamespace for each one, exiting on first failure.
+func emitNamespaces(outDir string, wantNS map[string]bool, byNS map[string][]endpoint) {
+	order := make([]string, 0, len(wantNS))
+	for namespace := range wantNS {
+		order = append(order, namespace)
+	}
+
+	sort.Strings(order)
+
+	for _, namespace := range order {
+		eps := byNS[namespace]
+		if len(eps) == 0 {
+			fmt.Fprintf(os.Stderr, "pvegen: warning: namespace %q has no endpoints in spec\n", namespace)
+
+			continue
+		}
+
+		err := emitNamespace(outDir, namespace, eps)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "pvegen: emit %s: %v\n", ns, err)
+			fmt.Fprintf(os.Stderr, "pvegen: emit %s: %v\n", namespace, err)
 			os.Exit(1)
 		}
 
-		fmt.Fprintf(os.Stderr, "pvegen: wrote namespace %q (%d endpoints)\n", ns, len(eps))
+		fmt.Fprintf(os.Stderr, "pvegen: wrote namespace %q (%d endpoints)\n", namespace, len(eps))
 	}
 }
 
 // stringSlice implements flag.Value for repeatable string flags.
 type stringSlice []string
 
-func (s *stringSlice) String() string { return strings.Join(*s, ",") }
-func (s *stringSlice) Set(v string) error {
-	*s = append(*s, v)
+func (slice *stringSlice) String() string { return strings.Join(*slice, ",") }
+func (slice *stringSlice) Set(val string) error {
+	*slice = append(*slice, val)
 
 	return nil
 }
@@ -213,7 +254,7 @@ func loadSpec(path string) ([]*node, error) {
 	}
 
 	if len(tree) == 0 {
-		return nil, fmt.Errorf("spec %s is empty", path)
+		return nil, fmt.Errorf("%w: %s", errEmptySpec, path)
 	}
 
 	return tree, nil
@@ -228,31 +269,31 @@ func collectEndpoints(tree []*node) []endpoint {
 		walk func(*node)
 	)
 
-	walk = func(n *node) {
-		if n == nil {
+	walk = func(treeNode *node) {
+		if treeNode == nil {
 			return
 		}
 
-		verbs := make([]string, 0, len(n.Info))
-		for v := range n.Info {
-			verbs = append(verbs, v)
+		verbs := make([]string, 0, len(treeNode.Info))
+		for verb := range treeNode.Info {
+			verbs = append(verbs, verb)
 		}
 
 		sort.Strings(verbs)
 
-		for _, v := range verbs {
-			info := n.Info[v]
+		for _, verb := range verbs {
+			info := treeNode.Info[verb]
 			out = append(out, endpoint{
-				Path:        n.Path,
-				Verb:        v,
+				Path:        treeNode.Path,
+				Verb:        verb,
 				Info:        info,
-				GoNamespace: namespaceOf(n.Path),
-				PathParams:  extractPathParams(n.Path),
+				GoNamespace: namespaceOf(treeNode.Path),
+				PathParams:  extractPathParams(treeNode.Path),
 			})
 		}
 
-		for _, c := range n.Children {
-			walk(c)
+		for _, child := range treeNode.Children {
+			walk(child)
 		}
 	}
 	for _, root := range tree {
@@ -274,23 +315,23 @@ func collectEndpoints(tree []*node) []endpoint {
 // "/version" the namespace is "version"; for "/nodes/{node}/qemu/..."
 // it is "nodes". The root path "/" maps to "root".
 func namespaceOf(path string) string {
-	p := strings.TrimPrefix(path, "/")
-	if p == "" {
+	trimmed := strings.TrimPrefix(path, "/")
+	if trimmed == "" {
 		return "root"
 	}
 
-	if i := strings.Index(p, "/"); i >= 0 {
-		return p[:i]
+	if idx := strings.Index(trimmed, "/"); idx >= 0 {
+		return trimmed[:idx]
 	}
 
-	return p
+	return trimmed
 }
 
 // groupByNamespace buckets endpoints by their top-level namespace.
 func groupByNamespace(eps []endpoint) map[string][]endpoint {
 	out := map[string][]endpoint{}
-	for _, ep := range eps {
-		out[ep.GoNamespace] = append(out[ep.GoNamespace], ep)
+	for _, endpt := range eps {
+		out[endpt.GoNamespace] = append(out[endpt.GoNamespace], endpt)
 	}
 
 	return out
@@ -330,14 +371,14 @@ func extractPathParams(path string) []string {
 // trailing segment) because the spec has many endpoints whose trailing
 // segment alone ("config", "status", "current") is non-unique within a
 // namespace.
-func goMethodBaseName(ep endpoint) string {
-	resource := pascalFromPath(ep.Path)
+func goMethodBaseName(endpt endpoint) string {
+	resource := pascalFromPath(endpt.Path)
 
 	var prefix string
 
-	switch strings.ToUpper(ep.Verb) {
-	case "GET":
-		if endsInPathParam(ep.Path) {
+	switch strings.ToUpper(endpt.Verb) {
+	case verbHTTPGet:
+		if endsInPathParam(endpt.Path) {
 			prefix = "Get"
 		} else {
 			prefix = "List"
@@ -349,14 +390,14 @@ func goMethodBaseName(ep endpoint) string {
 	case "DELETE":
 		prefix = "Delete"
 	default:
-		prefix = pascalize(strings.ToLower(ep.Verb))
+		prefix = pascalize(strings.ToLower(endpt.Verb))
 	}
 
 	// Drop the leading namespace segment from the resource so the
 	// emitted name reads naturally ("ListUsers", not "ListAccessUsers"
 	// inside package access). We keep the namespace prefix only when
 	// stripping it would yield an empty identifier.
-	ns := pascalize(ep.GoNamespace)
+	ns := pascalize(endpt.GoNamespace)
 	if ns != "" && strings.HasPrefix(resource, ns) {
 		stripped := strings.TrimPrefix(resource, ns)
 		if stripped != "" {
@@ -365,7 +406,7 @@ func goMethodBaseName(ep endpoint) string {
 	}
 
 	if resource == "" {
-		resource = "Root"
+		resource = identifierRoot
 	}
 
 	return prefix + resource
@@ -376,13 +417,13 @@ func goMethodBaseName(ep endpoint) string {
 // single item, named GetX) from collection GETs (return a list, named
 // ListX).
 func endsInPathParam(path string) bool {
-	p := strings.TrimSuffix(path, "/")
-	if p == "" {
+	trimmed := strings.TrimSuffix(path, "/")
+	if trimmed == "" {
 		return false
 	}
 
-	i := strings.LastIndex(p, "/")
-	last := p[i+1:]
+	idx := strings.LastIndex(trimmed, "/")
+	last := trimmed[idx+1:]
 
 	return strings.HasPrefix(last, "{") && strings.HasSuffix(last, "}")
 }
@@ -393,28 +434,28 @@ func endsInPathParam(path string) bool {
 func assignMethodNames(eps []endpoint) {
 	seen := map[string]int{}
 
-	for i := range eps {
-		key := strings.ToUpper(eps[i].Verb) + " " + eps[i].Path
+	for idx := range eps {
+		key := strings.ToUpper(eps[idx].Verb) + " " + eps[idx].Path
 		if override, ok := methodNameOverrides[key]; ok {
-			eps[i].GoMethod = override
+			eps[idx].GoMethod = override
 			seen[override]++
 
 			continue
 		}
 
-		base := goMethodBaseName(eps[i])
+		base := goMethodBaseName(eps[idx])
 		name := base
 
-		if n, ok := seen[base]; ok {
+		if count, ok := seen[base]; ok {
 			// Append a 2-based numeric suffix to keep the first hit
 			// unsuffixed. This is deterministic given the input order.
-			name = fmt.Sprintf("%s%d", base, n+1)
-			seen[base] = n + 1
+			name = fmt.Sprintf("%s%d", base, count+1)
+			seen[base] = count + 1
 		} else {
 			seen[base] = 1
 		}
 
-		eps[i].GoMethod = name
+		eps[idx].GoMethod = name
 	}
 }
 
@@ -424,12 +465,12 @@ func assignMethodNames(eps []endpoint) {
 // Brace placeholders are dropped because they become Go method
 // parameters, not part of the method name.
 func pascalFromPath(path string) string {
-	p := strings.TrimPrefix(path, "/")
-	if p == "" {
-		return "Root"
+	trimmed := strings.TrimPrefix(path, "/")
+	if trimmed == "" {
+		return identifierRoot
 	}
 
-	parts := strings.Split(p, "/")
+	parts := strings.Split(trimmed, "/")
 
 	var kept []string
 
@@ -441,49 +482,49 @@ func pascalFromPath(path string) string {
 		kept = append(kept, part)
 	}
 
-	var sb strings.Builder
+	var builder strings.Builder
 	for _, part := range kept {
-		sb.WriteString(pascalize(part))
+		builder.WriteString(pascalize(part))
 	}
 
-	if sb.Len() == 0 {
-		return "Root"
+	if builder.Len() == 0 {
+		return identifierRoot
 	}
 
-	return sb.String()
+	return builder.String()
 }
 
 // pascalize converts a snake_case / dash-case / dotted token to
 // PascalCase. Empty input yields "". Non-identifier characters such
 // as brackets ("link[n]") are stripped before splitting; the caller
 // keeps the original spelling for the JSON tag.
-func pascalize(s string) string {
-	if s == "" {
+func pascalize(token string) string {
+	if token == "" {
 		return ""
 	}
 
-	s = sanitizeIdentChars(s)
+	token = sanitizeIdentChars(token)
 
-	parts := splitOnAny(s, "-_.")
+	parts := splitOnAny(token, "-_.")
 
-	var sb strings.Builder
+	var builder strings.Builder
 
-	for _, p := range parts {
-		if p == "" {
+	for _, part := range parts {
+		if part == "" {
 			continue
 		}
 
-		sb.WriteString(strings.ToUpper(p[:1]))
-		sb.WriteString(p[1:])
+		builder.WriteString(strings.ToUpper(part[:1]))
+		builder.WriteString(part[1:])
 	}
 
-	return sb.String()
+	return builder.String()
 }
 
 // camelize converts a snake_case / dash-case / dotted token to
 // camelCase (first letter lower).
-func camelize(s string) string {
-	pc := pascalize(s)
+func camelize(token string) string {
+	pc := pascalize(token)
 	if pc == "" {
 		return ""
 	}
@@ -491,24 +532,24 @@ func camelize(s string) string {
 	return strings.ToLower(pc[:1]) + pc[1:]
 }
 
-// goIdentSafe returns s if it is a non-reserved Go identifier, else
-// returns s with a trailing underscore so it does not collide with a
+// goIdentSafe returns ident if it is a non-reserved Go identifier, else
+// returns ident with a trailing underscore so it does not collide with a
 // keyword or predeclared name.
-func goIdentSafe(s string) string {
-	switch s {
+func goIdentSafe(ident string) string {
+	switch ident {
 	case "type", "range", "func", "default", "select", "chan", "map",
 		"interface", "struct", "package", "import", "return", "if",
 		"else", "for", "switch", "case", "break", "continue", "goto",
 		"defer", "go", "const", "var", "fallthrough":
-		return s + "_"
+		return ident + "_"
 	}
 
-	return s
+	return ident
 }
 
-func splitOnAny(s, seps string) []string {
-	return strings.FieldsFunc(s, func(r rune) bool {
-		return strings.ContainsRune(seps, r)
+func splitOnAny(str, seps string) []string {
+	return strings.FieldsFunc(str, func(ch rune) bool {
+		return strings.ContainsRune(seps, ch)
 	})
 }
 
@@ -516,28 +557,28 @@ func splitOnAny(s, seps string) []string {
 // underscore. The PVE spec uses bracket suffixes like "link[n]" or
 // "ip[%d]" to denote indexed arrays; those are not legal Go
 // identifiers and must be stripped before Pascal-casing.
-func sanitizeIdentChars(s string) string {
-	var b strings.Builder
+func sanitizeIdentChars(str string) string {
+	var builder strings.Builder
 
-	for _, r := range s {
+	for _, char := range str {
 		switch {
-		case r >= 'a' && r <= 'z':
-			b.WriteRune(r)
-		case r >= 'A' && r <= 'Z':
-			b.WriteRune(r)
-		case r >= '0' && r <= '9':
-			b.WriteRune(r)
-		case r == '_' || r == '-' || r == '.':
-			b.WriteRune(r)
+		case char >= 'a' && char <= 'z':
+			builder.WriteRune(char)
+		case char >= 'A' && char <= 'Z':
+			builder.WriteRune(char)
+		case char >= '0' && char <= '9':
+			builder.WriteRune(char)
+		case char == '_' || char == '-' || char == '.':
+			builder.WriteRune(char)
 		}
 	}
 
-	return b.String()
+	return builder.String()
 }
 
 // emitNamespace writes both the generated source and the smoke test
 // for the given namespace.
-func emitNamespace(outRoot, ns string, eps []endpoint) error {
+func emitNamespace(outRoot, nsName string, eps []endpoint) error {
 	// Sort and assign collision-free method names before emission.
 	sort.SliceStable(eps, func(i, j int) bool {
 		if eps[i].Path != eps[j].Path {
@@ -548,21 +589,40 @@ func emitNamespace(outRoot, ns string, eps []endpoint) error {
 	})
 	assignMethodNames(eps)
 
-	dirName := ns
-	if override, ok := namespaceOutputDir[ns]; ok {
+	dirName := nsName
+	if override, ok := namespaceOutputDir[nsName]; ok {
 		dirName = override
 	}
 
 	pkgName := dirName
-
 	dir := filepath.Join(outRoot, dirName)
 
-	err := os.MkdirAll(dir, 0o755)
+	err := os.MkdirAll(dir, dirPerm)
 	if err != nil {
 		return fmt.Errorf("mkdir %s: %w", dir, err)
 	}
 
-	src, err := renderNamespaceSource(pkgName, ns, eps)
+	err = emitNamespaceSource(dir, dirName, pkgName, nsName, eps)
+	if err != nil {
+		return err
+	}
+
+	// Smoke test is only emitted for non-version namespaces. The
+	// version package has hand-written tests already and we must not
+	// stomp on them.
+	if nsName != "version" {
+		err = emitNamespaceSmokeTest(dir, dirName, pkgName, nsName, eps)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// emitNamespaceSource renders, formats, and writes the _gen.go file for a namespace.
+func emitNamespaceSource(dir, dirName, pkgName, nsName string, eps []endpoint) error {
+	src, err := renderNamespaceSource(pkgName, nsName, eps)
 	if err != nil {
 		return fmt.Errorf("render source: %w", err)
 	}
@@ -579,79 +639,86 @@ func emitNamespace(outRoot, ns string, eps []endpoint) error {
 		return fmt.Errorf("write %s: %w", target, err)
 	}
 
-	// Smoke test is only emitted for non-version namespaces. The
-	// version package has hand-written tests already and we must not
-	// stomp on them.
-	if ns != "version" {
-		smokeSrc, err := renderNamespaceSmokeTest(pkgName, ns, eps)
-		if err != nil {
-			return fmt.Errorf("render smoke test: %w", err)
-		}
+	return nil
+}
 
-		smokeFormatted, err := format.Source(smokeSrc)
-		if err != nil {
-			return fmt.Errorf("gofmt smoke test: %w\n--- source ---\n%s", err, smokeSrc)
-		}
+// emitNamespaceSmokeTest renders, formats, and writes the _smoke_test.go file for a namespace.
+func emitNamespaceSmokeTest(dir, dirName, pkgName, nsName string, eps []endpoint) error {
+	smokeSrc := renderNamespaceSmokeTest(pkgName, nsName, eps)
 
-		smokeTarget := filepath.Join(dir, dirName+"_smoke_test.go")
+	smokeFormatted, err := format.Source(smokeSrc)
+	if err != nil {
+		return fmt.Errorf("gofmt smoke test: %w\n--- source ---\n%s", err, smokeSrc)
+	}
 
-		err = writeIfChanged(smokeTarget, smokeFormatted)
-		if err != nil {
-			return fmt.Errorf("write %s: %w", smokeTarget, err)
-		}
+	smokeTarget := filepath.Join(dir, dirName+"_smoke_test.go")
+
+	err = writeIfChanged(smokeTarget, smokeFormatted)
+	if err != nil {
+		return fmt.Errorf("write %s: %w", smokeTarget, err)
 	}
 
 	return nil
 }
 
-// renderNamespaceSource builds the full _gen.go source for a namespace.
-func renderNamespaceSource(pkgName, ns string, eps []endpoint) ([]byte, error) {
-	var b strings.Builder
-
-	fmt.Fprintf(&b, "// Code generated by cmd/pvegen. DO NOT EDIT.\n\n")
-	fmt.Fprintf(&b, "// Package %s exposes typed bindings for the PVE /%s endpoint family.\n", pkgName, ns)
-	fmt.Fprintf(&b, "package %s\n\n", pkgName)
-	b.WriteString("import (\n")
-	b.WriteString("\t\"context\"\n")
-	b.WriteString("\t\"encoding/json\"\n")
-	b.WriteString("\t\"fmt\"\n")
-	b.WriteString("\t\"net/url\"\n")
-	b.WriteString("\t\"sort\"\n")
-	b.WriteString("\t\"strconv\"\n")
-	b.WriteString("\t\"strings\"\n\n")
-	b.WriteString("\t\"github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/client\"\n")
-	b.WriteString(")\n\n")
+// renderNamespaceSourceHeader writes the package declaration and import block
+// into builder.
+func renderNamespaceSourceHeader(builder *strings.Builder, pkgName, ns string) {
+	fmt.Fprintf(builder, "// Code generated by cmd/pvegen. DO NOT EDIT.\n\n")
+	fmt.Fprintf(builder, "// Package %s exposes typed bindings for the PVE /%s endpoint family.\n", pkgName, ns)
+	fmt.Fprintf(builder, "package %s\n\n", pkgName)
+	builder.WriteString("import (\n")
+	builder.WriteString("\t\"context\"\n")
+	builder.WriteString("\t\"encoding/json\"\n")
+	builder.WriteString("\t\"fmt\"\n")
+	builder.WriteString("\t\"net/url\"\n")
+	builder.WriteString("\t\"sort\"\n")
+	builder.WriteString("\t\"strconv\"\n")
+	builder.WriteString("\t\"strings\"\n\n")
+	builder.WriteString("\t\"github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/client\"\n")
+	builder.WriteString(")\n\n")
 
 	// Suppress "imported and not used" when a namespace happens to use
 	// no Params (and therefore no strings). All current namespaces use
 	// at least one Params struct, but keep a defensive blank reference
 	// so the file always compiles even if a future spec shrinks.
-	b.WriteString("var _ = strings.TrimPrefix\n")
-	b.WriteString("var _ = json.RawMessage(nil)\n")
-	b.WriteString("var _ = url.PathEscape\n")
-	b.WriteString("var _ = sort.Ints\n")
-	b.WriteString("var _ = strconv.Itoa\n\n")
+	builder.WriteString("var _ = strings.TrimPrefix\n")
+	builder.WriteString("var _ = json.RawMessage(nil)\n")
+	builder.WriteString("var _ = url.PathEscape\n")
+	builder.WriteString("var _ = sort.Ints\n")
+	builder.WriteString("var _ = strconv.Itoa\n\n")
+}
 
-	// Service interface.
-	b.WriteString("// Service exposes typed operations on the /" + ns + " endpoint family.\n")
-	b.WriteString("type Service interface {\n")
+// renderNamespaceServiceInterface writes the Service interface declaration
+// into builder.
+func renderNamespaceServiceInterface(builder *strings.Builder, ns string, eps []endpoint) {
+	builder.WriteString("// Service exposes typed operations on the /" + ns + " endpoint family.\n")
+	builder.WriteString("type Service interface {\n")
 
-	for _, ep := range eps {
-		sig, _ := renderMethodSignature(ep, true)
-		fmt.Fprintf(&b, "\t// %s %s %s\n", ep.GoMethod, ep.Verb, ep.Path)
+	for _, endpt := range eps {
+		sig := renderMethodSignature(endpt, true)
+		fmt.Fprintf(builder, "\t// %s %s %s\n", endpt.GoMethod, endpt.Verb, endpt.Path)
 
-		desc := escapeDoc(ep.Info.Description)
+		desc := escapeDoc(endpt.Info.Description)
 		if desc != "" {
-			fmt.Fprintf(&b, "\t// %s\n", desc)
+			fmt.Fprintf(builder, "\t// %s\n", desc)
 		}
 
-		fmt.Fprintf(&b, "\t%s\n", sig)
+		fmt.Fprintf(builder, "\t%s\n", sig)
 	}
 
-	b.WriteString("}\n\n")
+	builder.WriteString("}\n\n")
+}
+
+// renderNamespaceSource builds the full _gen.go source for a namespace.
+func renderNamespaceSource(pkgName, ns string, eps []endpoint) ([]byte, error) {
+	var builder strings.Builder
+
+	renderNamespaceSourceHeader(&builder, pkgName, ns)
+	renderNamespaceServiceInterface(&builder, ns, eps)
 
 	// Constructor + concrete service.
-	fmt.Fprintf(&b, `// New constructs a Service backed by the given pkg/client.Client.
+	fmt.Fprintf(&builder, `// New constructs a Service backed by the given pkg/client.Client.
 // The client owns authentication, TLS, retries, and logging; this
 // service only translates between typed Go shapes and the raw client.
 func New(c client.Client) Service {
@@ -666,67 +733,66 @@ type service struct {
 }
 `, pkgName)
 
-	b.WriteString("\n")
+	builder.WriteString("\n")
 
 	// Per-endpoint: Params struct, Response struct, method impl.
-	for _, ep := range eps {
-		err := renderEndpoint(&b, pkgName, ep)
+	for _, endpt := range eps {
+		err := renderEndpoint(&builder, pkgName, endpt)
 		if err != nil {
-			return nil, fmt.Errorf("endpoint %s %s: %w", ep.Verb, ep.Path, err)
+			return nil, fmt.Errorf("endpoint %s %s: %w", endpt.Verb, endpt.Path, err)
 		}
 	}
 
-	return []byte(b.String()), nil
+	return []byte(builder.String()), nil
 }
 
-// renderMethodSignature returns the Go method signature line and a
-// flag telling whether the endpoint has non-path parameters. When
-// forInterface is true the receiver portion is omitted (interface
+// renderMethodSignature returns the Go method signature line.
+// When forInterface is true the receiver portion is omitted (interface
 // method form); when false it includes "(s *service)".
-func renderMethodSignature(ep endpoint, forInterface bool) (string, bool) {
+func renderMethodSignature(endpt endpoint, forInterface bool) string {
 	var args []string
 
 	args = append(args, "ctx context.Context")
-	for _, p := range ep.PathParams {
-		args = append(args, goIdentSafe(camelize(p))+" string")
+	for _, pathParam := range endpt.PathParams {
+		args = append(args, goIdentSafe(camelize(pathParam))+" string")
 	}
 
-	hasParams := hasNonPathParams(ep)
+	hasParams := hasNonPathParams(endpt)
 	if hasParams {
-		args = append(args, fmt.Sprintf("params *%sParams", ep.GoMethod))
+		args = append(args, fmt.Sprintf("params *%sParams", endpt.GoMethod))
 	}
 
-	respType := responseGoType(ep)
+	respType := responseGoType(endpt)
 
 	var retSig string
 
 	if respType == "" {
 		retSig = "error"
 	} else {
-		retSig = fmt.Sprintf("(*%s, error)", responseTypeName(ep))
+		retSig = fmt.Sprintf("(*%s, error)", responseTypeName(endpt))
 	}
 
 	if forInterface {
-		return fmt.Sprintf("%s(%s) %s", ep.GoMethod, strings.Join(args, ", "), retSig), hasParams
+		return fmt.Sprintf("%s(%s) %s", endpt.GoMethod, strings.Join(args, ", "), retSig)
 	}
 
-	return fmt.Sprintf("(s *service) %s(%s) %s", ep.GoMethod, strings.Join(args, ", "), retSig), hasParams
+	return fmt.Sprintf("(s *service) %s(%s) %s", endpt.GoMethod, strings.Join(args, ", "), retSig)
 }
 
 // hasNonPathParams reports whether the endpoint accepts at least one
 // non-path query/body parameter. Used to decide whether to emit a
 // <Method>Params struct.
-func hasNonPathParams(ep endpoint) bool {
-	if ep.Info.Parameters == nil || len(ep.Info.Parameters.Properties) == 0 {
+func hasNonPathParams(endpt endpoint) bool {
+	if endpt.Info.Parameters == nil || len(endpt.Info.Parameters.Properties) == 0 {
 		return false
 	}
 
 	pathSet := map[string]bool{}
-	for _, p := range ep.PathParams {
-		pathSet[p] = true
+	for _, pathParam := range endpt.PathParams {
+		pathSet[pathParam] = true
 	}
 
-	for name := range ep.Info.Parameters.Properties {
+	for name := range endpt.Info.Parameters.Properties {
 		if !pathSet[name] {
 			return true
 		}
@@ -739,51 +805,48 @@ func hasNonPathParams(ep endpoint) bool {
 // the spec declares no return value (e.g. type:null). For object
 // returns the typed struct name is returned; the actual struct is
 // emitted by renderEndpoint.
-func responseGoType(ep endpoint) string {
-	r := ep.Info.Returns
-	if r == nil {
+func responseGoType(endpt endpoint) string {
+	ret := endpt.Info.Returns
+	if ret == nil {
 		return ""
 	}
 
-	if r.Type == "null" {
+	if ret.Type == "null" {
 		return ""
 	}
 
 	// For arrays, objects, scalars: there is always something to
 	// decode; even a bare scalar returns a typed wrapper.
-	return responseTypeName(ep)
+	return responseTypeName(endpt)
 }
 
 // responseTypeName returns the name of the Go type used for the
 // endpoint's response. Currently every endpoint with a non-null
 // return gets a "<Method>Response" alias for documentation purposes,
 // even when the underlying shape is json.RawMessage.
-func responseTypeName(ep endpoint) string {
-	return ep.GoMethod + "Response"
+func responseTypeName(endpt endpoint) string {
+	return endpt.GoMethod + "Response"
 }
 
 // renderEndpoint emits the Params struct, Response type, and method
 // implementation for a single endpoint.
-func renderEndpoint(b *strings.Builder, pkgName string, ep endpoint) error {
+func renderEndpoint(builder *strings.Builder, pkgName string, endpt endpoint) error {
 	// Params struct.
-	if hasNonPathParams(ep) {
-		err := renderParamsStruct(b, ep)
+	if hasNonPathParams(endpt) {
+		err := renderParamsStruct(builder, endpt)
 		if err != nil {
 			return fmt.Errorf("render params: %w", err)
 		}
 	}
 
 	// Response type.
-	respGo := responseGoType(ep)
+	respGo := responseGoType(endpt)
 	if respGo != "" {
-		err := renderResponseType(b, ep)
-		if err != nil {
-			return fmt.Errorf("render response: %w", err)
-		}
+		renderResponseType(builder, endpt)
 	}
 
 	// Method body.
-	return renderMethodBody(b, pkgName, ep)
+	return renderMethodBody(builder, pkgName, endpt)
 }
 
 // indexedField carries metadata for a single "base[n]" param family
@@ -797,63 +860,22 @@ type indexedField struct {
 	Desc string
 }
 
-// renderParamsStruct emits "type <Method>Params struct { ... }" and,
-// when the endpoint has any indexed ("base[n]") parameters, a custom
-// MarshalJSON method that expands map[int]string fields into numbered
-// keys ("net0", "net1", …) so the existing JSON-round-trip body
-// construction produces correct Proxmox wire format.
-func renderParamsStruct(b *strings.Builder, ep endpoint) error {
-	fmt.Fprintf(b, "// %sParams is the request payload for %s.\n", ep.GoMethod, ep.GoMethod)
-	fmt.Fprintf(b, "type %sParams struct {\n", ep.GoMethod)
+// pendingIndexed holds intermediate data for an indexed param before emission.
+type pendingIndexed struct {
+	base      string
+	fieldName string
+	desc      string
+}
 
-	pathSet := map[string]bool{}
-	for _, p := range ep.PathParams {
-		pathSet[p] = true
-	}
-
-	names := make([]string, 0, len(ep.Info.Parameters.Properties))
-	for n := range ep.Info.Parameters.Properties {
-		if pathSet[n] {
-			continue
-		}
-
-		names = append(names, n)
-	}
-
-	sort.Strings(names)
-
-	// First pass: collect all regular (non-indexed) field names so we can
-	// detect clashes when assigning indexed field names.
-	regularFieldNames := map[string]bool{}
-
-	for _, name := range names {
-		if _, ok := isIndexedParam(name); ok {
-			continue
-		}
-
-		fn := sanitizeFieldName(pascalize(name))
-		regularFieldNames[fn] = true
-	}
-
-	// Track which base names have already been emitted as map[int]string
-	// so that multiple "[n]" variants for the same base (rare but possible
-	// in future specs) collapse to a single field.
+// buildIndexedPending collects pending indexed fields from the sorted parameter
+// names, skipping duplicates and applying clash guards.
+func buildIndexedPending(names []string, endpt endpoint, regularFieldNames map[string]bool) []pendingIndexed {
 	emittedIndexed := map[string]bool{}
-
-	var indexedFields []indexedField
-
-	// Collect indexed fields first so we can emit them in sorted order
-	// after regular fields (struct layout: scalars first, maps last).
-	type pendingIndexed struct {
-		base      string
-		fieldName string
-		desc      string
-	}
 
 	var pending []pendingIndexed
 
 	for _, name := range names {
-		prop := ep.Info.Parameters.Properties[name]
+		prop := endpt.Info.Parameters.Properties[name]
 
 		base, ok := isIndexedParam(name)
 		if !ok {
@@ -879,20 +901,24 @@ func renderParamsStruct(b *strings.Builder, ep endpoint) error {
 		pending = append(pending, pendingIndexed{base: base, fieldName: fieldName, desc: desc})
 	}
 
-	// Emit regular fields.
+	return pending
+}
+
+// emitRegularFields writes the non-indexed struct fields into builder.
+func emitRegularFields(builder *strings.Builder, names []string, endpt endpoint) error {
 	for _, name := range names {
 		if _, ok := isIndexedParam(name); ok {
 			continue
 		}
 
-		prop := ep.Info.Parameters.Properties[name]
+		prop := endpt.Info.Parameters.Properties[name]
 
 		goType, err := goTypeFor(prop)
 		if err != nil {
 			// Fall back to json.RawMessage rather than failing
 			// generation; the spec uses several shapes we deliberately
 			// do not model.
-			goType = "json.RawMessage"
+			goType = goTypeRawMessage
 		}
 
 		opt := isOptional(prop)
@@ -904,12 +930,11 @@ func renderParamsStruct(b *strings.Builder, ep endpoint) error {
 			goType = "*" + goType
 		}
 
-		fieldName := pascalize(name)
-		fieldName = sanitizeFieldName(fieldName)
+		fieldName := sanitizeFieldName(pascalize(name))
 
 		desc := strings.TrimSpace(prop.Description)
 		if desc != "" {
-			fmt.Fprintf(b, "\t// %s %s\n", fieldName, escapeDoc(desc))
+			fmt.Fprintf(builder, "\t// %s %s\n", fieldName, escapeDoc(desc))
 		}
 
 		jsonTag := name
@@ -917,34 +942,93 @@ func renderParamsStruct(b *strings.Builder, ep endpoint) error {
 			jsonTag += ",omitempty"
 		}
 
-		fmt.Fprintf(b, "\t%s %s `json:\"%s\"`\n", fieldName, goType, jsonTag)
+		fmt.Fprintf(builder, "\t%s %s `json:\"%s\"`\n", fieldName, goType, jsonTag)
 	}
 
-	// Emit indexed fields (map[int]string, tagged json:"-").
-	for _, pi := range pending {
-		if pi.desc != "" {
-			fmt.Fprintf(b, "\t// %s (indexed) %s\n", pi.fieldName, escapeDoc(pi.desc))
+	return nil
+}
+
+// emitIndexedFields writes the indexed (map[int]string) struct fields and
+// returns the collected indexedField metadata for MarshalJSON generation.
+func emitIndexedFields(builder *strings.Builder, pending []pendingIndexed) []indexedField {
+	indexedFields := make([]indexedField, 0, len(pending))
+
+	for _, pendItem := range pending {
+		if pendItem.desc != "" {
+			fmt.Fprintf(builder, "\t// %s (indexed) %s\n", pendItem.fieldName, escapeDoc(pendItem.desc))
 		} else {
-			fmt.Fprintf(b, "\t// %s indexed Proxmox param family (e.g. %s0, %s1, ...).\n",
-				pi.fieldName, pi.base, pi.base)
+			fmt.Fprintf(builder, "\t// %s indexed Proxmox param family (e.g. %s0, %s1, ...).\n",
+				pendItem.fieldName, pendItem.base, pendItem.base)
 		}
 
 		// map[int]string is nilable; no pointer needed.
-		fmt.Fprintf(b, "\t%s map[int]string `json:\"-\"`\n", pi.fieldName)
+		fmt.Fprintf(builder, "\t%s map[int]string `json:\"-\"`\n", pendItem.fieldName)
 
 		indexedFields = append(indexedFields, indexedField{
-			BaseName:  pi.base,
-			FieldName: pi.fieldName,
-			Desc:      pi.desc,
+			BaseName:  pendItem.base,
+			FieldName: pendItem.fieldName,
+			Desc:      pendItem.desc,
 		})
 	}
 
-	b.WriteString("}\n\n")
+	return indexedFields
+}
+
+// renderParamsStruct emits "type <Method>Params struct { ... }" and,
+// when the endpoint has any indexed ("base[n]") parameters, a custom
+// MarshalJSON method that expands map[int]string fields into numbered
+// keys ("net0", "net1", …) so the existing JSON-round-trip body
+// construction produces correct Proxmox wire format.
+func renderParamsStruct(builder *strings.Builder, endpt endpoint) error {
+	fmt.Fprintf(builder, "// %sParams is the request payload for %s.\n", endpt.GoMethod, endpt.GoMethod)
+	fmt.Fprintf(builder, "type %sParams struct {\n", endpt.GoMethod)
+
+	pathSet := map[string]bool{}
+	for _, pathParam := range endpt.PathParams {
+		pathSet[pathParam] = true
+	}
+
+	names := make([]string, 0, len(endpt.Info.Parameters.Properties))
+	for name := range endpt.Info.Parameters.Properties {
+		if pathSet[name] {
+			continue
+		}
+
+		names = append(names, name)
+	}
+
+	sort.Strings(names)
+
+	// First pass: collect all regular (non-indexed) field names so we can
+	// detect clashes when assigning indexed field names.
+	regularFieldNames := map[string]bool{}
+
+	for _, name := range names {
+		if _, ok := isIndexedParam(name); ok {
+			continue
+		}
+
+		fn := sanitizeFieldName(pascalize(name))
+		regularFieldNames[fn] = true
+	}
+
+	pending := buildIndexedPending(names, endpt, regularFieldNames)
+
+	// Emit regular fields.
+	err := emitRegularFields(builder, names, endpt)
+	if err != nil {
+		return err
+	}
+
+	// Emit indexed fields (map[int]string, tagged json:"-").
+	indexedFields := emitIndexedFields(builder, pending)
+
+	builder.WriteString("}\n\n")
 
 	// If any indexed fields were emitted, generate a MarshalJSON method
 	// that merges normally-tagged fields with the expanded indexed fields.
 	if len(indexedFields) > 0 {
-		renderIndexedMarshalJSON(b, ep.GoMethod, indexedFields)
+		renderIndexedMarshalJSON(builder, endpt.GoMethod, indexedFields)
 	}
 
 	return nil
@@ -958,94 +1042,94 @@ func renderParamsStruct(b *strings.Builder, ep endpoint) error {
 //  3. For each indexed field with a non-nil map, inserts numbered keys
 //     (e.g. "net0", "net1") sorted by index for deterministic wire output.
 //  4. Re-encodes and returns the merged map.
-func renderIndexedMarshalJSON(b *strings.Builder, methodName string, fields []indexedField) {
+func renderIndexedMarshalJSON(builder *strings.Builder, methodName string, fields []indexedField) {
 	typeName := methodName + "Params"
 
-	fmt.Fprintf(b, "// MarshalJSON implements json.Marshaler for %s.\n", typeName)
-	fmt.Fprintf(b, "// It expands indexed map[int]string fields into numbered Proxmox\n")
-	fmt.Fprintf(b, "// param keys (e.g. Net[0] → \"net0\", Net[1] → \"net1\").\n")
-	fmt.Fprintf(b, "func (p %s) MarshalJSON() ([]byte, error) {\n", typeName)
+	fmt.Fprintf(builder, "// MarshalJSON implements json.Marshaler for %s.\n", typeName)
+	fmt.Fprintf(builder, "// It expands indexed map[int]string fields into numbered Proxmox\n")
+	fmt.Fprintf(builder, "// param keys (e.g. Net[0] → \"net0\", Net[1] → \"net1\").\n")
+	fmt.Fprintf(builder, "func (p %s) MarshalJSON() ([]byte, error) {\n", typeName)
 
 	// Use an alias type to call the default encoder without recursion.
-	fmt.Fprintf(b, "\ttype alias %s\n", typeName)
-	fmt.Fprintf(b, "\tbase, err := json.Marshal(alias(p))\n")
-	b.WriteString("\tif err != nil {\n")
-	fmt.Fprintf(b, "\t\treturn nil, fmt.Errorf(\"%s.MarshalJSON: %%w\", err)\n", typeName)
-	b.WriteString("\t}\n\n")
+	fmt.Fprintf(builder, "\ttype alias %s\n", typeName)
+	fmt.Fprintf(builder, "\tbase, err := json.Marshal(alias(p))\n")
+	builder.WriteString("\tif err != nil {\n")
+	fmt.Fprintf(builder, "\t\treturn nil, fmt.Errorf(\"%s.MarshalJSON: %%w\", err)\n", typeName)
+	builder.WriteString("\t}\n\n")
 
-	b.WriteString("\tvar merged map[string]json.RawMessage\n")
-	b.WriteString("\tif err = json.Unmarshal(base, &merged); err != nil {\n")
-	fmt.Fprintf(b, "\t\treturn nil, fmt.Errorf(\"%s.MarshalJSON decode base: %%w\", err)\n", typeName)
-	b.WriteString("\t}\n")
-	b.WriteString("\tif merged == nil {\n")
-	b.WriteString("\t\tmerged = make(map[string]json.RawMessage)\n")
-	b.WriteString("\t}\n\n")
+	builder.WriteString("\tvar merged map[string]json.RawMessage\n")
+	builder.WriteString("\tif err = json.Unmarshal(base, &merged); err != nil {\n")
+	fmt.Fprintf(builder, "\t\treturn nil, fmt.Errorf(\"%s.MarshalJSON decode base: %%w\", err)\n", typeName)
+	builder.WriteString("\t}\n")
+	builder.WriteString("\tif merged == nil {\n")
+	builder.WriteString("\t\tmerged = make(map[string]json.RawMessage)\n")
+	builder.WriteString("\t}\n\n")
 
-	for _, f := range fields {
-		fmt.Fprintf(b, "\t// Expand %s (map[int]string → %s0, %s1, …).\n", f.FieldName, f.BaseName, f.BaseName)
-		fmt.Fprintf(b, "\tif len(p.%s) > 0 {\n", f.FieldName)
-		fmt.Fprintf(b, "\t\tkeys%s := make([]int, 0, len(p.%s))\n", f.FieldName, f.FieldName)
-		fmt.Fprintf(b, "\t\tfor idx := range p.%s {\n", f.FieldName)
-		fmt.Fprintf(b, "\t\t\tkeys%s = append(keys%s, idx)\n", f.FieldName, f.FieldName)
-		b.WriteString("\t\t}\n")
-		fmt.Fprintf(b, "\t\tsort.Ints(keys%s)\n", f.FieldName)
-		fmt.Fprintf(b, "\t\tfor _, idx := range keys%s {\n", f.FieldName)
-		fmt.Fprintf(b, "\t\t\tkey := %s + strconv.Itoa(idx)\n", strconvQuote(f.BaseName))
-		fmt.Fprintf(b, "\t\t\tval, merr := json.Marshal(p.%s[idx])\n", f.FieldName)
-		b.WriteString("\t\t\tif merr != nil {\n")
-		fmt.Fprintf(b, "\t\t\t\treturn nil, fmt.Errorf(\"%s.MarshalJSON %s[%%d]: %%w\", idx, merr)\n",
-			typeName, f.BaseName)
-		b.WriteString("\t\t\t}\n")
-		b.WriteString("\t\t\tmerged[key] = val\n")
-		b.WriteString("\t\t}\n")
-		b.WriteString("\t}\n\n")
+	for _, field := range fields {
+		fmt.Fprintf(builder, "\t// Expand %s (map[int]string → %s0, %s1, …).\n", field.FieldName, field.BaseName, field.BaseName)
+		fmt.Fprintf(builder, "\tif len(p.%s) > 0 {\n", field.FieldName)
+		fmt.Fprintf(builder, "\t\tkeys%s := make([]int, 0, len(p.%s))\n", field.FieldName, field.FieldName)
+		fmt.Fprintf(builder, "\t\tfor idx := range p.%s {\n", field.FieldName)
+		fmt.Fprintf(builder, "\t\t\tkeys%s = append(keys%s, idx)\n", field.FieldName, field.FieldName)
+		builder.WriteString("\t\t}\n")
+		fmt.Fprintf(builder, "\t\tsort.Ints(keys%s)\n", field.FieldName)
+		fmt.Fprintf(builder, "\t\tfor _, idx := range keys%s {\n", field.FieldName)
+		fmt.Fprintf(builder, "\t\t\tkey := %s + strconv.Itoa(idx)\n", strconvQuote(field.BaseName))
+		fmt.Fprintf(builder, "\t\t\tval, merr := json.Marshal(p.%s[idx])\n", field.FieldName)
+		builder.WriteString("\t\t\tif merr != nil {\n")
+		fmt.Fprintf(builder, "\t\t\t\treturn nil, fmt.Errorf(\"%s.MarshalJSON %s[%%d]: %%w\", idx, merr)\n",
+			typeName, field.BaseName)
+		builder.WriteString("\t\t\t}\n")
+		builder.WriteString("\t\t\tmerged[key] = val\n")
+		builder.WriteString("\t\t}\n")
+		builder.WriteString("\t}\n\n")
 	}
 
-	b.WriteString("\treturn json.Marshal(merged)\n")
-	b.WriteString("}\n\n")
+	builder.WriteString("\treturn json.Marshal(merged)\n")
+	builder.WriteString("}\n\n")
 }
 
 // isIndexedParam reports whether name follows the PVE "base[n]" or
 // "base[%d]" convention and returns (baseName, true) when it does.
 // E.g. "net[n]" → ("net", true), "hostname" → ("", false).
 func isIndexedParam(name string) (string, bool) {
-	m := indexedParamRe.FindStringSubmatch(name)
-	if m == nil {
+	match := indexedParamRe.FindStringSubmatch(name)
+	if match == nil {
 		return "", false
 	}
 
-	return m[1], true
+	return match[1], true
 }
 
 // sanitizeFieldName guarantees the result is a valid exported Go
 // identifier. Some spec parameter names start with a digit or contain
 // only digits; prefix those with "Field".
-func sanitizeFieldName(s string) string {
-	if s == "" {
+func sanitizeFieldName(fieldName string) string {
+	if fieldName == "" {
 		return "Field"
 	}
 
-	if c := s[0]; c >= '0' && c <= '9' {
-		return "Field" + s
+	if firstChar := fieldName[0]; firstChar >= '0' && firstChar <= '9' {
+		return "Field" + fieldName
 	}
 
-	return s
+	return fieldName
 }
 
 // isAlreadyNilable reports whether the given Go type is naturally
 // nil-able (slice, map, pointer, interface, json.RawMessage). Those
 // do not need an extra * for optional encoding.
-func isAlreadyNilable(t string) bool {
+func isAlreadyNilable(goType string) bool {
 	switch {
-	case strings.HasPrefix(t, "[]"):
+	case strings.HasPrefix(goType, "[]"):
 		return true
-	case strings.HasPrefix(t, "map["):
+	case strings.HasPrefix(goType, "map["):
 		return true
-	case strings.HasPrefix(t, "*"):
+	case strings.HasPrefix(goType, "*"):
 		return true
-	case t == "json.RawMessage":
+	case goType == goTypeRawMessage:
 		return true
-	case t == "interface{}":
+	case goType == "interface{}":
 		return true
 	}
 
@@ -1056,75 +1140,73 @@ func isAlreadyNilable(t string) bool {
 // shape of the returns schema. Objects become typed structs; arrays
 // of objects become []<inner-struct>; everything else falls back to a
 // type alias over json.RawMessage so callers can decode further.
-func renderResponseType(b *strings.Builder, ep endpoint) error {
-	name := responseTypeName(ep)
-	r := ep.Info.Returns
+func renderResponseType(builder *strings.Builder, endpt endpoint) {
+	name := responseTypeName(endpt)
+	ret := endpt.Info.Returns
 
 	switch {
-	case r == nil:
-		return nil
-	case r.Type == "object" && len(r.Properties) > 0:
-		body, err := renderObjectFields(r)
+	case ret == nil:
+		return
+	case ret.Type == schemaTypeObject && len(ret.Properties) > 0:
+		body, err := renderObjectFields(ret)
 		if err != nil {
 			// Fallback to json.RawMessage alias on shapes we cannot
-			// model. Do NOT call b.Reset() here — that would wipe every
+			// model. Do NOT call builder.Reset() here — that would wipe every
 			// preceding endpoint in the same namespace.
-			fmt.Fprintf(b, "// %s is the raw JSON returned by %s %s. The spec\n", name, ep.Verb, ep.Path)
-			fmt.Fprintf(b, "// shape was not modellable as a Go struct; decode further as needed.\n")
-			fmt.Fprintf(b, "type %s = json.RawMessage\n\n", name)
+			fmt.Fprintf(builder, "// %s is the raw JSON returned by %s %s. The spec\n", name, endpt.Verb, endpt.Path)
+			fmt.Fprintf(builder, "// shape was not modellable as a Go struct; decode further as needed.\n")
+			fmt.Fprintf(builder, "type %s = json.RawMessage\n\n", name)
 
-			return nil //nolint:nilerr // fallback path is intentional
+			return
 		}
 
-		fmt.Fprintf(b, "// %s mirrors the shape returned by %s %s.\n", name, ep.Verb, ep.Path)
-		fmt.Fprintf(b, "type %s struct {\n", name)
-		b.WriteString(body)
-		b.WriteString("}\n\n")
-	case r.Type == "array":
-		inner := "json.RawMessage"
+		fmt.Fprintf(builder, "// %s mirrors the shape returned by %s %s.\n", name, endpt.Verb, endpt.Path)
+		fmt.Fprintf(builder, "type %s struct {\n", name)
+		builder.WriteString(body)
+		builder.WriteString("}\n\n")
+	case ret.Type == schemaTypeArray:
+		inner := goTypeRawMessage
 
-		if r.Items != nil {
-			it, err := goTypeFor(r.Items)
+		if ret.Items != nil {
+			it, err := goTypeFor(ret.Items)
 			if err == nil {
 				inner = it
 			}
 		}
 
-		fmt.Fprintf(b, "// %s mirrors the shape returned by %s %s.\n", name, ep.Verb, ep.Path)
-		fmt.Fprintf(b, "type %s []%s\n\n", name, inner)
+		fmt.Fprintf(builder, "// %s mirrors the shape returned by %s %s.\n", name, endpt.Verb, endpt.Path)
+		fmt.Fprintf(builder, "type %s []%s\n\n", name, inner)
 	default:
-		fmt.Fprintf(b, "// %s is the raw JSON returned by %s %s.\n", name, ep.Verb, ep.Path)
-		fmt.Fprintf(b, "type %s = json.RawMessage\n\n", name)
+		fmt.Fprintf(builder, "// %s is the raw JSON returned by %s %s.\n", name, endpt.Verb, endpt.Path)
+		fmt.Fprintf(builder, "type %s = json.RawMessage\n\n", name)
 	}
-
-	return nil
 }
 
 // renderObjectFields returns the inner-body text of a typed struct
 // (one field per top-level property of the object schema). Lines are
 // already indented with a leading tab; the caller wraps "type X
 // struct { ... }".
-func renderObjectFields(s *schema) (string, error) {
-	if s == nil || s.Type != "object" || len(s.Properties) == 0 {
-		return "", errors.New("response schema missing object properties")
+func renderObjectFields(objSchema *schema) (string, error) {
+	if objSchema == nil || objSchema.Type != schemaTypeObject || len(objSchema.Properties) == 0 {
+		return "", errMissingObjProps
 	}
 
-	names := make([]string, 0, len(s.Properties))
-	for n := range s.Properties {
-		names = append(names, n)
+	names := make([]string, 0, len(objSchema.Properties))
+	for name := range objSchema.Properties {
+		names = append(names, name)
 	}
 
 	sort.Strings(names)
 
-	var b strings.Builder
+	var builder strings.Builder
 
 	for _, name := range names {
-		prop := s.Properties[name]
+		prop := objSchema.Properties[name]
 
 		goType, err := goTypeFor(prop)
 		if err != nil {
 			// For response shapes, unknown types fall back to RawMessage.
-			goType = "json.RawMessage"
+			goType = goTypeRawMessage
 		}
 
 		opt := isOptional(prop)
@@ -1136,7 +1218,7 @@ func renderObjectFields(s *schema) (string, error) {
 
 		desc := strings.TrimSpace(prop.Description)
 		if desc != "" {
-			fmt.Fprintf(&b, "\t// %s %s\n", fieldName, escapeDoc(desc))
+			fmt.Fprintf(&builder, "\t// %s %s\n", fieldName, escapeDoc(desc))
 		}
 
 		jsonTag := name
@@ -1144,52 +1226,57 @@ func renderObjectFields(s *schema) (string, error) {
 			jsonTag += ",omitempty"
 		}
 
-		fmt.Fprintf(&b, "\t%s %s `json:\"%s\"`\n", fieldName, goType, jsonTag)
+		fmt.Fprintf(&builder, "\t%s %s `json:\"%s\"`\n", fieldName, goType, jsonTag)
 	}
 
-	return b.String(), nil
+	return builder.String(), nil
 }
 
-// renderMethodBody emits the receiver-method implementation.
-func renderMethodBody(b *strings.Builder, pkgName string, ep endpoint) error {
-	sig, _ := renderMethodSignature(ep, false)
+// renderMethodBodyHead emits the method signature, nil-ctx guard, and path
+// expression into builder, returning the path expression string.
+func renderMethodBodyHead(builder *strings.Builder, pkgName string, endpt endpoint, respGo string) {
+	sig := renderMethodSignature(endpt, false)
 
-	respGo := responseGoType(ep)
-
-	fmt.Fprintf(b, "// %s implements Service.%s. %s %s.\n", ep.GoMethod, ep.GoMethod, ep.Verb, ep.Path)
-	fmt.Fprintf(b, "func %s {\n", sig)
-	fmt.Fprintf(b, "\tif ctx == nil {\n\t\treturn %s fmt.Errorf(\"%s.%s: ctx must not be nil\")\n\t}\n",
-		zeroReturnExpr(respGo), pkgName, ep.GoMethod)
+	fmt.Fprintf(builder, "// %s implements Service.%s. %s %s.\n", endpt.GoMethod, endpt.GoMethod, endpt.Verb, endpt.Path)
+	fmt.Fprintf(builder, "func %s {\n", sig)
+	fmt.Fprintf(builder, "\tif ctx == nil {\n\t\treturn %s fmt.Errorf(\"%s.%s: ctx must not be nil\")\n\t}\n",
+		zeroReturnExpr(respGo), pkgName, endpt.GoMethod)
 
 	// Build the path with %s substitution for each path parameter.
-	pathExpr := buildPathExpression(ep)
-	b.WriteString("\tpath := " + pathExpr + "\n")
+	pathExpr := buildPathExpression(endpt)
+	builder.WriteString("\tpath := " + pathExpr + "\n")
+}
 
-	// Build params map from struct.
-	hasParams := hasNonPathParams(ep)
+// renderMethodBodyParams emits the body map construction (marshal/unmarshal
+// params) into builder.
+func renderMethodBodyParams(builder *strings.Builder, pkgName string, endpt endpoint, respGo string) {
+	hasParams := hasNonPathParams(endpt)
 	if hasParams {
-		b.WriteString("\tvar body map[string]interface{}\n")
-		b.WriteString("\tif params != nil {\n")
-		b.WriteString("\t\traw, err := json.Marshal(params)\n")
-		b.WriteString("\t\tif err != nil {\n")
-		fmt.Fprintf(b, "\t\t\treturn %s fmt.Errorf(\"%s.%s: marshal params: %%w\", err)\n",
-			zeroReturnExpr(respGo), pkgName, ep.GoMethod)
-		b.WriteString("\t\t}\n")
-		b.WriteString("\t\terr = json.Unmarshal(raw, &body)\n")
-		b.WriteString("\t\tif err != nil {\n")
-		fmt.Fprintf(b, "\t\t\treturn %s fmt.Errorf(\"%s.%s: decode params: %%w\", err)\n",
-			zeroReturnExpr(respGo), pkgName, ep.GoMethod)
-		b.WriteString("\t\t}\n")
-		b.WriteString("\t}\n")
+		builder.WriteString("\tvar body map[string]interface{}\n")
+		builder.WriteString("\tif params != nil {\n")
+		builder.WriteString("\t\traw, err := json.Marshal(params)\n")
+		builder.WriteString("\t\tif err != nil {\n")
+		fmt.Fprintf(builder, "\t\t\treturn %s fmt.Errorf(\"%s.%s: marshal params: %%w\", err)\n",
+			zeroReturnExpr(respGo), pkgName, endpt.GoMethod)
+		builder.WriteString("\t\t}\n")
+		builder.WriteString("\t\terr = json.Unmarshal(raw, &body)\n")
+		builder.WriteString("\t\tif err != nil {\n")
+		fmt.Fprintf(builder, "\t\t\treturn %s fmt.Errorf(\"%s.%s: decode params: %%w\", err)\n",
+			zeroReturnExpr(respGo), pkgName, endpt.GoMethod)
+		builder.WriteString("\t\t}\n")
+		builder.WriteString("\t}\n")
 	} else {
-		b.WriteString("\tvar body map[string]interface{}\n")
+		builder.WriteString("\tvar body map[string]interface{}\n")
 	}
+}
 
-	// Dispatch to the appropriate client verb.
+// renderMethodBodyDispatch emits the client dispatch call and nil-response
+// guard into builder. Returns an error for unsupported verbs.
+func renderMethodBodyDispatch(builder *strings.Builder, pkgName string, endpt endpoint, respGo string) error {
 	var verbCall string
 
-	switch strings.ToUpper(ep.Verb) {
-	case "GET":
+	switch strings.ToUpper(endpt.Verb) {
+	case verbHTTPGet:
 		verbCall = "GetRawCtx"
 	case "POST":
 		verbCall = "PostRawCtx"
@@ -1198,51 +1285,72 @@ func renderMethodBody(b *strings.Builder, pkgName string, ep endpoint) error {
 	case "DELETE":
 		verbCall = "DeleteRawCtx"
 	default:
-		return fmt.Errorf("unsupported HTTP verb %q on %s", ep.Verb, ep.Path)
+		return fmt.Errorf("unsupported HTTP verb %q on %s: %w", endpt.Verb, endpt.Path, errNilSchema)
 	}
 
-	fmt.Fprintf(b, "\tresp, err := s.c.%s(ctx, path, body)\n", verbCall)
-	b.WriteString("\tif err != nil {\n")
-	fmt.Fprintf(b, "\t\treturn %s fmt.Errorf(\"%s.%s: %%w\", err)\n", zeroReturnExpr(respGo), pkgName, ep.GoMethod)
-	b.WriteString("\t}\n")
-	b.WriteString("\tif resp == nil {\n")
-	fmt.Fprintf(b, "\t\treturn %s fmt.Errorf(\"%s.%s: nil response from client\")\n",
-		zeroReturnExpr(respGo), pkgName, ep.GoMethod)
-	b.WriteString("\t}\n")
+	fmt.Fprintf(builder, "\tresp, err := s.c.%s(ctx, path, body)\n", verbCall)
+	builder.WriteString("\tif err != nil {\n")
+	fmt.Fprintf(builder, "\t\treturn %s fmt.Errorf(\"%s.%s: %%w\", err)\n", zeroReturnExpr(respGo), pkgName, endpt.GoMethod)
+	builder.WriteString("\t}\n")
+	builder.WriteString("\tif resp == nil {\n")
+	fmt.Fprintf(builder, "\t\treturn %s fmt.Errorf(\"%s.%s: nil response from client\")\n",
+		zeroReturnExpr(respGo), pkgName, endpt.GoMethod)
+	builder.WriteString("\t}\n")
+
+	return nil
+}
+
+// renderMethodBodyResponse emits the response-decoding block into builder.
+func renderMethodBodyResponse(builder *strings.Builder, pkgName string, endpt endpoint) {
+	respName := responseTypeName(endpt)
+
+	builder.WriteString("\tif resp.Data == nil {\n")
+
+	// For alias types and slice types, the zero value is the correct empty result.
+	if isResponseEmptyOk(endpt) {
+		fmt.Fprintf(builder, "\t\tout := %s{}\n", respName)
+		builder.WriteString("\t\treturn &out, nil\n")
+	} else {
+		fmt.Fprintf(builder, "\t\treturn nil, fmt.Errorf(\"%s.%s: empty data in response (code=%%d)\", resp.Code)\n",
+			pkgName, endpt.GoMethod)
+	}
+
+	builder.WriteString("\t}\n")
+	builder.WriteString("\traw, err := json.Marshal(resp.Data)\n")
+	builder.WriteString("\tif err != nil {\n")
+	fmt.Fprintf(builder, "\t\treturn nil, fmt.Errorf(\"%s.%s: re-marshal data: %%w\", err)\n", pkgName, endpt.GoMethod)
+	builder.WriteString("\t}\n")
+	fmt.Fprintf(builder, "\tout := &%s{}\n", respName)
+	builder.WriteString("\terr = json.Unmarshal(raw, out)\n")
+	builder.WriteString("\tif err != nil {\n")
+	fmt.Fprintf(builder, "\t\treturn nil, fmt.Errorf(\"%s.%s: unmarshal data: %%w\", err)\n", pkgName, endpt.GoMethod)
+	builder.WriteString("\t}\n")
+	builder.WriteString("\treturn out, nil\n")
+	builder.WriteString("}\n\n")
+}
+
+// renderMethodBody emits the receiver-method implementation.
+func renderMethodBody(builder *strings.Builder, pkgName string, endpt endpoint) error {
+	respGo := responseGoType(endpt)
+
+	renderMethodBodyHead(builder, pkgName, endpt, respGo)
+	renderMethodBodyParams(builder, pkgName, endpt, respGo)
+
+	err := renderMethodBodyDispatch(builder, pkgName, endpt, respGo)
+	if err != nil {
+		return err
+	}
 
 	if respGo == "" {
-		b.WriteString("\t_ = resp\n")
-		b.WriteString("\treturn nil\n")
-		b.WriteString("}\n\n")
+		builder.WriteString("\t_ = resp\n")
+		builder.WriteString("\treturn nil\n")
+		builder.WriteString("}\n\n")
 
 		return nil
 	}
 
 	// Decode resp.Data into typed response via JSON round-trip.
-	b.WriteString("\tif resp.Data == nil {\n")
-
-	respName := responseTypeName(ep)
-	// For alias types and slice types, the zero value is the correct empty result.
-	if isResponseEmptyOk(ep) {
-		fmt.Fprintf(b, "\t\tout := %s{}\n", respName)
-		b.WriteString("\t\treturn &out, nil\n")
-	} else {
-		fmt.Fprintf(b, "\t\treturn nil, fmt.Errorf(\"%s.%s: empty data in response (code=%%d)\", resp.Code)\n",
-			pkgName, ep.GoMethod)
-	}
-
-	b.WriteString("\t}\n")
-	b.WriteString("\traw, err := json.Marshal(resp.Data)\n")
-	b.WriteString("\tif err != nil {\n")
-	fmt.Fprintf(b, "\t\treturn nil, fmt.Errorf(\"%s.%s: re-marshal data: %%w\", err)\n", pkgName, ep.GoMethod)
-	b.WriteString("\t}\n")
-	fmt.Fprintf(b, "\tout := &%s{}\n", respName)
-	b.WriteString("\terr = json.Unmarshal(raw, out)\n")
-	b.WriteString("\tif err != nil {\n")
-	fmt.Fprintf(b, "\t\treturn nil, fmt.Errorf(\"%s.%s: unmarshal data: %%w\", err)\n", pkgName, ep.GoMethod)
-	b.WriteString("\t}\n")
-	b.WriteString("\treturn out, nil\n")
-	b.WriteString("}\n\n")
+	renderMethodBodyResponse(builder, pkgName, endpt)
 
 	return nil
 }
@@ -1251,17 +1359,17 @@ func renderMethodBody(b *strings.Builder, pkgName string, ep endpoint) error {
 // response should be treated as the empty zero value rather than an
 // error. Array and aliased-RawMessage responses are tolerant; typed
 // struct responses are strict.
-func isResponseEmptyOk(ep endpoint) bool {
-	r := ep.Info.Returns
-	if r == nil {
+func isResponseEmptyOk(endpt endpoint) bool {
+	ret := endpt.Info.Returns
+	if ret == nil {
 		return true
 	}
 
-	if r.Type == "array" {
+	if ret.Type == schemaTypeArray {
 		return true
 	}
 	// Aliased RawMessage = anything not a populated object/array.
-	if r.Type != "object" || len(r.Properties) == 0 {
+	if ret.Type != schemaTypeObject || len(ret.Properties) == 0 {
 		return true
 	}
 
@@ -1285,40 +1393,40 @@ func zeroReturnExpr(respGo string) string {
 // escaped via url.PathEscape before substitution to prevent path
 // traversal (e.g. a caller passing vmid="100/../../etc" would otherwise
 // corrupt the constructed URL).
-func buildPathExpression(ep endpoint) string {
-	if len(ep.PathParams) == 0 {
-		return strconvQuote(ep.Path)
+func buildPathExpression(endpt endpoint) string {
+	if len(endpt.PathParams) == 0 {
+		return strconvQuote(endpt.Path)
 	}
 
 	// Replace each {name} with %s in the format string.
-	format := ep.Path
+	fmtPath := endpt.Path
 
-	args := make([]string, 0, len(ep.PathParams))
+	args := make([]string, 0, len(endpt.PathParams))
 
-	for _, p := range ep.PathParams {
-		format = strings.Replace(format, "{"+p+"}", "%s", 1)
-		args = append(args, "url.PathEscape("+goIdentSafe(camelize(p))+")")
+	for _, pathParam := range endpt.PathParams {
+		fmtPath = strings.Replace(fmtPath, "{"+pathParam+"}", "%s", 1)
+		args = append(args, "url.PathEscape("+goIdentSafe(camelize(pathParam))+")")
 	}
 
-	return fmt.Sprintf("fmt.Sprintf(%s, %s)", strconvQuote(format), strings.Join(args, ", "))
+	return fmt.Sprintf("fmt.Sprintf(%s, %s)", strconvQuote(fmtPath), strings.Join(args, ", "))
 }
 
 // strconvQuote is a tiny helper that returns a Go-quoted string
-// literal for s. We use this instead of strconv.Quote to avoid
+// literal for str. We use this instead of strconv.Quote to avoid
 // pulling in the strconv import in the generator output (we only
 // quote ASCII-safe paths from the spec).
-func strconvQuote(s string) string {
-	return "\"" + strings.ReplaceAll(s, "\"", "\\\"") + "\""
+func strconvQuote(str string) string {
+	return "\"" + strings.ReplaceAll(str, "\"", "\\\"") + "\""
 }
 
 // goTypeFor maps a JSON-schema type to a Go type. Unknown shapes fall
 // back to json.RawMessage so the generator stays total.
-func goTypeFor(s *schema) (string, error) {
-	if s == nil {
-		return "", errors.New("nil schema")
+func goTypeFor(objSchema *schema) (string, error) {
+	if objSchema == nil {
+		return "", errNilSchema
 	}
 
-	switch s.Type {
+	switch objSchema.Type {
 	case "string":
 		return "string", nil
 	case "integer":
@@ -1328,48 +1436,48 @@ func goTypeFor(s *schema) (string, error) {
 	case "boolean":
 		return "bool", nil
 	case "array":
-		if s.Items == nil {
+		if objSchema.Items == nil {
 			return "[]json.RawMessage", nil
 		}
 
-		inner, err := goTypeFor(s.Items)
+		inner, err := goTypeFor(objSchema.Items)
 		if err != nil {
 			return "[]json.RawMessage", nil //nolint:nilerr // intentional fallback
 		}
 
 		return "[]" + inner, nil
-	case "object":
+	case schemaTypeObject:
 		// Nested objects fall back to raw JSON; emitting nested typed
 		// structs recursively would explode the surface area beyond the
 		// SW3 scope. Callers can decode further via json.Unmarshal.
-		return "json.RawMessage", nil
+		return goTypeRawMessage, nil
 	case "null":
-		return "json.RawMessage", nil
+		return goTypeRawMessage, nil
 	case "":
-		return "json.RawMessage", nil
+		return goTypeRawMessage, nil
 	default:
-		return "json.RawMessage", nil
+		return goTypeRawMessage, nil
 	}
 }
 
 // isOptional reports whether a schema's optional flag is truthy. The
 // upstream spec encodes it as either the integer 1 or the string "1";
 // any other shape (absent, 0, "0", null, "") means required.
-func isOptional(s *schema) bool {
-	if s == nil || len(s.Optional) == 0 {
+func isOptional(objSchema *schema) bool {
+	if objSchema == nil || len(objSchema.Optional) == 0 {
 		return false
 	}
 
 	var asInt int
 
-	err := json.Unmarshal(s.Optional, &asInt)
+	err := json.Unmarshal(objSchema.Optional, &asInt)
 	if err == nil {
 		return asInt == 1
 	}
 
 	var asStr string
 
-	err = json.Unmarshal(s.Optional, &asStr)
+	err = json.Unmarshal(objSchema.Optional, &asStr)
 	if err == nil {
 		return asStr == "1" || strings.EqualFold(asStr, "true")
 	}
@@ -1379,12 +1487,12 @@ func isOptional(s *schema) bool {
 
 // escapeDoc strips characters that break Go doc comments (mainly
 // trailing whitespace and embedded newlines).
-func escapeDoc(s string) string {
-	s = strings.ReplaceAll(s, "\r\n", " ")
-	s = strings.ReplaceAll(s, "\n", " ")
-	s = strings.ReplaceAll(s, "\t", " ")
+func escapeDoc(str string) string {
+	str = strings.ReplaceAll(str, "\r\n", " ")
+	str = strings.ReplaceAll(str, "\n", " ")
+	str = strings.ReplaceAll(str, "\t", " ")
 
-	return strings.TrimSpace(s)
+	return strings.TrimSpace(str)
 }
 
 // writeIfChanged writes data to path only when the existing content
@@ -1396,33 +1504,33 @@ func writeIfChanged(path string, data []byte) error {
 		return nil
 	}
 
-	return os.WriteFile(path, data, 0o644)
+	err = os.WriteFile(path, data, filePerm)
+	if err != nil {
+		return fmt.Errorf("write file: %w", err)
+	}
+
+	return nil
 }
 
-// renderNamespaceSmokeTest builds a single table-driven smoke test
-// that verifies the generated GET methods compile and round-trip JSON
-// over an httptest server. Methods with non-path required parameters
-// or non-GET verbs are skipped — they exercise state-changing endpoints
-// and need real fixtures, which is out of scope for SW3.
-func renderNamespaceSmokeTest(pkgName, ns string, eps []endpoint) ([]byte, error) {
-	var b strings.Builder
+// renderSmokeTestHeader writes the package declaration, imports, and
+// smokeOptsFromServerURL helper into builder.
+func renderSmokeTestHeader(builder *strings.Builder, pkgName string) {
+	fmt.Fprintf(builder, "// Code generated by cmd/pvegen. DO NOT EDIT.\n\n")
+	fmt.Fprintf(builder, "package %s_test\n\n", pkgName)
 
-	fmt.Fprintf(&b, "// Code generated by cmd/pvegen. DO NOT EDIT.\n\n")
-	fmt.Fprintf(&b, "package %s_test\n\n", pkgName)
+	builder.WriteString("import (\n")
+	builder.WriteString("\t\"context\"\n")
+	builder.WriteString("\t\"encoding/json\"\n")
+	builder.WriteString("\t\"net/http\"\n")
+	builder.WriteString("\t\"net/http/httptest\"\n")
+	builder.WriteString("\t\"net/url\"\n")
+	builder.WriteString("\t\"strconv\"\n")
+	builder.WriteString("\t\"testing\"\n\n")
+	fmt.Fprintf(builder, "\t\"github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/api/%s\"\n", pkgName)
+	builder.WriteString("\tpveclient \"github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/client\"\n")
+	builder.WriteString(")\n\n")
 
-	b.WriteString("import (\n")
-	b.WriteString("\t\"context\"\n")
-	b.WriteString("\t\"encoding/json\"\n")
-	b.WriteString("\t\"net/http\"\n")
-	b.WriteString("\t\"net/http/httptest\"\n")
-	b.WriteString("\t\"net/url\"\n")
-	b.WriteString("\t\"strconv\"\n")
-	b.WriteString("\t\"testing\"\n\n")
-	fmt.Fprintf(&b, "\t\"github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/api/%s\"\n", pkgName)
-	b.WriteString("\tpveclient \"github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/client\"\n")
-	b.WriteString(")\n\n")
-
-	b.WriteString(`func smokeOptsFromServerURL(u string) pveclient.Options {
+	builder.WriteString(`func smokeOptsFromServerURL(u string) pveclient.Options {
 	parsed, err := url.Parse(u)
 	if err != nil {
 		panic("test setup: invalid server URL: " + err.Error())
@@ -1444,81 +1552,101 @@ func renderNamespaceSmokeTest(pkgName, ns string, eps []endpoint) ([]byte, error
 }
 
 `)
+}
 
-	// Pick the smoke-eligible endpoints: GET only.
-	type smokeCase struct {
-		Method     string
-		PathParams []string
-		HasParams  bool
-		RespType   string
-	}
+// smokeCase holds the data needed to emit one smoke-test subtest.
+type smokeCase struct {
+	Method     string
+	PathParams []string
+	HasParams  bool
+	RespType   string
+}
 
+// collectSmokeCases returns all smoke-eligible (GET) endpoints as smoke cases.
+func collectSmokeCases(eps []endpoint) []smokeCase {
 	var cases []smokeCase
 
-	for _, ep := range eps {
-		if strings.ToUpper(ep.Verb) != "GET" {
+	for _, endpt := range eps {
+		if strings.ToUpper(endpt.Verb) != verbHTTPGet {
 			continue
 		}
 
 		cases = append(cases, smokeCase{
-			Method:     ep.GoMethod,
-			PathParams: ep.PathParams,
-			HasParams:  hasNonPathParams(ep),
-			RespType:   responseGoType(ep),
+			Method:     endpt.GoMethod,
+			PathParams: endpt.PathParams,
+			HasParams:  hasNonPathParams(endpt),
+			RespType:   responseGoType(endpt),
 		})
 	}
 
-	// Emit one test func per namespace that walks all smoke cases.
-	fmt.Fprintf(&b, "func TestSmoke_%s_GeneratedMethods(t *testing.T) {\n", pascalize(pkgName))
-	b.WriteString("\tt.Parallel()\n\n")
-	b.WriteString("\tmux := http.NewServeMux()\n")
-	b.WriteString("\tmux.HandleFunc(\"/\", func(w http.ResponseWriter, r *http.Request) {\n")
-	b.WriteString("\t\t_ = json.NewEncoder(w).Encode(map[string]any{\n")
-	b.WriteString("\t\t\t\"data\":    map[string]any{},\n")
-	b.WriteString("\t\t\t\"success\": 1,\n")
-	b.WriteString("\t\t})\n")
-	b.WriteString("\t})\n\n")
-	b.WriteString("\tsrv := httptest.NewServer(mux)\n")
-	b.WriteString("\tdefer srv.Close()\n\n")
-	b.WriteString("\tc, err := pveclient.NewClient(smokeOptsFromServerURL(srv.URL))\n")
-	b.WriteString("\tif err != nil {\n")
-	b.WriteString("\t\tt.Fatalf(\"NewClient: %v\", err)\n")
-	b.WriteString("\t}\n\n")
-	fmt.Fprintf(&b, "\tsvc := %s.New(c)\n", pkgName)
-	b.WriteString("\tctx := context.Background()\n\n")
+	return cases
+}
 
-	for _, c := range cases {
-		fmt.Fprintf(&b, "\tt.Run(%q, func(t *testing.T) {\n", c.Method)
+// renderSmokeTestBody writes the test function body into builder.
+func renderSmokeTestBody(builder *strings.Builder, pkgName string, cases []smokeCase) {
+	fmt.Fprintf(builder, "func TestSmoke_%s_GeneratedMethods(t *testing.T) {\n", pascalize(pkgName))
+	builder.WriteString("\tt.Parallel()\n\n")
+	builder.WriteString("\tmux := http.NewServeMux()\n")
+	builder.WriteString("\tmux.HandleFunc(\"/\", func(w http.ResponseWriter, r *http.Request) {\n")
+	builder.WriteString("\t\t_ = json.NewEncoder(w).Encode(map[string]any{\n")
+	builder.WriteString("\t\t\t\"data\":    map[string]any{},\n")
+	builder.WriteString("\t\t\t\"success\": 1,\n")
+	builder.WriteString("\t\t})\n")
+	builder.WriteString("\t})\n\n")
+	builder.WriteString("\tsrv := httptest.NewServer(mux)\n")
+	builder.WriteString("\tdefer srv.Close()\n\n")
+	builder.WriteString("\tc, err := pveclient.NewClient(smokeOptsFromServerURL(srv.URL))\n")
+	builder.WriteString("\tif err != nil {\n")
+	builder.WriteString("\t\tt.Fatalf(\"NewClient: %v\", err)\n")
+	builder.WriteString("\t}\n\n")
+	fmt.Fprintf(builder, "\tsvc := %s.New(c)\n", pkgName)
+	builder.WriteString("\tctx := context.Background()\n\n")
+
+	for _, smokeTestCase := range cases {
+		fmt.Fprintf(builder, "\tt.Run(%q, func(t *testing.T) {\n", smokeTestCase.Method)
 
 		args := []string{"ctx"}
 
-		for _, p := range c.PathParams {
-			_ = p
-
+		for range smokeTestCase.PathParams {
 			args = append(args, "\"stub\"")
 		}
 
-		if c.HasParams {
+		if smokeTestCase.HasParams {
 			args = append(args, "nil")
 		}
 
-		callExpr := fmt.Sprintf("svc.%s(%s)", c.Method, strings.Join(args, ", "))
+		callExpr := fmt.Sprintf("svc.%s(%s)", smokeTestCase.Method, strings.Join(args, ", "))
 
-		if c.RespType == "" {
-			fmt.Fprintf(&b, "\t\terr := %s\n", callExpr)
-			b.WriteString("\t\t_ = err // smoke: any outcome is acceptable; the stub server is permissive\n")
+		if smokeTestCase.RespType == "" {
+			fmt.Fprintf(builder, "\t\terr := %s\n", callExpr)
+			builder.WriteString("\t\t_ = err // smoke: any outcome is acceptable; the stub server is permissive\n")
 		} else {
-			fmt.Fprintf(&b, "\t\t_, err := %s\n", callExpr)
-			b.WriteString("\t\t_ = err // smoke: any outcome is acceptable; the stub server is permissive\n")
+			fmt.Fprintf(builder, "\t\t_, err := %s\n", callExpr)
+			builder.WriteString("\t\t_ = err // smoke: any outcome is acceptable; the stub server is permissive\n")
 		}
 
-		b.WriteString("\t})\n")
+		builder.WriteString("\t})\n")
 	}
 
-	b.WriteString("}\n")
+	builder.WriteString("}\n")
+}
+
+// renderNamespaceSmokeTest builds a single table-driven smoke test
+// that verifies the generated GET methods compile and round-trip JSON
+// over an httptest server. Methods with non-path required parameters
+// or non-GET verbs are skipped — they exercise state-changing endpoints
+// and need real fixtures, which is out of scope for SW3.
+func renderNamespaceSmokeTest(pkgName, nsName string, eps []endpoint) []byte {
+	var builder strings.Builder
+
+	renderSmokeTestHeader(&builder, pkgName)
+
+	cases := collectSmokeCases(eps)
+
+	renderSmokeTestBody(&builder, pkgName, cases)
 
 	// Silence unused-import warnings if no cases were emitted.
-	_ = ns
+	_ = nsName
 
-	return []byte(b.String()), nil
+	return []byte(builder.String())
 }
