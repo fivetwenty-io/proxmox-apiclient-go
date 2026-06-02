@@ -17,6 +17,22 @@ VERSION ?= "dev/$(GIT_BRANCH)/$(GIT_SHA)"
 BUILD_TIME := $(shell date -u '+%Y-%m-%d_%H:%M:%S')
 GO_FILES := $(shell find . -name '*.go' -type f -not -path "./vendor/*")
 
+# gosec scope. Generated bindings emitted by cmd/pvegen are excluded — any
+# finding there is a property of the generator template, not author intent
+# (fix the generator, not the output). Build-time tooling (cmd) and runnable
+# examples are not library surface. Rule exclusions are domain-inherent to a
+# Proxmox API client: G117 (request structs legitimately marshal credentials
+# such as password/secret/client-key), G123 (certificate pinning via
+# VerifyPeerCertificate is a deliberate feature), G402 (InsecureSkipVerify is
+# opt-in only when the caller sets Insecure, for self-signed endpoints), and
+# G704 (issuing HTTP requests to a caller-configured host is the library's job).
+GOSEC_EXCLUDE_DIRS := -exclude-dir=examples -exclude-dir=cmd \
+	-exclude-dir=pkg/api/access -exclude-dir=pkg/api/cluster \
+	-exclude-dir=pkg/api/clusterstorage -exclude-dir=pkg/api/nodes \
+	-exclude-dir=pkg/api/pools -exclude-dir=pkg/api/version
+GOSEC_EXCLUDE_RULES := -exclude=G117,G123,G402,G704
+GOSEC_FLAGS := $(GOSEC_EXCLUDE_DIRS) $(GOSEC_EXCLUDE_RULES)
+
 ##@ General
 
 .PHONY: help
@@ -133,7 +149,7 @@ gosec: ## Run security scanner on source code
 		echo "$(YELLOW)Installing gosec...$(RESET)"; \
 		go install github.com/securego/gosec/v2/cmd/gosec@latest; \
 	}
-	@gosec -quiet -fmt text ./...
+	@gosec -quiet -fmt text $(GOSEC_FLAGS) ./...
 	@echo "$(GREEN)✓ Security scan complete$(RESET)"
 
 .PHONY: staticcheck

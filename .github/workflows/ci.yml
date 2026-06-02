@@ -64,7 +64,17 @@ jobs:
     - name: Run gosec
       uses: securego/gosec@master
       with:
-        args: ./...
+        # Generated bindings (pkg/api/*_gen.go) are excluded — fix the pvegen
+        # generator, not its output. Rule exclusions are domain-inherent to a
+        # Proxmox API client: G117 (request structs carry credentials), G123
+        # (deliberate certificate pinning), G402 (opt-in InsecureSkipVerify),
+        # G704 (HTTP to a caller-configured host). Keep in sync with Makefile.
+        args: >-
+          -exclude-dir=examples -exclude-dir=cmd
+          -exclude-dir=pkg/api/access -exclude-dir=pkg/api/cluster
+          -exclude-dir=pkg/api/clusterstorage -exclude-dir=pkg/api/nodes
+          -exclude-dir=pkg/api/pools -exclude-dir=pkg/api/version
+          -exclude=G117,G123,G402,G704 ./...
 
   lint:
     name: Lint

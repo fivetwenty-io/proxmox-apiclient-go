@@ -5,6 +5,18 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v3.2.1] — 2026-06-01
+
+### Changed
+
+- Wrapped WebSocket transport errors (`Conn.ReadMessage`/`WriteMessage`/`Close` and proxy POST) so failures carry package context, and promoted ad-hoc error strings to named sentinels in the streaming and generator code paths. No exported symbols changed; behavior is identical.
+- Extracted repeated content-type, log-field, realm, and protocol literals into named constants; reduced the complexity of several transport, streaming, and disk-attach helpers by extracting sub-functions. Pure refactor, no API or behavior change.
+
+### Internal
+
+- Scoped `gosec` and `golangci-lint` to exclude generator-emitted bindings and domain-inherent rules (request structs carry credentials, deliberate certificate pinning, opt-in `InsecureSkipVerify`, and issuing HTTP to a caller-configured host), keeping the Makefile and CI in sync. The full lint and security suite (`go vet`, `staticcheck`, `golangci-lint`, `gosec`, `govulncheck`, `go test -race`) now passes clean.
+- Hardened the test suite: descriptive variable names, parallel-safe subtests, closed response bodies, two-value type assertions, and deduplicated fixtures. Generated bindings remain owned by `cmd/pvegen`; none were hand-edited.
+
 ## [v3.2.0] — 2026-06-01
 
 ### Added

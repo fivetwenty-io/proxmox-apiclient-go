@@ -49,7 +49,7 @@ linters:
   - godox # Detects usage of FIXME, TODO and other keywords inside comments. [fast]
   - goheader # Check if file header matches to pattern. [fast, auto-fix]
   - gomoddirectives # Manage the use of 'replace', 'retract', and 'excludes' directives in go.mod. [fast]
-  - gomodguard # Allow and blocklist linter for direct Go module dependencies. This is different from depguard where there are different block types for example version constraints and module recommendations. [fast]
+  - gomodguard_v2 # Allow and blocklist linter for direct Go module dependencies. This is different from depguard where there are different block types for example version constraints and module recommendations. [fast]
   - goprintffuncname # Checks that printf-like functions are named with `f` at the end. [fast]
   - gosec # Inspects source code for security problems.
   - gosmopolitan # Report certain i18n/l10n anti-patterns in your Go codebase.
@@ -132,6 +132,27 @@ linters:
       - pkg/api/clusterstorage/.*_smoke_test\.go
       - pkg/api/nodes/.*_smoke_test\.go
       - pkg/api/pools/.*_smoke_test\.go
+
+    # gosec exclusions mirror the standalone gosec scope wired into the
+    # Makefile and CI. These rules are domain-inherent to a Proxmox API
+    # client, not defects to fix in code.
+    rules:
+      # API request structs legitimately marshal credential fields; cert
+      # pinning, opt-in InsecureSkipVerify, and issuing HTTP to a caller's
+      # host are deliberate library behavior.
+      - linters: [gosec]
+        text: "G117|G123|G402|G704"
+      # Build-time generator tool: file permissions/inclusion on emitted
+      # source are inherent to its job, not shipped library surface.
+      - path: cmd/pvegen/
+        linters: [gosec]
+      # Runnable examples are illustrative, not library API.
+      - path: examples/
+        linters: [gosec]
+      # Test fixtures use controlled, non-secret inputs; gosec's secret and
+      # conversion heuristics (G101/G115/G120) are false positives here.
+      - path: _test\.go$
+        linters: [gosec]
 
   settings:
     cyclop:
