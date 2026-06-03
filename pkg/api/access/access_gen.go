@@ -1129,53 +1129,53 @@ func (s *service) DeleteRoles(ctx context.Context, roleid string) error {
 
 // GetRolesResponse mirrors the shape returned by GET /access/roles/{roleid}.
 type GetRolesResponse struct {
-	DatastoreAllocate          *bool `json:"Datastore.Allocate,omitempty"`
-	DatastoreAllocateSpace     *bool `json:"Datastore.AllocateSpace,omitempty"`
-	DatastoreAllocateTemplate  *bool `json:"Datastore.AllocateTemplate,omitempty"`
-	DatastoreAudit             *bool `json:"Datastore.Audit,omitempty"`
-	GroupAllocate              *bool `json:"Group.Allocate,omitempty"`
-	MappingAudit               *bool `json:"Mapping.Audit,omitempty"`
-	MappingModify              *bool `json:"Mapping.Modify,omitempty"`
-	MappingUse                 *bool `json:"Mapping.Use,omitempty"`
-	PermissionsModify          *bool `json:"Permissions.Modify,omitempty"`
-	PoolAllocate               *bool `json:"Pool.Allocate,omitempty"`
-	PoolAudit                  *bool `json:"Pool.Audit,omitempty"`
-	RealmAllocate              *bool `json:"Realm.Allocate,omitempty"`
-	RealmAllocateUser          *bool `json:"Realm.AllocateUser,omitempty"`
-	SDNAllocate                *bool `json:"SDN.Allocate,omitempty"`
-	SDNAudit                   *bool `json:"SDN.Audit,omitempty"`
-	SDNUse                     *bool `json:"SDN.Use,omitempty"`
-	SysAccessNetwork           *bool `json:"Sys.AccessNetwork,omitempty"`
-	SysAudit                   *bool `json:"Sys.Audit,omitempty"`
-	SysConsole                 *bool `json:"Sys.Console,omitempty"`
-	SysIncoming                *bool `json:"Sys.Incoming,omitempty"`
-	SysModify                  *bool `json:"Sys.Modify,omitempty"`
-	SysPowerMgmt               *bool `json:"Sys.PowerMgmt,omitempty"`
-	SysSyslog                  *bool `json:"Sys.Syslog,omitempty"`
-	UserModify                 *bool `json:"User.Modify,omitempty"`
-	VMAllocate                 *bool `json:"VM.Allocate,omitempty"`
-	VMAudit                    *bool `json:"VM.Audit,omitempty"`
-	VMBackup                   *bool `json:"VM.Backup,omitempty"`
-	VMClone                    *bool `json:"VM.Clone,omitempty"`
-	VMConfigCDROM              *bool `json:"VM.Config.CDROM,omitempty"`
-	VMConfigCPU                *bool `json:"VM.Config.CPU,omitempty"`
-	VMConfigCloudinit          *bool `json:"VM.Config.Cloudinit,omitempty"`
-	VMConfigDisk               *bool `json:"VM.Config.Disk,omitempty"`
-	VMConfigHWType             *bool `json:"VM.Config.HWType,omitempty"`
-	VMConfigMemory             *bool `json:"VM.Config.Memory,omitempty"`
-	VMConfigNetwork            *bool `json:"VM.Config.Network,omitempty"`
-	VMConfigOptions            *bool `json:"VM.Config.Options,omitempty"`
-	VMConsole                  *bool `json:"VM.Console,omitempty"`
-	VMGuestAgentAudit          *bool `json:"VM.GuestAgent.Audit,omitempty"`
-	VMGuestAgentFileRead       *bool `json:"VM.GuestAgent.FileRead,omitempty"`
-	VMGuestAgentFileSystemMgmt *bool `json:"VM.GuestAgent.FileSystemMgmt,omitempty"`
-	VMGuestAgentFileWrite      *bool `json:"VM.GuestAgent.FileWrite,omitempty"`
-	VMGuestAgentUnrestricted   *bool `json:"VM.GuestAgent.Unrestricted,omitempty"`
-	VMMigrate                  *bool `json:"VM.Migrate,omitempty"`
-	VMPowerMgmt                *bool `json:"VM.PowerMgmt,omitempty"`
-	VMReplicate                *bool `json:"VM.Replicate,omitempty"`
-	VMSnapshot                 *bool `json:"VM.Snapshot,omitempty"`
-	VMSnapshotRollback         *bool `json:"VM.Snapshot.Rollback,omitempty"`
+	DatastoreAllocate          *client.PVEBool `json:"Datastore.Allocate,omitempty"`
+	DatastoreAllocateSpace     *client.PVEBool `json:"Datastore.AllocateSpace,omitempty"`
+	DatastoreAllocateTemplate  *client.PVEBool `json:"Datastore.AllocateTemplate,omitempty"`
+	DatastoreAudit             *client.PVEBool `json:"Datastore.Audit,omitempty"`
+	GroupAllocate              *client.PVEBool `json:"Group.Allocate,omitempty"`
+	MappingAudit               *client.PVEBool `json:"Mapping.Audit,omitempty"`
+	MappingModify              *client.PVEBool `json:"Mapping.Modify,omitempty"`
+	MappingUse                 *client.PVEBool `json:"Mapping.Use,omitempty"`
+	PermissionsModify          *client.PVEBool `json:"Permissions.Modify,omitempty"`
+	PoolAllocate               *client.PVEBool `json:"Pool.Allocate,omitempty"`
+	PoolAudit                  *client.PVEBool `json:"Pool.Audit,omitempty"`
+	RealmAllocate              *client.PVEBool `json:"Realm.Allocate,omitempty"`
+	RealmAllocateUser          *client.PVEBool `json:"Realm.AllocateUser,omitempty"`
+	SDNAllocate                *client.PVEBool `json:"SDN.Allocate,omitempty"`
+	SDNAudit                   *client.PVEBool `json:"SDN.Audit,omitempty"`
+	SDNUse                     *client.PVEBool `json:"SDN.Use,omitempty"`
+	SysAccessNetwork           *client.PVEBool `json:"Sys.AccessNetwork,omitempty"`
+	SysAudit                   *client.PVEBool `json:"Sys.Audit,omitempty"`
+	SysConsole                 *client.PVEBool `json:"Sys.Console,omitempty"`
+	SysIncoming                *client.PVEBool `json:"Sys.Incoming,omitempty"`
+	SysModify                  *client.PVEBool `json:"Sys.Modify,omitempty"`
+	SysPowerMgmt               *client.PVEBool `json:"Sys.PowerMgmt,omitempty"`
+	SysSyslog                  *client.PVEBool `json:"Sys.Syslog,omitempty"`
+	UserModify                 *client.PVEBool `json:"User.Modify,omitempty"`
+	VMAllocate                 *client.PVEBool `json:"VM.Allocate,omitempty"`
+	VMAudit                    *client.PVEBool `json:"VM.Audit,omitempty"`
+	VMBackup                   *client.PVEBool `json:"VM.Backup,omitempty"`
+	VMClone                    *client.PVEBool `json:"VM.Clone,omitempty"`
+	VMConfigCDROM              *client.PVEBool `json:"VM.Config.CDROM,omitempty"`
+	VMConfigCPU                *client.PVEBool `json:"VM.Config.CPU,omitempty"`
+	VMConfigCloudinit          *client.PVEBool `json:"VM.Config.Cloudinit,omitempty"`
+	VMConfigDisk               *client.PVEBool `json:"VM.Config.Disk,omitempty"`
+	VMConfigHWType             *client.PVEBool `json:"VM.Config.HWType,omitempty"`
+	VMConfigMemory             *client.PVEBool `json:"VM.Config.Memory,omitempty"`
+	VMConfigNetwork            *client.PVEBool `json:"VM.Config.Network,omitempty"`
+	VMConfigOptions            *client.PVEBool `json:"VM.Config.Options,omitempty"`
+	VMConsole                  *client.PVEBool `json:"VM.Console,omitempty"`
+	VMGuestAgentAudit          *client.PVEBool `json:"VM.GuestAgent.Audit,omitempty"`
+	VMGuestAgentFileRead       *client.PVEBool `json:"VM.GuestAgent.FileRead,omitempty"`
+	VMGuestAgentFileSystemMgmt *client.PVEBool `json:"VM.GuestAgent.FileSystemMgmt,omitempty"`
+	VMGuestAgentFileWrite      *client.PVEBool `json:"VM.GuestAgent.FileWrite,omitempty"`
+	VMGuestAgentUnrestricted   *client.PVEBool `json:"VM.GuestAgent.Unrestricted,omitempty"`
+	VMMigrate                  *client.PVEBool `json:"VM.Migrate,omitempty"`
+	VMPowerMgmt                *client.PVEBool `json:"VM.PowerMgmt,omitempty"`
+	VMReplicate                *client.PVEBool `json:"VM.Replicate,omitempty"`
+	VMSnapshot                 *client.PVEBool `json:"VM.Snapshot,omitempty"`
+	VMSnapshotRollback         *client.PVEBool `json:"VM.Snapshot.Rollback,omitempty"`
 }
 
 // GetRoles implements Service.GetRoles. GET /access/roles/{roleid}.
@@ -1413,7 +1413,7 @@ type GetTfa2Response struct {
 	// Description User chosen description for this entry.
 	Description string `json:"description"`
 	// Enable Whether this TFA entry is currently enabled.
-	Enable *bool `json:"enable,omitempty"`
+	Enable *client.PVEBool `json:"enable,omitempty"`
 	// Id The id used to reference this entry.
 	Id string `json:"id"`
 	// Type TFA Entry Type.
@@ -1693,7 +1693,7 @@ type GetUsersResponse struct {
 	Comment *string `json:"comment,omitempty"`
 	Email   *string `json:"email,omitempty"`
 	// Enable Enable the account (default). You can set this to '0' to disable the account
-	Enable *bool `json:"enable,omitempty"`
+	Enable *client.PVEBool `json:"enable,omitempty"`
 	// Expire Account expiration date (seconds since epoch). '0' means no expiration date.
 	Expire    *int64   `json:"expire,omitempty"`
 	Firstname *string  `json:"firstname,omitempty"`
@@ -1889,7 +1889,7 @@ type GetUsersTokenResponse struct {
 	// Expire API token expiration date (seconds since epoch). '0' means no expiration date.
 	Expire *int64 `json:"expire,omitempty"`
 	// Privsep Restrict API token privileges with separate ACLs (default), or give full privileges of corresponding user.
-	Privsep *bool `json:"privsep,omitempty"`
+	Privsep *client.PVEBool `json:"privsep,omitempty"`
 }
 
 // GetUsersToken implements Service.GetUsersToken. GET /access/users/{userid}/token/{tokenid}.
@@ -1999,7 +1999,7 @@ type UpdateUsersTokenResponse struct {
 	// FullTokenid The full token id. Only set when 'regenerate' was set.
 	FullTokenid *string `json:"full-tokenid,omitempty"`
 	// Privsep Restrict API token privileges with separate ACLs (default), or give full privileges of corresponding user.
-	Privsep *bool `json:"privsep,omitempty"`
+	Privsep *client.PVEBool `json:"privsep,omitempty"`
 	// Value API token value used for authentication. Only set when 'regenerate' was set.
 	Value *string `json:"value,omitempty"`
 }

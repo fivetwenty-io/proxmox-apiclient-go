@@ -5,6 +5,16 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v3.2.4] — 2026-06-03
+
+### Fixed
+
+- Response booleans now decode the several JSON encodings the Proxmox VE API emits. PVE renders booleans inconsistently across endpoints — as a JSON boolean (`true`/`false`), a number (`1`/`0`), or a string (`"1"`/`"0"`, `"true"`/`"false"`, `"yes"`/`"no"`, `""`) — which caused typed get-by-id responses (for example QEMU status `agent`, user `enable`, role privileges) to fail with `cannot unmarshal number into Go struct field ... of type bool` against real payloads. A new tolerant `client.PVEBool` type accepts every form and marshals back out as a native JSON boolean.
+
+### Changed
+
+- The generator (`cmd/pvegen`) now emits `*client.PVEBool` for boolean fields in response structs; request parameter structs keep plain `bool` so query encoding is unchanged. Regenerated bindings retype 150 response boolean fields. `PVEBool` has an underlying type of `bool` and a `Bool()` accessor; call sites reading these fields convert with `bool(*field)` or `field.Bool()`.
+
 ## [v3.2.1] — 2026-06-01
 
 ### Changed

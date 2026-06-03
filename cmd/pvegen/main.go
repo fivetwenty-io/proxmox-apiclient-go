@@ -1170,7 +1170,7 @@ func renderResponseType(builder *strings.Builder, endpt endpoint) {
 		if ret.Items != nil {
 			it, err := goTypeFor(ret.Items)
 			if err == nil {
-				inner = it
+				inner = responseBoolType(it)
 			}
 		}
 
@@ -1208,6 +1208,12 @@ func renderObjectFields(objSchema *schema) (string, error) {
 			// For response shapes, unknown types fall back to RawMessage.
 			goType = goTypeRawMessage
 		}
+
+		// Response booleans use the tolerant client.PVEBool: the PVE API renders
+		// booleans inconsistently (true/false, 1/0, "1"/"0", ...), so a plain
+		// bool fails to decode real get-by-id payloads. Request params keep plain
+		// bool (see emitRegularFields); only response shapes are retyped.
+		goType = responseBoolType(goType)
 
 		opt := isOptional(prop)
 		if opt && !isAlreadyNilable(goType) {
@@ -1457,6 +1463,22 @@ func goTypeFor(objSchema *schema) (string, error) {
 		return goTypeRawMessage, nil
 	default:
 		return goTypeRawMessage, nil
+	}
+}
+
+// responseBoolType rewrites a bool Go type produced by goTypeFor into the
+// tolerant client.PVEBool used in response shapes. Scalar "bool" and slice
+// "[]bool" are handled; every other type is returned unchanged. Only response
+// structs call this — request params keep plain bool so query encoding is
+// unaffected.
+func responseBoolType(goType string) string {
+	switch goType {
+	case "bool":
+		return "client.PVEBool"
+	case "[]bool":
+		return "[]client.PVEBool"
+	default:
+		return goType
 	}
 }
 
