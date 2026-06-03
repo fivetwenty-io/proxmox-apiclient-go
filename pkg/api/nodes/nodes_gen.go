@@ -3314,7 +3314,7 @@ type ListCephPoolStatusResponse struct {
 	// TargetSize The estimated target size of the pool for the PG autoscaler.
 	TargetSize *string `json:"target_size,omitempty"`
 	// TargetSizeRatio The estimated target ratio of the pool for the PG autoscaler.
-	TargetSizeRatio *float64 `json:"target_size_ratio,omitempty"`
+	TargetSizeRatio *client.PVEFloat `json:"target_size_ratio,omitempty"`
 	// UseGmtHitset Set if hitsets use GMT timestamps (for cache-tier pools).
 	UseGmtHitset client.PVEBool `json:"use_gmt_hitset"`
 	// WriteFadviseDontneed Set if the pool sets the FADV_DONTNEED hint on writes.
@@ -6272,7 +6272,7 @@ type ListLxcConfigResponse struct {
 	// Cores The number of cores assigned to the container. A container can use all available cores by default.
 	Cores *int64 `json:"cores,omitempty"`
 	// Cpulimit Limit of CPU usage.  NOTE: If the computer has 2 CPUs, it has a total of '2' CPU time. Value '0' indicates no CPU limit.
-	Cpulimit *float64 `json:"cpulimit,omitempty"`
+	Cpulimit *client.PVEFloat `json:"cpulimit,omitempty"`
 	// Cpuunits CPU weight for a container, will be clamped to [1, 10000] in cgroup v2.
 	Cpuunits *int64 `json:"cpuunits,omitempty"`
 	// Debug Try to be more verbose. For now this only enables debug log-level on start.
@@ -8508,9 +8508,9 @@ func (s *service) ListLxcStatus(ctx context.Context, node string, vmid string) (
 // ListLxcStatusCurrentResponse mirrors the shape returned by GET /nodes/{node}/lxc/{vmid}/status/current.
 type ListLxcStatusCurrentResponse struct {
 	// Cpu Current CPU usage.
-	Cpu *float64 `json:"cpu,omitempty"`
+	Cpu *client.PVEFloat `json:"cpu,omitempty"`
 	// Cpus Maximum usable CPUs.
-	Cpus *float64 `json:"cpus,omitempty"`
+	Cpus *client.PVEFloat `json:"cpus,omitempty"`
 	// Disk Root disk image space-usage in bytes.
 	Disk *int64 `json:"disk,omitempty"`
 	// Diskread The amount of bytes the guest read from it's block devices since the guest was started. (Note: This info is not available for all storage types.)
@@ -8536,15 +8536,15 @@ type ListLxcStatusCurrentResponse struct {
 	// Netout The amount of traffic in bytes that was sent from the guest over the network since it was started.
 	Netout *int64 `json:"netout,omitempty"`
 	// Pressurecpusome CPU Some pressure stall average over the last 10 seconds.
-	Pressurecpusome *float64 `json:"pressurecpusome,omitempty"`
+	Pressurecpusome *client.PVEFloat `json:"pressurecpusome,omitempty"`
 	// Pressureiofull IO Full pressure stall average over the last 10 seconds.
-	Pressureiofull *float64 `json:"pressureiofull,omitempty"`
+	Pressureiofull *client.PVEFloat `json:"pressureiofull,omitempty"`
 	// Pressureiosome IO Some pressure stall average over the last 10 seconds.
-	Pressureiosome *float64 `json:"pressureiosome,omitempty"`
+	Pressureiosome *client.PVEFloat `json:"pressureiosome,omitempty"`
 	// Pressurememoryfull Memory Full pressure stall average over the last 10 seconds.
-	Pressurememoryfull *float64 `json:"pressurememoryfull,omitempty"`
+	Pressurememoryfull *client.PVEFloat `json:"pressurememoryfull,omitempty"`
 	// Pressurememorysome Memory Some pressure stall average over the last 10 seconds.
-	Pressurememorysome *float64 `json:"pressurememorysome,omitempty"`
+	Pressurememorysome *client.PVEFloat `json:"pressurememorysome,omitempty"`
 	// Status LXC Container status.
 	Status string `json:"status"`
 	// Tags The current configured tags, if any.
@@ -11281,7 +11281,7 @@ type ListQemuConfigResponse struct {
 	// Cpu Emulated CPU type.
 	Cpu *string `json:"cpu,omitempty"`
 	// Cpulimit Limit of CPU usage.
-	Cpulimit *float64 `json:"cpulimit,omitempty"`
+	Cpulimit *client.PVEFloat `json:"cpulimit,omitempty"`
 	// Cpuunits CPU weight for a VM, will be clamped to [1, 10000] in cgroup v2.
 	Cpuunits *int64 `json:"cpuunits,omitempty"`
 	// Description Description for the VM. Shown in the web-interface VM's summary. This is saved as comment inside the configuration file.
@@ -11325,7 +11325,7 @@ type ListQemuConfigResponse struct {
 	// Meta Some (read-only) meta-information about this guest.
 	Meta *string `json:"meta,omitempty"`
 	// MigrateDowntime Set maximum tolerated downtime (in seconds) for migrations. Should the migration not be able to converge in the very end, because too much newly dirtied RAM needs to be transferred, the limit will be increased automatically step-by-step until migration can converge. Will be capped to 2000 seconds (maximum in QEMU).
-	MigrateDowntime *float64 `json:"migrate_downtime,omitempty"`
+	MigrateDowntime *client.PVEFloat `json:"migrate_downtime,omitempty"`
 	// MigrateSpeed Set maximum speed (in MB/s) for migrations. Value 0 is no limit.
 	MigrateSpeed *int64 `json:"migrate_speed,omitempty"`
 	// Name Set a name for the VM. Only used on the configuration web interface.
@@ -14422,9 +14422,9 @@ type ListQemuStatusCurrentResponse struct {
 	// Clipboard Enable a specific clipboard. If not set, depending on the display type the SPICE one will be added.
 	Clipboard *string `json:"clipboard,omitempty"`
 	// Cpu Current CPU usage.
-	Cpu *float64 `json:"cpu,omitempty"`
+	Cpu *client.PVEFloat `json:"cpu,omitempty"`
 	// Cpus Maximum usable CPUs.
-	Cpus *float64 `json:"cpus,omitempty"`
+	Cpus *client.PVEFloat `json:"cpus,omitempty"`
 	// Diskread The amount of bytes the guest read from it's block devices since the guest was started. (Note: This info is not available for all storage types.)
 	Diskread *int64 `json:"diskread,omitempty"`
 	// Diskwrite The amount of bytes the guest wrote from it's block devices since the guest was started. (Note: This info is not available for all storage types.)
@@ -14450,17 +14450,17 @@ type ListQemuStatusCurrentResponse struct {
 	// Pid PID of the QEMU process, if the VM is running.
 	Pid *int64 `json:"pid,omitempty"`
 	// Pressurecpufull CPU Full pressure stall average over the last 10 seconds.
-	Pressurecpufull *float64 `json:"pressurecpufull,omitempty"`
+	Pressurecpufull *client.PVEFloat `json:"pressurecpufull,omitempty"`
 	// Pressurecpusome CPU Some pressure stall average over the last 10 seconds.
-	Pressurecpusome *float64 `json:"pressurecpusome,omitempty"`
+	Pressurecpusome *client.PVEFloat `json:"pressurecpusome,omitempty"`
 	// Pressureiofull IO Full pressure stall average over the last 10 seconds.
-	Pressureiofull *float64 `json:"pressureiofull,omitempty"`
+	Pressureiofull *client.PVEFloat `json:"pressureiofull,omitempty"`
 	// Pressureiosome IO Some pressure stall average over the last 10 seconds.
-	Pressureiosome *float64 `json:"pressureiosome,omitempty"`
+	Pressureiosome *client.PVEFloat `json:"pressureiosome,omitempty"`
 	// Pressurememoryfull Memory Full pressure stall average over the last 10 seconds.
-	Pressurememoryfull *float64 `json:"pressurememoryfull,omitempty"`
+	Pressurememoryfull *client.PVEFloat `json:"pressurememoryfull,omitempty"`
 	// Pressurememorysome Memory Some pressure stall average over the last 10 seconds.
-	Pressurememorysome *float64 `json:"pressurememorysome,omitempty"`
+	Pressurememorysome *client.PVEFloat `json:"pressurememorysome,omitempty"`
 	// Qmpstatus VM run state from the 'query-status' QMP monitor command.
 	Qmpstatus *string `json:"qmpstatus,omitempty"`
 	// RunningMachine The currently running machine type (if running).
@@ -16676,7 +16676,7 @@ type ListStatusResponse struct {
 	// BootInfo Meta-information about the boot mode.
 	BootInfo json.RawMessage `json:"boot-info"`
 	// Cpu The current cpu usage.
-	Cpu     float64         `json:"cpu"`
+	Cpu     client.PVEFloat `json:"cpu"`
 	Cpuinfo json.RawMessage `json:"cpuinfo"`
 	// CurrentKernel Meta-information about the currently booted kernel of this node.
 	CurrentKernel json.RawMessage `json:"current-kernel"`

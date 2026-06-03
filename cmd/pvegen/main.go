@@ -1170,7 +1170,7 @@ func renderResponseType(builder *strings.Builder, endpt endpoint) {
 		if ret.Items != nil {
 			it, err := goTypeFor(ret.Items)
 			if err == nil {
-				inner = responseBoolType(it)
+				inner = responseFloatType(responseBoolType(it))
 			}
 		}
 
@@ -1209,11 +1209,13 @@ func renderObjectFields(objSchema *schema) (string, error) {
 			goType = goTypeRawMessage
 		}
 
-		// Response booleans use the tolerant client.PVEBool: the PVE API renders
-		// booleans inconsistently (true/false, 1/0, "1"/"0", ...), so a plain
-		// bool fails to decode real get-by-id payloads. Request params keep plain
-		// bool (see emitRegularFields); only response shapes are retyped.
-		goType = responseBoolType(goType)
+		// Response booleans and floats use the tolerant client.PVEBool and
+		// client.PVEFloat: the PVE API renders booleans (true/false, 1/0,
+		// "1"/"0", ...) and documented numbers (PSI pressure metrics arrive as
+		// strings) inconsistently, so plain bool/float64 fail to decode real
+		// get-by-id payloads. Request params keep plain types (see
+		// emitRegularFields); only response shapes are retyped.
+		goType = responseFloatType(responseBoolType(goType))
 
 		opt := isOptional(prop)
 		if opt && !isAlreadyNilable(goType) {
@@ -1477,6 +1479,24 @@ func responseBoolType(goType string) string {
 		return "client.PVEBool"
 	case "[]bool":
 		return "[]client.PVEBool"
+	default:
+		return goType
+	}
+}
+
+// responseFloatType rewrites a float Go type produced by goTypeFor into the
+// tolerant client.PVEFloat used in response shapes. Scalar "float64" and slice
+// "[]float64" are handled; every other type is returned unchanged. Only response
+// structs call this — request params keep plain float64 so query encoding is
+// unaffected. PVE renders documented numbers inconsistently (notably PSI
+// pressure metrics arrive as strings), so a plain float64 fails to decode real
+// payloads.
+func responseFloatType(goType string) string {
+	switch goType {
+	case "float64":
+		return "client.PVEFloat"
+	case "[]float64":
+		return "[]client.PVEFloat"
 	default:
 		return goType
 	}

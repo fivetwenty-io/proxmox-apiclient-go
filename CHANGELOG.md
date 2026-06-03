@@ -5,6 +5,16 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v3.2.5] — 2026-06-03
+
+### Fixed
+
+- Response numbers now decode the JSON encodings the Proxmox VE API emits. As with booleans in v3.2.4, PVE renders documented numbers inconsistently — most notably the pressure-stall (PSI) metrics on container and VM status (`pressurecpusome`, `pressureiofull`, …) arrive as JSON strings rather than numbers — which caused typed status responses (for example `ListLxcStatusCurrent`) to fail with `cannot unmarshal string into Go struct field ... of type float64` against real payloads. A new tolerant `client.PVEFloat` type accepts both the numeric and string forms (and an empty string as `0`) and marshals back out as a native JSON number.
+
+### Changed
+
+- The generator (`cmd/pvegen`) now emits `*client.PVEFloat` for floating-point fields in response structs; request parameter structs keep plain `float64` so query encoding is unchanged. Regenerated bindings retype 24 response float fields. `PVEFloat` has an underlying type of `float64` and a `Float()` accessor; call sites reading these fields convert with `float64(*field)`, `field.Float()`, or — for a pointer — the direct conversion `(*float64)(field)`.
+
 ## [v3.2.4] — 2026-06-03
 
 ### Fixed

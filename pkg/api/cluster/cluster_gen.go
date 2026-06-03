@@ -8224,7 +8224,7 @@ type GetReplicationResponse struct {
 	// Jobnum Unique, sequential ID assigned to each job.
 	Jobnum int64 `json:"jobnum"`
 	// Rate Rate limit in mbps (megabytes per second) as floating point number.
-	Rate *float64 `json:"rate,omitempty"`
+	Rate *client.PVEFloat `json:"rate,omitempty"`
 	// RemoveJob Mark the replication job for removal. The job will remove all local replication snapshots. When set to 'full', it also tries to remove replicated volumes on the target. The job then removes itself from the configuration file.
 	RemoveJob *string `json:"remove_job,omitempty"`
 	// Schedule Storage replication schedule. The format is a subset of `systemd` calendar events.
@@ -9198,11 +9198,11 @@ type GetSdnFabricsFabricResponse struct {
 	// Area OSPF area. Either a IPv4 address or a 32-bit number. Gets validated in rust.
 	Area *string `json:"area,omitempty"`
 	// CsnpInterval The csnp_interval property for Openfabric
-	CsnpInterval *float64 `json:"csnp_interval,omitempty"`
+	CsnpInterval *client.PVEFloat `json:"csnp_interval,omitempty"`
 	// Digest Prevent changes if current configuration file has a different digest. This can be used to prevent concurrent modifications.
 	Digest *string `json:"digest,omitempty"`
 	// HelloInterval The hello_interval property for Openfabric
-	HelloInterval *float64 `json:"hello_interval,omitempty"`
+	HelloInterval *client.PVEFloat `json:"hello_interval,omitempty"`
 	// Id Identifier for SDN fabrics
 	Id string `json:"id"`
 	// Ip6Prefix The IP prefix for Node IPs
@@ -9212,7 +9212,7 @@ type GetSdnFabricsFabricResponse struct {
 	// LockToken the token for unlocking the global SDN configuration
 	LockToken *string `json:"lock-token,omitempty"`
 	// PersistentKeepalive A seconds interval, between 1 and 65535 inclusive, of how often to send an authenticated empty packet to the peer for the purpose of keeping a stateful firewall or NAT mapping valid persistently. For example, if the interface very rarely sends traffic, but it might at anytime receive traffic from another node, and it is behind NAT, the interface might benefit from having a persistent keepalive interval of 25 seconds. If unset or set to 0, it is turned off
-	PersistentKeepalive *float64 `json:"persistent_keepalive,omitempty"`
+	PersistentKeepalive *client.PVEFloat `json:"persistent_keepalive,omitempty"`
 	// Protocol Type of configuration entry in an SDN Fabric section config
 	Protocol     string            `json:"protocol"`
 	Redistribute []json.RawMessage `json:"redistribute"`
