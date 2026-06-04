@@ -551,3 +551,181 @@ func TestWaitTask_UPIDPreservedInStatus(t *testing.T) {
 		t.Errorf("UpID: want %q, got %q", upid, taskStatus.UpID)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// GetStatus — single-shot task status read (§7.28 adaptive-poll surface)
+// ---------------------------------------------------------------------------
+
+// TestGetStatus_Running verifies that GetStatus returns a non-nil Status with
+// Status=="running" and a nil error when the task is still in progress.
+func TestGetStatus_Running(t *testing.T) {
+	t.Parallel()
+
+	const node = "pve1"
+	const upid = "UPID:pve1:0:0:0:0:0:0:root@pam"
+
+	apiPath := "/api2/json/nodes/" + node + "/tasks/" + upid + "/status"
+
+	srv := newTestHTTPServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != apiPath {
+			http.Error(w, "bad path", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data":    map[string]any{"status": "running", "progress": 0.42},
+			"success": 1,
+		})
+	}))
+
+	svc := tasks.New(newTestClient(t, srv))
+
+	st, err := svc.GetStatus(context.Background(), node, upid)
+	if err != nil {
+		t.Fatalf("GetStatus running: unexpected error: %v", err)
+	}
+
+	if st.Status != "running" {
+		t.Errorf("Status = %q, want %q", st.Status, "running")
+	}
+
+	if st.Progress < 0.41 || st.Progress > 0.43 {
+		t.Errorf("Progress = %v, want ~0.42", st.Progress)
+	}
+
+	if st.UpID != upid {
+		t.Errorf("UpID = %q, want %q", st.UpID, upid)
+	}
+}
+
+// TestGetStatus_Stopped verifies that GetStatus returns a Status with
+// Status=="stopped" and ExitStatus=="OK" without error when task is done.
+func TestGetStatus_Stopped(t *testing.T) {
+	t.Parallel()
+
+	const node = "pve1"
+	const upid = "UPID:pve1:0:0:0:0:0:0:root@pam"
+
+	apiPath := "/api2/json/nodes/" + node + "/tasks/" + upid + "/status"
+
+	srv := newTestHTTPServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != apiPath {
+			http.Error(w, "bad path", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data":    map[string]any{"status": "stopped", "exitstatus": "OK"},
+			"success": 1,
+		})
+	}))
+
+	svc := tasks.New(newTestClient(t, srv))
+
+	st, err := svc.GetStatus(context.Background(), node, upid)
+	if err != nil {
+		t.Fatalf("GetStatus stopped: unexpected error: %v", err)
+	}
+
+	if st.Status != "stopped" {
+		t.Errorf("Status = %q, want %q", st.Status, "stopped")
+	}
+
+	if st.ExitStatus != "OK" {
+		t.Errorf("ExitStatus = %q, want %q", st.ExitStatus, "OK")
+	}
+}
+
+// TestGetStatus_FailedTask verifies that GetStatus returns a Status with
+// ExitStatus=="FAILED" and a nil error — GetStatus never synthesises errTaskFailed.
+func TestGetStatus_FailedTask(t *testing.T) {
+	t.Parallel()
+
+	const node = "pve1"
+	const upid = "UPID:pve1:0:0:0:0:0:0:root@pam"
+
+	apiPath := "/api2/json/nodes/" + node + "/tasks/" + upid + "/status"
+
+	srv := newTestHTTPServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != apiPath {
+			http.Error(w, "bad path", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data":    map[string]any{"status": "stopped", "exitstatus": "FAILED"},
+			"success": 1,
+		})
+	}))
+
+	svc := tasks.New(newTestClient(t, srv))
+
+	st, err := svc.GetStatus(context.Background(), node, upid)
+	if err != nil {
+		t.Fatalf("GetStatus failed-task: expected nil error from GetStatus, got: %v", err)
+	}
+
+	if st.ExitStatus != "FAILED" {
+		t.Errorf("ExitStatus = %q, want %q", st.ExitStatus, "FAILED")
+	}
+}
+
+// TestGetStatus_ZeroProgressWhenAbsent verifies that absent progress field
+// in the API response yields Progress==0 (parseProgress default).
+func TestGetStatus_ZeroProgressWhenAbsent(t *testing.T) {
+	t.Parallel()
+
+	const node = "pve1"
+	const upid = "UPID:pve1:0:0:0:0:0:0:root@pam"
+
+	apiPath := "/api2/json/nodes/" + node + "/tasks/" + upid + "/status"
+
+	srv := newTestHTTPServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != apiPath {
+			http.Error(w, "bad path", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		// No "progress" key — PVE omits it when not applicable.
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data":    map[string]any{"status": "running"},
+			"success": 1,
+		})
+	}))
+
+	svc := tasks.New(newTestClient(t, srv))
+
+	st, err := svc.GetStatus(context.Background(), node, upid)
+	if err != nil {
+		t.Fatalf("GetStatus no-progress: unexpected error: %v", err)
+	}
+
+	if st.Progress != 0 {
+		t.Errorf("Progress = %v, want 0 when field absent", st.Progress)
+	}
+}
+
+// TestGetStatus_ContextCancellation verifies that a cancelled context propagates
+// as an error from GetStatus.
+func TestGetStatus_ContextCancellation(t *testing.T) {
+	t.Parallel()
+
+	const node = "pve1"
+	const upid = "UPID:pve1:0:0:0:0:0:0:root@pam"
+
+	// Server that blocks until the test ends — ensures cancellation wins.
+	srv := newTestHTTPServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+		http.Error(w, "canceled", http.StatusGatewayTimeout)
+	}))
+
+	svc := tasks.New(newTestClient(t, srv))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	_, err := svc.GetStatus(ctx, node, upid)
+	if err == nil {
+		t.Error("GetStatus context-cancel: expected error, got nil")
+	}
+}

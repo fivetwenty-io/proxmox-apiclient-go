@@ -3558,3 +3558,167 @@ func TestDo_GetHotPath_SliceRepeatedKeys(t *testing.T) {
 		t.Errorf("found Go-style slice in query, expected repeated keys: %q", gotQuery)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// createHTTPTransport — §7.30 transport-tuning knob mapping
+// ---------------------------------------------------------------------------
+
+// TestCreateHTTPTransport_ZeroKnobs asserts that when all new transport knobs
+// are zero the produced transport is equivalent to the baseline (MaxIdleConns==
+// KeepAlive, MaxIdleConnsPerHost==KeepAlive, IdleConnTimeout==LongTimeout(),
+// TLSHandshakeTimeout==0, DialContext==nil).
+func TestCreateHTTPTransport_ZeroKnobs(t *testing.T) {
+	t.Parallel()
+
+	opts := &Options{
+		KeepAlive: 7,
+		// All new knobs intentionally left zero.
+	}
+
+	tr := createHTTPTransport(opts)
+
+	if tr.MaxIdleConns != 7 {
+		t.Errorf("MaxIdleConns = %d, want 7", tr.MaxIdleConns)
+	}
+
+	if tr.MaxIdleConnsPerHost != 7 {
+		t.Errorf("MaxIdleConnsPerHost = %d, want 7 (KeepAlive fallback)", tr.MaxIdleConnsPerHost)
+	}
+
+	if tr.IdleConnTimeout != constants.LongTimeout() {
+		t.Errorf("IdleConnTimeout = %v, want %v", tr.IdleConnTimeout, constants.LongTimeout())
+	}
+
+	if tr.TLSHandshakeTimeout != 0 {
+		t.Errorf("TLSHandshakeTimeout = %v, want 0 (Go default)", tr.TLSHandshakeTimeout)
+	}
+
+	if tr.DialContext != nil {
+		t.Errorf("DialContext = non-nil, want nil (no dial knobs set)")
+	}
+}
+
+// TestCreateHTTPTransport_Knobs_MaxIdleConnsPerHost asserts that a non-zero
+// MaxIdleConnsPerHost overrides the KeepAlive fallback.
+func TestCreateHTTPTransport_Knobs_MaxIdleConnsPerHost(t *testing.T) {
+	t.Parallel()
+
+	opts := &Options{
+		KeepAlive:           5,
+		MaxIdleConnsPerHost: 20,
+	}
+
+	tr := createHTTPTransport(opts)
+
+	if tr.MaxIdleConnsPerHost != 20 {
+		t.Errorf("MaxIdleConnsPerHost = %d, want 20", tr.MaxIdleConnsPerHost)
+	}
+
+	// MaxIdleConns still tracks KeepAlive.
+	if tr.MaxIdleConns != 5 {
+		t.Errorf("MaxIdleConns = %d, want 5 (KeepAlive)", tr.MaxIdleConns)
+	}
+}
+
+// TestCreateHTTPTransport_Knobs_IdleConnTimeout asserts that a non-zero
+// IdleConnTimeoutSec sets the transport field to the expected duration.
+func TestCreateHTTPTransport_Knobs_IdleConnTimeout(t *testing.T) {
+	t.Parallel()
+
+	opts := &Options{
+		KeepAlive:          5,
+		IdleConnTimeoutSec: 120,
+	}
+
+	tr := createHTTPTransport(opts)
+
+	want := 120 * time.Second
+	if tr.IdleConnTimeout != want {
+		t.Errorf("IdleConnTimeout = %v, want %v", tr.IdleConnTimeout, want)
+	}
+}
+
+// TestCreateHTTPTransport_Knobs_TLSHandshakeTimeout asserts that a non-zero
+// TLSHandshakeTimeoutSec sets the transport field to the expected duration.
+func TestCreateHTTPTransport_Knobs_TLSHandshakeTimeout(t *testing.T) {
+	t.Parallel()
+
+	opts := &Options{
+		KeepAlive:              5,
+		TLSHandshakeTimeoutSec: 15,
+	}
+
+	tr := createHTTPTransport(opts)
+
+	want := 15 * time.Second
+	if tr.TLSHandshakeTimeout != want {
+		t.Errorf("TLSHandshakeTimeout = %v, want %v", tr.TLSHandshakeTimeout, want)
+	}
+}
+
+// TestCreateHTTPTransport_Knobs_DialTimeout asserts that a non-zero
+// DialTimeoutSec causes DialContext to be set (non-nil).
+func TestCreateHTTPTransport_Knobs_DialTimeout(t *testing.T) {
+	t.Parallel()
+
+	opts := &Options{
+		KeepAlive:      5,
+		DialTimeoutSec: 10,
+	}
+
+	tr := createHTTPTransport(opts)
+
+	if tr.DialContext == nil {
+		t.Error("DialContext = nil, want non-nil when DialTimeoutSec > 0")
+	}
+}
+
+// TestCreateHTTPTransport_Knobs_TCPKeepAlive asserts that a non-zero
+// TCPKeepAliveSec causes DialContext to be set (non-nil).
+func TestCreateHTTPTransport_Knobs_TCPKeepAlive(t *testing.T) {
+	t.Parallel()
+
+	opts := &Options{
+		KeepAlive:       5,
+		TCPKeepAliveSec: 30,
+	}
+
+	tr := createHTTPTransport(opts)
+
+	if tr.DialContext == nil {
+		t.Error("DialContext = nil, want non-nil when TCPKeepAliveSec > 0")
+	}
+}
+
+// TestCreateHTTPTransport_Knobs_AllSet exercises all five new knobs together,
+// confirming each field receives its expected value.
+func TestCreateHTTPTransport_Knobs_AllSet(t *testing.T) {
+	t.Parallel()
+
+	opts := &Options{
+		KeepAlive:              5,
+		DialTimeoutSec:         10,
+		TLSHandshakeTimeoutSec: 15,
+		MaxIdleConnsPerHost:    20,
+		IdleConnTimeoutSec:     120,
+		TCPKeepAliveSec:        30,
+	}
+
+	tr := createHTTPTransport(opts)
+
+	if tr.MaxIdleConnsPerHost != 20 {
+		t.Errorf("MaxIdleConnsPerHost = %d, want 20", tr.MaxIdleConnsPerHost)
+	}
+
+	if tr.IdleConnTimeout != 120*time.Second {
+		t.Errorf("IdleConnTimeout = %v, want 120s", tr.IdleConnTimeout)
+	}
+
+	if tr.TLSHandshakeTimeout != 15*time.Second {
+		t.Errorf("TLSHandshakeTimeout = %v, want 15s", tr.TLSHandshakeTimeout)
+	}
+
+	if tr.DialContext == nil {
+		t.Error("DialContext = nil, want non-nil when DialTimeoutSec and TCPKeepAliveSec > 0")
+	}
+}
