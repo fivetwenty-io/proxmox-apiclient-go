@@ -556,3 +556,49 @@ func TestCovCloseWithCacheEnabled(t *testing.T) {
 		t.Fatalf("Close() second call: %v", secondCloseErr)
 	}
 }
+
+// TestCovSetAndRemoveHeader verifies SetHeader injects a custom header on every
+// outgoing request through the public Client and RemoveHeader clears it.
+func TestCovSetAndRemoveHeader(t *testing.T) {
+	t.Parallel()
+
+	var lastUA atomic.Value
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api2/json/test", func(w http.ResponseWriter, r *http.Request) {
+		lastUA.Store(r.Header.Get("User-Agent"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":"ok","success":1}`))
+	})
+
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	cli, err := client.NewClient(optsFromServer(srv.URL))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+
+	const customUA = "bosh-pve-cpi/test"
+	cli.SetHeader("User-Agent", customUA)
+
+	_, setErr := cli.GetCtx(context.Background(), "/test", nil)
+	if setErr != nil {
+		t.Fatalf("GetCtx after SetHeader: %v", setErr)
+	}
+
+	if got, _ := lastUA.Load().(string); got != customUA {
+		t.Errorf("User-Agent on wire = %q, want %q", got, customUA)
+	}
+
+	cli.RemoveHeader("User-Agent")
+
+	_, removeErr := cli.GetCtx(context.Background(), "/test", nil)
+	if removeErr != nil {
+		t.Fatalf("GetCtx after RemoveHeader: %v", removeErr)
+	}
+
+	if got, _ := lastUA.Load().(string); got == customUA {
+		t.Errorf("User-Agent still %q after RemoveHeader; want it cleared/defaulted", customUA)
+	}
+}

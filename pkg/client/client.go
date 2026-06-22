@@ -67,6 +67,13 @@ type Client interface {
 	ClearCache()
 	CacheStats() *CacheStats
 
+	// Header control. SetHeader adds key/value to every outgoing request;
+	// RemoveHeader removes a previously set header. Both are safe for
+	// concurrent use. Useful for setting a custom User-Agent at construction
+	// time, among other things.
+	SetHeader(key, value string)
+	RemoveHeader(key string)
+
 	// Lifecycle. Close releases background resources (response-cache cleanup
 	// goroutine and idle HTTP connections). Safe to call more than once.
 	Close() error
@@ -389,6 +396,16 @@ func (c *client) ClearCache() {
 // CacheStats returns current cache statistics.
 func (c *client) CacheStats() *CacheStats {
 	return c.httpClient.CacheStats()
+}
+
+// SetHeader adds key/value to every outgoing request. Safe for concurrent use.
+func (c *client) SetHeader(key, value string) {
+	c.httpClient.SetHeader(key, value)
+}
+
+// RemoveHeader removes a previously set custom header. Safe for concurrent use.
+func (c *client) RemoveHeader(key string) {
+	c.httpClient.RemoveHeader(key)
 }
 
 // Close releases background resources held by the client (the response-cache
