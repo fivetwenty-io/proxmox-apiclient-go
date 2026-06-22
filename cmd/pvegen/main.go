@@ -1267,7 +1267,13 @@ func renderMethodBodyParams(builder *strings.Builder, pkgName string, endpt endp
 		fmt.Fprintf(builder, "\t\t\treturn %s fmt.Errorf(\"%s.%s: marshal params: %%w\", err)\n",
 			zeroReturnExpr(respGo), pkgName, endpt.GoMethod)
 		builder.WriteString("\t\t}\n")
-		builder.WriteString("\t\terr = json.Unmarshal(raw, &body)\n")
+		// Decode with UseNumber so integer params keep their exact digits.
+		// Plain Unmarshal turns every JSON number into float64, which the
+		// form encoder renders in scientific notation for values >= 1e6
+		// (e.g. bwlimit=1048576 -> "1.048576e+06"), which PVE rejects.
+		builder.WriteString("\t\tdec := json.NewDecoder(strings.NewReader(string(raw)))\n")
+		builder.WriteString("\t\tdec.UseNumber()\n")
+		builder.WriteString("\t\terr = dec.Decode(&body)\n")
 		builder.WriteString("\t\tif err != nil {\n")
 		fmt.Fprintf(builder, "\t\t\treturn %s fmt.Errorf(\"%s.%s: decode params: %%w\", err)\n",
 			zeroReturnExpr(respGo), pkgName, endpt.GoMethod)

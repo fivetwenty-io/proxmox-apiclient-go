@@ -5,6 +5,16 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v3.2.8] — 2026-06-22
+
+### Fixed
+
+- Integer request parameters of 1,000,000 or greater are no longer transmitted in scientific notation. The generated bindings build the request body by marshaling the typed `*Params` struct to JSON and unmarshaling into `map[string]interface{}`; the default `encoding/json` decode turned every number into `float64`, and the form encoder's fallback (`fmt.Sprintf("%v", float64)`) rendered any value `>= 1e6` as e.g. `1.048576e+06`, which PVE rejects. This silently broke realistic calls such as `bwlimit=1048576` on backup/vzdump, all UNIX-epoch parameters (`expire`, task `since`/`until`, firewall-log `since`/`until`), and `nf-conntrack-max`. As with the booleans of v3.2.4 and numbers of v3.2.5, this completes the request-side counterpart to those response-side fixes.
+
+### Changed
+
+- The generator (`cmd/pvegen`) now decodes request params with a `json.Decoder` configured via `UseNumber()`, so integers reach the form encoder as `json.Number` and keep their exact digits. The form encoder (`internal/http`) gained `json.Number`, `float64`, and `float32` cases that emit plain decimal notation (never an exponent), which also hardens any hand-written body map that still decodes without `UseNumber`. Regenerated bindings change only the param-decode line in each method; no exported symbols changed and encoding of every other type is identical.
+
 ## [v3.2.5] — 2026-06-03
 
 ### Fixed

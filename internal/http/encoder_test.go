@@ -1,8 +1,10 @@
 package http //nolint:testpackage // white-box tests: must access unexported encodeParams, encodeSingleValue, encodeNestedMap
 
 import (
+	"encoding/json"
 	"net/url"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -159,9 +161,9 @@ func TestEncodeParams_DefaultFallback(t *testing.T) {
 	t.Parallel()
 
 	got := encodeParams(map[string]interface{}{
-		"count": 42,
-		"ratio": 3.14,
-		"name":  "proxmox",
+		"count":      42,
+		testEncRatio: 3.14,
+		"name":       "proxmox",
 	})
 
 	if got.Get("count") != "42" {
@@ -170,6 +172,101 @@ func TestEncodeParams_DefaultFallback(t *testing.T) {
 
 	if got.Get("name") != "proxmox" {
 		t.Errorf("string: got %q, want proxmox", got.Get("name"))
+	}
+}
+
+// TestEncodeParams_JSONNumberNoScientificNotation guards the regression where
+// large integer params were transmitted in scientific notation. The generated
+// bindings decode params with UseNumber, so numbers reach the encoder as
+// json.Number; they must serialise to their exact decimal digits because PVE
+// rejects values like "1.048576e+06".
+func TestEncodeParams_JSONNumberNoScientificNotation(t *testing.T) {
+	t.Parallel()
+
+	got := encodeParams(map[string]interface{}{
+		testEncBwlimit: json.Number(testEncBwVal), // 1 GiB/s
+		testEncExpire:  json.Number(testEncEpoch), // unix epoch
+		"small":        json.Number("50"),
+		"frac":         json.Number("1.5"),
+	})
+
+	cases := map[string]string{
+		testEncBwlimit: testEncBwVal,
+		testEncExpire:  testEncEpoch,
+		"small":        "50",
+		"frac":         "1.5",
+	}
+	for key, want := range cases {
+		if g := got.Get(key); g != want {
+			t.Errorf("%s: got %q, want %q", key, g, want)
+		}
+	}
+}
+
+// TestEncodeParams_Float64NoScientificNotation covers the defensive float64
+// path (any body map built without UseNumber): a large whole float must still
+// render in plain decimal, never scientific notation.
+func TestEncodeParams_Float64NoScientificNotation(t *testing.T) {
+	t.Parallel()
+
+	got := encodeParams(map[string]interface{}{
+		testEncBwlimit: float64(1048576),
+		testEncExpire:  float64(1700000000),
+		testEncRatio:   float64(2.5),
+	})
+
+	for _, key := range []string{testEncBwlimit, testEncExpire, testEncRatio} {
+		if strings.ContainsAny(got.Get(key), "eE") {
+			t.Errorf("%s: scientific notation leaked: %q", key, got.Get(key))
+		}
+	}
+
+	if got.Get(testEncBwlimit) != testEncBwVal {
+		t.Errorf("bwlimit: got %q, want %s", got.Get(testEncBwlimit), testEncBwVal)
+	}
+
+	if got.Get(testEncExpire) != testEncEpoch {
+		t.Errorf("expire: got %q, want %s", got.Get(testEncExpire), testEncEpoch)
+	}
+}
+
+// TestEncodeParams_MarshalRoundTripMirrorsGeneratedCode reproduces the exact
+// pipeline the generated bindings use (json.Marshal of a *Params struct, then
+// a UseNumber decode into the body map, then encodeParams) and asserts a large
+// integer field survives intact.
+func TestEncodeParams_MarshalRoundTripMirrorsGeneratedCode(t *testing.T) {
+	t.Parallel()
+
+	type backupParams struct {
+		Bwlimit *int64 `json:"bwlimit,omitempty"`
+		Expire  *int64 `json:"expire,omitempty"`
+	}
+
+	bw := int64(1048576)
+	expire := int64(1700000000)
+
+	raw, err := json.Marshal(&backupParams{Bwlimit: &bw, Expire: &expire})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var body map[string]interface{}
+
+	dec := json.NewDecoder(strings.NewReader(string(raw)))
+	dec.UseNumber()
+
+	err = dec.Decode(&body)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	got := encodeParams(body)
+	if got.Get(testEncBwlimit) != testEncBwVal {
+		t.Errorf("bwlimit: got %q, want %s", got.Get(testEncBwlimit), testEncBwVal)
+	}
+
+	if got.Get(testEncExpire) != testEncEpoch {
+		t.Errorf("expire: got %q, want %s", got.Get(testEncExpire), testEncEpoch)
 	}
 }
 

@@ -270,7 +270,9 @@ func (s *service) UpdateAcl(ctx context.Context, params *UpdateAclParams) error 
 		if err != nil {
 			return fmt.Errorf("access.UpdateAcl: marshal params: %w", err)
 		}
-		err = json.Unmarshal(raw, &body)
+		dec := json.NewDecoder(strings.NewReader(string(raw)))
+		dec.UseNumber()
+		err = dec.Decode(&body)
 		if err != nil {
 			return fmt.Errorf("access.UpdateAcl: decode params: %w", err)
 		}
@@ -421,7 +423,9 @@ func (s *service) CreateDomains(ctx context.Context, params *CreateDomainsParams
 		if err != nil {
 			return fmt.Errorf("access.CreateDomains: marshal params: %w", err)
 		}
-		err = json.Unmarshal(raw, &body)
+		dec := json.NewDecoder(strings.NewReader(string(raw)))
+		dec.UseNumber()
+		err = dec.Decode(&body)
 		if err != nil {
 			return fmt.Errorf("access.CreateDomains: decode params: %w", err)
 		}
@@ -588,7 +592,9 @@ func (s *service) UpdateDomains(ctx context.Context, realm string, params *Updat
 		if err != nil {
 			return fmt.Errorf("access.UpdateDomains: marshal params: %w", err)
 		}
-		err = json.Unmarshal(raw, &body)
+		dec := json.NewDecoder(strings.NewReader(string(raw)))
+		dec.UseNumber()
+		err = dec.Decode(&body)
 		if err != nil {
 			return fmt.Errorf("access.UpdateDomains: decode params: %w", err)
 		}
@@ -635,7 +641,9 @@ func (s *service) CreateDomainsSync(ctx context.Context, realm string, params *C
 		if err != nil {
 			return nil, fmt.Errorf("access.CreateDomainsSync: marshal params: %w", err)
 		}
-		err = json.Unmarshal(raw, &body)
+		dec := json.NewDecoder(strings.NewReader(string(raw)))
+		dec.UseNumber()
+		err = dec.Decode(&body)
 		if err != nil {
 			return nil, fmt.Errorf("access.CreateDomainsSync: decode params: %w", err)
 		}
@@ -714,7 +722,9 @@ func (s *service) CreateGroups(ctx context.Context, params *CreateGroupsParams) 
 		if err != nil {
 			return fmt.Errorf("access.CreateGroups: marshal params: %w", err)
 		}
-		err = json.Unmarshal(raw, &body)
+		dec := json.NewDecoder(strings.NewReader(string(raw)))
+		dec.UseNumber()
+		err = dec.Decode(&body)
 		if err != nil {
 			return fmt.Errorf("access.CreateGroups: decode params: %w", err)
 		}
@@ -800,7 +810,9 @@ func (s *service) UpdateGroups(ctx context.Context, groupid string, params *Upda
 		if err != nil {
 			return fmt.Errorf("access.UpdateGroups: marshal params: %w", err)
 		}
-		err = json.Unmarshal(raw, &body)
+		dec := json.NewDecoder(strings.NewReader(string(raw)))
+		dec.UseNumber()
+		err = dec.Decode(&body)
 		if err != nil {
 			return fmt.Errorf("access.UpdateGroups: decode params: %w", err)
 		}
@@ -872,7 +884,9 @@ func (s *service) CreateOpenidAuthUrl(ctx context.Context, params *CreateOpenidA
 		if err != nil {
 			return nil, fmt.Errorf("access.CreateOpenidAuthUrl: marshal params: %w", err)
 		}
-		err = json.Unmarshal(raw, &body)
+		dec := json.NewDecoder(strings.NewReader(string(raw)))
+		dec.UseNumber()
+		err = dec.Decode(&body)
 		if err != nil {
 			return nil, fmt.Errorf("access.CreateOpenidAuthUrl: decode params: %w", err)
 		}
@@ -925,7 +939,9 @@ func (s *service) CreateOpenidLogin(ctx context.Context, params *CreateOpenidLog
 		if err != nil {
 			return nil, fmt.Errorf("access.CreateOpenidLogin: marshal params: %w", err)
 		}
-		err = json.Unmarshal(raw, &body)
+		dec := json.NewDecoder(strings.NewReader(string(raw)))
+		dec.UseNumber()
+		err = dec.Decode(&body)
 		if err != nil {
 			return nil, fmt.Errorf("access.CreateOpenidLogin: decode params: %w", err)
 		}
@@ -975,7 +991,9 @@ func (s *service) UpdatePassword(ctx context.Context, params *UpdatePasswordPara
 		if err != nil {
 			return fmt.Errorf("access.UpdatePassword: marshal params: %w", err)
 		}
-		err = json.Unmarshal(raw, &body)
+		dec := json.NewDecoder(strings.NewReader(string(raw)))
+		dec.UseNumber()
+		err = dec.Decode(&body)
 		if err != nil {
 			return fmt.Errorf("access.UpdatePassword: decode params: %w", err)
 		}
@@ -1014,7 +1032,9 @@ func (s *service) ListPermissions(ctx context.Context, params *ListPermissionsPa
 		if err != nil {
 			return nil, fmt.Errorf("access.ListPermissions: marshal params: %w", err)
 		}
-		err = json.Unmarshal(raw, &body)
+		dec := json.NewDecoder(strings.NewReader(string(raw)))
+		dec.UseNumber()
+		err = dec.Decode(&body)
 		if err != nil {
 			return nil, fmt.Errorf("access.ListPermissions: decode params: %w", err)
 		}
@@ -1093,7 +1113,9 @@ func (s *service) CreateRoles(ctx context.Context, params *CreateRolesParams) er
 		if err != nil {
 			return fmt.Errorf("access.CreateRoles: marshal params: %w", err)
 		}
-		err = json.Unmarshal(raw, &body)
+		dec := json.NewDecoder(strings.NewReader(string(raw)))
+		dec.UseNumber()
+		err = dec.Decode(&body)
 		if err != nil {
 			return fmt.Errorf("access.CreateRoles: decode params: %w", err)
 		}
@@ -1225,7 +1247,9 @@ func (s *service) UpdateRoles(ctx context.Context, roleid string, params *Update
 		if err != nil {
 			return fmt.Errorf("access.UpdateRoles: marshal params: %w", err)
 		}
-		err = json.Unmarshal(raw, &body)
+		dec := json.NewDecoder(strings.NewReader(string(raw)))
+		dec.UseNumber()
+		err = dec.Decode(&body)
 		if err != nil {
 			return fmt.Errorf("access.UpdateRoles: decode params: %w", err)
 		}
@@ -1345,7 +1369,9 @@ func (s *service) CreateTfa(ctx context.Context, userid string, params *CreateTf
 		if err != nil {
 			return nil, fmt.Errorf("access.CreateTfa: marshal params: %w", err)
 		}
-		err = json.Unmarshal(raw, &body)
+		dec := json.NewDecoder(strings.NewReader(string(raw)))
+		dec.UseNumber()
+		err = dec.Decode(&body)
 		if err != nil {
 			return nil, fmt.Errorf("access.CreateTfa: decode params: %w", err)
 		}
@@ -1390,7 +1416,9 @@ func (s *service) DeleteTfa(ctx context.Context, userid string, id string, param
 		if err != nil {
 			return fmt.Errorf("access.DeleteTfa: marshal params: %w", err)
 		}
-		err = json.Unmarshal(raw, &body)
+		dec := json.NewDecoder(strings.NewReader(string(raw)))
+		dec.UseNumber()
+		err = dec.Decode(&body)
 		if err != nil {
 			return fmt.Errorf("access.DeleteTfa: decode params: %w", err)
 		}
@@ -1471,7 +1499,9 @@ func (s *service) UpdateTfa(ctx context.Context, userid string, id string, param
 		if err != nil {
 			return fmt.Errorf("access.UpdateTfa: marshal params: %w", err)
 		}
-		err = json.Unmarshal(raw, &body)
+		dec := json.NewDecoder(strings.NewReader(string(raw)))
+		dec.UseNumber()
+		err = dec.Decode(&body)
 		if err != nil {
 			return fmt.Errorf("access.UpdateTfa: decode params: %w", err)
 		}
@@ -1545,7 +1575,9 @@ func (s *service) CreateTicket(ctx context.Context, params *CreateTicketParams) 
 		if err != nil {
 			return nil, fmt.Errorf("access.CreateTicket: marshal params: %w", err)
 		}
-		err = json.Unmarshal(raw, &body)
+		dec := json.NewDecoder(strings.NewReader(string(raw)))
+		dec.UseNumber()
+		err = dec.Decode(&body)
 		if err != nil {
 			return nil, fmt.Errorf("access.CreateTicket: decode params: %w", err)
 		}
@@ -1595,7 +1627,9 @@ func (s *service) ListUsers(ctx context.Context, params *ListUsersParams) (*List
 		if err != nil {
 			return nil, fmt.Errorf("access.ListUsers: marshal params: %w", err)
 		}
-		err = json.Unmarshal(raw, &body)
+		dec := json.NewDecoder(strings.NewReader(string(raw)))
+		dec.UseNumber()
+		err = dec.Decode(&body)
 		if err != nil {
 			return nil, fmt.Errorf("access.ListUsers: decode params: %w", err)
 		}
@@ -1654,7 +1688,9 @@ func (s *service) CreateUsers(ctx context.Context, params *CreateUsersParams) er
 		if err != nil {
 			return fmt.Errorf("access.CreateUsers: marshal params: %w", err)
 		}
-		err = json.Unmarshal(raw, &body)
+		dec := json.NewDecoder(strings.NewReader(string(raw)))
+		dec.UseNumber()
+		err = dec.Decode(&body)
 		if err != nil {
 			return fmt.Errorf("access.CreateUsers: decode params: %w", err)
 		}
@@ -1761,7 +1797,9 @@ func (s *service) UpdateUsers(ctx context.Context, userid string, params *Update
 		if err != nil {
 			return fmt.Errorf("access.UpdateUsers: marshal params: %w", err)
 		}
-		err = json.Unmarshal(raw, &body)
+		dec := json.NewDecoder(strings.NewReader(string(raw)))
+		dec.UseNumber()
+		err = dec.Decode(&body)
 		if err != nil {
 			return fmt.Errorf("access.UpdateUsers: decode params: %w", err)
 		}
@@ -1805,7 +1843,9 @@ func (s *service) ListUsersTfa(ctx context.Context, userid string, params *ListU
 		if err != nil {
 			return nil, fmt.Errorf("access.ListUsersTfa: marshal params: %w", err)
 		}
-		err = json.Unmarshal(raw, &body)
+		dec := json.NewDecoder(strings.NewReader(string(raw)))
+		dec.UseNumber()
+		err = dec.Decode(&body)
 		if err != nil {
 			return nil, fmt.Errorf("access.ListUsersTfa: decode params: %w", err)
 		}
@@ -1951,7 +1991,9 @@ func (s *service) CreateUsersToken(ctx context.Context, userid string, tokenid s
 		if err != nil {
 			return nil, fmt.Errorf("access.CreateUsersToken: marshal params: %w", err)
 		}
-		err = json.Unmarshal(raw, &body)
+		dec := json.NewDecoder(strings.NewReader(string(raw)))
+		dec.UseNumber()
+		err = dec.Decode(&body)
 		if err != nil {
 			return nil, fmt.Errorf("access.CreateUsersToken: decode params: %w", err)
 		}
@@ -2016,7 +2058,9 @@ func (s *service) UpdateUsersToken(ctx context.Context, userid string, tokenid s
 		if err != nil {
 			return nil, fmt.Errorf("access.UpdateUsersToken: marshal params: %w", err)
 		}
-		err = json.Unmarshal(raw, &body)
+		dec := json.NewDecoder(strings.NewReader(string(raw)))
+		dec.UseNumber()
+		err = dec.Decode(&body)
 		if err != nil {
 			return nil, fmt.Errorf("access.UpdateUsersToken: decode params: %w", err)
 		}
@@ -2102,7 +2146,9 @@ func (s *service) CreateVncticket(ctx context.Context, params *CreateVncticketPa
 		if err != nil {
 			return fmt.Errorf("access.CreateVncticket: marshal params: %w", err)
 		}
-		err = json.Unmarshal(raw, &body)
+		dec := json.NewDecoder(strings.NewReader(string(raw)))
+		dec.UseNumber()
+		err = dec.Decode(&body)
 		if err != nil {
 			return fmt.Errorf("access.CreateVncticket: decode params: %w", err)
 		}

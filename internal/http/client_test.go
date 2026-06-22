@@ -49,6 +49,13 @@ const (
 	testEncVMBR0  = "vmbr0"
 	testEncFlag   = "flag"
 	testEncGamma  = "gamma"
+
+	// Numeric-encoding regression test constants.
+	testEncBwlimit = "bwlimit"
+	testEncRatio   = "ratio"
+	testEncExpire  = "expire"
+	testEncBwVal   = "1048576"
+	testEncEpoch   = "1700000000"
 )
 
 // Sentinel errors used in test helpers.
