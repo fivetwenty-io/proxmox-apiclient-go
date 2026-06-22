@@ -29,9 +29,12 @@ func TestPVEFloat_Unmarshal(t *testing.T) {
 
 	for _, tc := range cases {
 		var f client.PVEFloat
-		if err := json.Unmarshal([]byte(tc.in), &f); err != nil {
+
+		err := json.Unmarshal([]byte(tc.in), &f)
+		if err != nil {
 			t.Fatalf("Unmarshal(%s): unexpected error: %v", tc.in, err)
 		}
+
 		if f.Float() != tc.want {
 			t.Errorf("Unmarshal(%s) = %v, want %v", tc.in, f.Float(), tc.want)
 		}
@@ -42,9 +45,12 @@ func TestPVEFloat_UnmarshalNullLeavesValue(t *testing.T) {
 	t.Parallel()
 
 	f := client.PVEFloat(9.0)
-	if err := json.Unmarshal([]byte(`null`), &f); err != nil {
+
+	err := json.Unmarshal([]byte(`null`), &f)
+	if err != nil {
 		t.Fatalf("Unmarshal(null): unexpected error: %v", err)
 	}
+
 	if f.Float() != 9.0 {
 		t.Errorf("Unmarshal(null) changed value to %v, want 9.0", f.Float())
 	}
@@ -59,13 +65,18 @@ func TestPVEFloat_InStruct(t *testing.T) {
 		Cpu      *client.PVEFloat `json:"cpu,omitempty"`
 		Pressure *client.PVEFloat `json:"pressurecpusome,omitempty"`
 	}
+
 	body := `{"cpu":0.0123,"pressurecpusome":"0.42"}`
-	if err := json.Unmarshal([]byte(body), &s); err != nil {
+
+	err := json.Unmarshal([]byte(body), &s)
+	if err != nil {
 		t.Fatalf("Unmarshal struct: %v", err)
 	}
+
 	if s.Cpu == nil || s.Cpu.Float() != 0.0123 {
 		t.Errorf("Cpu = %v, want 0.0123", s.Cpu)
 	}
+
 	if s.Pressure == nil || s.Pressure.Float() != 0.42 {
 		t.Errorf("Pressure = %v, want 0.42", s.Pressure)
 	}
@@ -78,6 +89,7 @@ func TestPVEFloat_Marshal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
+
 	if string(out) != "1.5" {
 		t.Errorf("Marshal(1.5) = %s, want 1.5", out)
 	}
@@ -87,6 +99,7 @@ func TestPVEFloat_Marshal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Marshal(+Inf): %v", err)
 	}
+
 	if string(out) != "0" {
 		t.Errorf("Marshal(+Inf) = %s, want 0", out)
 	}
@@ -96,7 +109,9 @@ func TestPVEFloat_Invalid(t *testing.T) {
 	t.Parallel()
 
 	var f client.PVEFloat
-	if err := json.Unmarshal([]byte(`{}`), &f); err == nil {
+
+	err := json.Unmarshal([]byte(`{}`), &f)
+	if err == nil {
 		t.Error("Unmarshal({}) expected an error, got nil")
 	}
 }

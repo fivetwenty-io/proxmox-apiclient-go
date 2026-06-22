@@ -66,6 +66,10 @@ type Client interface {
 	InvalidateCache(pattern string) int
 	ClearCache()
 	CacheStats() *CacheStats
+
+	// Lifecycle. Close releases background resources (response-cache cleanup
+	// goroutine and idle HTTP connections). Safe to call more than once.
+	Close() error
 }
 
 // Response represents a response from the PVE API.
@@ -91,6 +95,7 @@ type HTTPClient interface {
 	InvalidateCache(pattern string) int
 	ClearCache()
 	CacheStats() *CacheStats
+	Close() error
 }
 
 // Re-export logging types for the public API.
@@ -386,6 +391,18 @@ func (c *client) CacheStats() *CacheStats {
 	return c.httpClient.CacheStats()
 }
 
+// Close releases background resources held by the client (the response-cache
+// cleanup goroutine and idle HTTP connections). It is safe to call more than
+// once. After Close the client should not be used for further requests.
+func (c *client) Close() error {
+	err := c.httpClient.Close()
+	if err != nil {
+		return fmt.Errorf("closing client: %w", err)
+	}
+
+	return nil
+}
+
 func (c *client) call(method, path string, params map[string]interface{}) (*Response, error) {
 	// Make the HTTP request
 	resp, err := c.httpClient.Do(method, path, params)
@@ -475,6 +492,17 @@ func (a *internalHTTPAdapter) ClearCache() {
 func (a *internalHTTPAdapter) CacheStats() *CacheStats {
 	if a.inner != nil {
 		return a.inner.CacheStats()
+	}
+
+	return nil
+}
+
+func (a *internalHTTPAdapter) Close() error {
+	if a.inner != nil {
+		err := a.inner.Close()
+		if err != nil {
+			return fmt.Errorf("closing internal HTTP client: %w", err)
+		}
 	}
 
 	return nil

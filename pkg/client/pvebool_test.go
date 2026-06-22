@@ -34,9 +34,12 @@ func TestPVEBool_Unmarshal(t *testing.T) {
 
 	for _, tc := range cases {
 		var b client.PVEBool
-		if err := json.Unmarshal([]byte(tc.in), &b); err != nil {
+
+		err := json.Unmarshal([]byte(tc.in), &b)
+		if err != nil {
 			t.Fatalf("Unmarshal(%s): unexpected error: %v", tc.in, err)
 		}
+
 		if b.Bool() != tc.want {
 			t.Errorf("Unmarshal(%s) = %v, want %v", tc.in, b.Bool(), tc.want)
 		}
@@ -47,9 +50,12 @@ func TestPVEBool_UnmarshalNullLeavesUnchanged(t *testing.T) {
 	t.Parallel()
 
 	b := client.PVEBool(true)
-	if err := json.Unmarshal([]byte("null"), &b); err != nil {
+
+	err := json.Unmarshal([]byte("null"), &b)
+	if err != nil {
 		t.Fatalf("Unmarshal(null): %v", err)
 	}
+
 	if !b.Bool() {
 		t.Errorf("Unmarshal(null) mutated value to false")
 	}
@@ -62,14 +68,18 @@ func TestPVEBool_UnmarshalInStruct(t *testing.T) {
 		Enable *client.PVEBool `json:"enable,omitempty"`
 		Agent  *client.PVEBool `json:"agent,omitempty"`
 	}
+
 	var r resp
 	// enable as number 1, agent absent.
-	if err := json.Unmarshal([]byte(`{"enable":1}`), &r); err != nil {
+	err := json.Unmarshal([]byte(`{"enable":1}`), &r)
+	if err != nil {
 		t.Fatalf("Unmarshal struct: %v", err)
 	}
+
 	if r.Enable == nil || !r.Enable.Bool() {
 		t.Errorf("Enable = %v, want true", r.Enable)
 	}
+
 	if r.Agent != nil {
 		t.Errorf("Agent = %v, want nil (absent)", r.Agent)
 	}
@@ -82,6 +92,7 @@ func TestPVEBool_Marshal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Marshal(true): %v", err)
 	}
+
 	if string(got) != "true" {
 		t.Errorf("Marshal(true) = %s, want true", got)
 	}
@@ -90,6 +101,7 @@ func TestPVEBool_Marshal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Marshal(false): %v", err)
 	}
+
 	if string(got) != "false" {
 		t.Errorf("Marshal(false) = %s, want false", got)
 	}
@@ -99,7 +111,9 @@ func TestPVEBool_Invalid(t *testing.T) {
 	t.Parallel()
 
 	var b client.PVEBool
-	if err := json.Unmarshal([]byte(`{"x":1}`), &b); err == nil {
+
+	err := json.Unmarshal([]byte(`{"x":1}`), &b)
+	if err == nil {
 		t.Errorf("Unmarshal(object) expected error, got nil")
 	}
 }

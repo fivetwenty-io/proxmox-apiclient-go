@@ -17,11 +17,11 @@ import (
 
 func optsFromServerURL(u string) pveclient.Options {
 	parsed, _ := url.Parse(u)
-	host := strings.Split(parsed.Host, ":")[0]
+	host := parsed.Hostname()
 	port := 0
 
-	if parts := strings.Split(parsed.Host, ":"); len(parts) == 2 {
-		p, _ := strconv.Atoi(parts[1])
+	p, err := strconv.Atoi(parsed.Port())
+	if err == nil {
 		port = p
 	}
 
@@ -64,6 +64,8 @@ const (
 	taskStoppedVal = "stopped"
 	taskRunningVal = "running"
 	taskExitKey    = "exitstatus"
+	taskDataKey    = "data"
+	taskSuccessKey = "success"
 )
 
 // taskStatusHandler returns an http.HandlerFunc that yields runningCount "running" responses
@@ -88,7 +90,7 @@ func taskStatusHandler(path string, runningCount int, exitStatus string) http.Ha
 		}
 
 		writer.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(writer).Encode(map[string]any{"data": data, "success": 1})
+		_ = json.NewEncoder(writer).Encode(map[string]any{taskDataKey: data, taskSuccessKey: 1})
 	}
 }
 
@@ -115,7 +117,7 @@ func TestWaitTaskSuccess(t *testing.T) {
 			data = map[string]any{taskStatusKey: taskStoppedVal, taskExitKey: "OK"}
 		}
 
-		_ = json.NewEncoder(writer).Encode(map[string]any{"data": data, "success": 1})
+		_ = json.NewEncoder(writer).Encode(map[string]any{taskDataKey: data, taskSuccessKey: 1})
 	}))
 	defer srv.Close()
 
@@ -150,11 +152,13 @@ func TestWaitTaskTimeout(t *testing.T) {
 	defer srv.Close()
 
 	parsed, _ := url.Parse(srv.URL)
-	host := strings.Split(parsed.Host, ":")[0]
+	host := parsed.Hostname()
 
 	portNum := 0
-	if parts := strings.Split(parsed.Host, ":"); len(parts) == 2 {
-		portNum, _ = strconv.Atoi(parts[1])
+
+	p, convErr := strconv.Atoi(parsed.Port())
+	if convErr == nil {
+		portNum = p
 	}
 
 	cli, err := pveclient.NewClient(pveclient.Options{Host: host, Port: portNum, Protocol: "http", APIToken: "u@pam!tok=sec"})
@@ -561,20 +565,24 @@ func TestWaitTask_UPIDPreservedInStatus(t *testing.T) {
 func TestGetStatus_Running(t *testing.T) {
 	t.Parallel()
 
-	const node = "pve1"
-	const upid = "UPID:pve1:0:0:0:0:0:0:root@pam"
+	const (
+		node = "pve1"
+		upid = "UPID:pve1:0:0:0:0:0:0:root@pam"
+	)
 
 	apiPath := "/api2/json/nodes/" + node + "/tasks/" + upid + "/status"
 
 	srv := newTestHTTPServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != apiPath {
 			http.Error(w, "bad path", http.StatusNotFound)
+
 			return
 		}
+
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"data":    map[string]any{"status": "running", "progress": 0.42},
-			"success": 1,
+			taskDataKey:    map[string]any{taskStatusKey: taskRunningVal, "progress": 0.42},
+			taskSuccessKey: 1,
 		})
 	}))
 
@@ -603,20 +611,24 @@ func TestGetStatus_Running(t *testing.T) {
 func TestGetStatus_Stopped(t *testing.T) {
 	t.Parallel()
 
-	const node = "pve1"
-	const upid = "UPID:pve1:0:0:0:0:0:0:root@pam"
+	const (
+		node = "pve1"
+		upid = "UPID:pve1:0:0:0:0:0:0:root@pam"
+	)
 
 	apiPath := "/api2/json/nodes/" + node + "/tasks/" + upid + "/status"
 
 	srv := newTestHTTPServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != apiPath {
 			http.Error(w, "bad path", http.StatusNotFound)
+
 			return
 		}
+
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"data":    map[string]any{"status": "stopped", "exitstatus": "OK"},
-			"success": 1,
+			taskDataKey:    map[string]any{taskStatusKey: taskStoppedVal, taskExitKey: "OK"},
+			taskSuccessKey: 1,
 		})
 	}))
 
@@ -641,20 +653,24 @@ func TestGetStatus_Stopped(t *testing.T) {
 func TestGetStatus_FailedTask(t *testing.T) {
 	t.Parallel()
 
-	const node = "pve1"
-	const upid = "UPID:pve1:0:0:0:0:0:0:root@pam"
+	const (
+		node = "pve1"
+		upid = "UPID:pve1:0:0:0:0:0:0:root@pam"
+	)
 
 	apiPath := "/api2/json/nodes/" + node + "/tasks/" + upid + "/status"
 
 	srv := newTestHTTPServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != apiPath {
 			http.Error(w, "bad path", http.StatusNotFound)
+
 			return
 		}
+
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"data":    map[string]any{"status": "stopped", "exitstatus": "FAILED"},
-			"success": 1,
+			taskDataKey:    map[string]any{taskStatusKey: taskStoppedVal, taskExitKey: "FAILED"},
+			taskSuccessKey: 1,
 		})
 	}))
 
@@ -675,21 +691,25 @@ func TestGetStatus_FailedTask(t *testing.T) {
 func TestGetStatus_ZeroProgressWhenAbsent(t *testing.T) {
 	t.Parallel()
 
-	const node = "pve1"
-	const upid = "UPID:pve1:0:0:0:0:0:0:root@pam"
+	const (
+		node = "pve1"
+		upid = "UPID:pve1:0:0:0:0:0:0:root@pam"
+	)
 
 	apiPath := "/api2/json/nodes/" + node + "/tasks/" + upid + "/status"
 
 	srv := newTestHTTPServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != apiPath {
 			http.Error(w, "bad path", http.StatusNotFound)
+
 			return
 		}
+
 		w.Header().Set("Content-Type", "application/json")
 		// No "progress" key — PVE omits it when not applicable.
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"data":    map[string]any{"status": "running"},
-			"success": 1,
+			taskDataKey:    map[string]any{taskStatusKey: taskRunningVal},
+			taskSuccessKey: 1,
 		})
 	}))
 
@@ -710,8 +730,10 @@ func TestGetStatus_ZeroProgressWhenAbsent(t *testing.T) {
 func TestGetStatus_ContextCancellation(t *testing.T) {
 	t.Parallel()
 
-	const node = "pve1"
-	const upid = "UPID:pve1:0:0:0:0:0:0:root@pam"
+	const (
+		node = "pve1"
+		upid = "UPID:pve1:0:0:0:0:0:0:root@pam"
+	)
 
 	// Server that blocks until the test ends — ensures cancellation wins.
 	srv := newTestHTTPServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

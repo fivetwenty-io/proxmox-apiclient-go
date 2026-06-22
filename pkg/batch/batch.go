@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"sync"
 	"time"
@@ -365,8 +366,21 @@ func (e *Executor) executeRequest(ctx context.Context, req *Request) *Response {
 
 	err = json.NewDecoder(httpResp.Body).Decode(&body)
 	if err != nil {
-		// If JSON decode fails, treat as plain text
-		body = json.RawMessage(`""`)
+		if errors.Is(err, io.EOF) {
+			// Empty body (e.g. 204 No Content): not an error.
+			body = json.RawMessage("null")
+		} else {
+			// Body present but not valid JSON. Surface it as an error rather
+			// than silently counting a malformed response as a success.
+			return &Response{
+				ID:         req.ID,
+				StatusCode: httpResp.StatusCode,
+				Headers:    httpResp.Header,
+				Body:       nil,
+				Error:      fmt.Sprintf("failed to decode response body: %v", err),
+				Duration:   time.Since(start),
+			}
+		}
 	}
 
 	return &Response{

@@ -27,15 +27,14 @@ var (
 
 // Stream represents a streaming response handler.
 type Stream struct {
-	reader     io.ReadCloser
-	decoder    Decoder
-	buffer     *bufio.Reader
-	config     *Config
-	closed     bool
-	mu         sync.RWMutex
-	metrics    *Metrics
-	errorChan  chan error
-	cancelFunc context.CancelFunc
+	reader    io.ReadCloser
+	decoder   Decoder
+	buffer    *bufio.Reader
+	config    *Config
+	closed    bool
+	mu        sync.RWMutex
+	metrics   *streamMetrics
+	errorChan chan error
 }
 
 // Config represents stream configuration.
@@ -74,7 +73,15 @@ type Metrics struct {
 	ErrorCount   int64
 	ReadTime     time.Duration
 	LastReadTime time.Time
-	mu           sync.RWMutex
+}
+
+// streamMetrics is the internal, mutex-guarded metrics state. Metrics (the
+// embedded value) is the pure-data snapshot returned by Stream.Metrics, so
+// callers copy a snapshot without copying a lock.
+type streamMetrics struct {
+	Metrics
+
+	mu sync.RWMutex
 }
 
 // Decoder interface for decoding streamed data.
@@ -143,20 +150,14 @@ func New(reader io.ReadCloser, config *Config) *Stream {
 		decoder = &JSONLinesDecoder{}
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-
 	stream := &Stream{
-		reader:     reader,
-		decoder:    decoder,
-		buffer:     bufio.NewReaderSize(reader, config.BufferSize),
-		config:     config,
-		metrics:    &Metrics{},
-		errorChan:  make(chan error, 1),
-		cancelFunc: cancel,
+		reader:    reader,
+		decoder:   decoder,
+		buffer:    bufio.NewReaderSize(reader, config.BufferSize),
+		config:    config,
+		metrics:   &streamMetrics{},
+		errorChan: make(chan error, 1),
 	}
-
-	// Start metrics collector if needed
-	go stream.collectMetrics(ctx)
 
 	return stream
 }
@@ -358,13 +359,7 @@ func (s *Stream) Metrics() Metrics {
 	s.metrics.mu.RLock()
 	defer s.metrics.mu.RUnlock()
 
-	return Metrics{
-		ItemsRead:    s.metrics.ItemsRead,
-		BytesRead:    s.metrics.BytesRead,
-		ErrorCount:   s.metrics.ErrorCount,
-		ReadTime:     s.metrics.ReadTime,
-		LastReadTime: s.metrics.LastReadTime,
-	}
+	return s.metrics.Metrics
 }
 
 // Close closes the stream.
@@ -377,7 +372,6 @@ func (s *Stream) Close() error {
 	}
 
 	s.closed = true
-	s.cancelFunc()
 	close(s.errorChan)
 
 	err := s.reader.Close()
@@ -505,20 +499,6 @@ func (s *Stream) trySendError(err error) {
 	select {
 	case s.errorChan <- err:
 	default:
-	}
-}
-
-func (s *Stream) collectMetrics(ctx context.Context) {
-	ticker := time.NewTicker(constants.StreamTickerDuration())
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			// Could emit metrics here if needed
-		}
 	}
 }
 

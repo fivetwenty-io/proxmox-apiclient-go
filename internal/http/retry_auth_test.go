@@ -211,3 +211,44 @@ func TestSetTicket_PropagatesToAuthenticator(t *testing.T) {
 		t.Errorf("ticket not propagated: %+v", tkt)
 	}
 }
+
+// TestHandleAuthRetry_APIToken401NotRetried verifies that a 401 carrying a
+// static API token is NOT retried. API tokens do not expire and cannot be
+// re-issued by the client, so a refresh-and-retry would just replay the same
+// rejected token and 401 again. The original 401 must surface after exactly
+// one request.
+func TestHandleAuthRetry_APIToken401NotRetried(t *testing.T) {
+	t.Parallel()
+
+	var calls int32
+
+	srv := newTestServer(t, func(writer http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		writer.WriteHeader(http.StatusUnauthorized)
+		_, _ = writer.Write([]byte(`{"message":"invalid token"}`))
+	})
+
+	opts := minimalHTTPOptions()
+	opts.APIToken = testAPITokenFull
+
+	client, err := NewClient(opts)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+
+	client.baseURL = srv.URL
+
+	// Precondition: a static-credential authenticator, which cannot re-auth.
+	if _, ok := client.authenticator.(*auth.APITokenAuthenticator); !ok {
+		t.Fatalf("authenticator is %T, want *auth.APITokenAuthenticator", client.authenticator)
+	}
+
+	_, err = client.Do("GET", "/version", nil)
+	if err == nil {
+		t.Fatal("expected an error from the 401 response")
+	}
+
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Errorf("calls = %d, want 1 (API-token 401 must not trigger a re-auth retry)", got)
+	}
+}

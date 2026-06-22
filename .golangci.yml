@@ -158,6 +158,39 @@ linters:
     cyclop:
       max-complexity: 16
       package-average: 0.0
+    # recvcheck flags PVEBool/PVEFloat for mixing value and pointer
+    # receivers. That mix is the canonical encoding/json pattern: a value
+    # MarshalJSON (so non-pointer values marshal) paired with a pointer
+    # UnmarshalJSON (so decoding can mutate). Exclude the marshaler methods.
+    recvcheck:
+      exclusions:
+        - "*.MarshalJSON"
+        - "*.UnmarshalJSON"
+    # varnamelen's scope heuristic flags idiomatic short names (loop index
+    # i, table-case tc, receiver-less locals b/f/s/n for buffers, floats,
+    # strings, numbers). These are Go conventions, not unclear names.
+    varnamelen:
+      ignore-names:
+        - i
+        - b
+        - f
+        - n
+        - s
+        - r
+        - t
+        - tr
+        - st
+        - p
+        - tc
+        - w
+        - ok
+      ignore-decls:
+        - i int
+        - n int
+        - w io.Writer
+        - r io.Reader
+        - b []byte
+        - tc testCase
 
 # Formatters configuration
 formatters:

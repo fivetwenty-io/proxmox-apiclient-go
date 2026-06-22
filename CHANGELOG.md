@@ -5,6 +5,30 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v3.2.9] — 2026-06-22
+
+### Added
+
+- `Client.Close()` and `HTTPClient.Close()` release the response-cache cleanup goroutine and close idle HTTP connections. `Close` is idempotent and safe to call more than once.
+
+### Fixed
+
+- The response cache no longer panics on a second `Close()`; the cleanup channel is now closed exactly once.
+- Each `Stream` no longer leaks a background goroutine. An inert metrics collector was started per stream and never stopped when the stream was read to EOF; it produced no observable output and has been removed.
+- The connection pool's active-connection counter no longer underflows when `Put` is called without a matching `Get` (or twice for one client); the counter is clamped at zero.
+- A `401` carrying a static API token is no longer retried. Because API tokens cannot be re-issued by the client, the previous refresh-and-retry replayed the same rejected token; the original `401` now surfaces after a single request. Ticket-based authenticators still refresh and retry as before.
+- A malformed body on a `2xx` batch response is now reported as a failure instead of being silently counted as success. An empty body (including `204 No Content`) remains a success.
+
+### Changed
+
+- The unexported mutex was moved off the exported `pool.Stats` and stream metrics value types into private wrappers, so callers can copy a returned snapshot without copying a lock. The exported struct fields are unchanged.
+- The unused TLS `Verifier` mode machinery and its dead error sentinels were removed. The behavior is unchanged: every non-`None` `SSLVerifyMode` performs full certificate-chain and hostname verification (fail-secure), which is now documented on the type.
+
+### Internal
+
+- Raised hand-written package test coverage (notably `internal/ssl`, and the cloudinit, network, storage, qemu, and client bindings) with behavior-focused tests, and added regression tests for each fix above.
+- Tightened the lint configuration (targeted `varnamelen` short-name allowances and a `recvcheck` exclusion for the `MarshalJSON`/`UnmarshalJSON` pair) and resolved the substantive findings. `go vet`, `staticcheck`, `golangci-lint`, and `go test -race` pass clean.
+
 ## [v3.2.8] — 2026-06-22
 
 ### Fixed

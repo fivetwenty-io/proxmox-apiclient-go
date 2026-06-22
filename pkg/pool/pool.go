@@ -55,7 +55,7 @@ type Pool struct {
 	transport *http.Transport
 	client    *http.Client
 	mu        sync.RWMutex
-	stats     *Stats
+	stats     *poolStats
 	closed    bool
 }
 
@@ -69,7 +69,16 @@ type Stats struct {
 	BytesSent           int64
 	BytesReceived       int64
 	AverageResponseTime time.Duration
-	mu                  sync.RWMutex
+}
+
+// poolStats is the internal, mutex-guarded counter state. Stats (the embedded
+// value) is the pure-data snapshot handed back by Pool.Stats; keeping the lock
+// off the exported type means callers can copy a snapshot without copying a
+// mutex.
+type poolStats struct {
+	Stats
+
+	mu sync.RWMutex
 }
 
 // New creates a new connection pool with the given configuration.
@@ -115,18 +124,8 @@ func New(config *Config) *Pool {
 			Jar:           nil,
 			Timeout:       config.ConnectionTimeout,
 		},
-		mu: sync.RWMutex{},
-		stats: &Stats{
-			ActiveConnections:   0,
-			IdleConnections:     0,
-			TotalConnections:    0,
-			FailedConnections:   0,
-			RequestsServed:      0,
-			BytesSent:           0,
-			BytesReceived:       0,
-			AverageResponseTime: time.Duration(0),
-			mu:                  sync.RWMutex{},
-		},
+		mu:     sync.RWMutex{},
+		stats:  &poolStats{},
 		closed: false,
 	}
 }
@@ -158,7 +157,12 @@ func (p *Pool) Put(client *http.Client) {
 	}
 
 	p.stats.mu.Lock()
-	p.stats.ActiveConnections--
+	// Guard against a Put without a matching Get (or a double Put) driving the
+	// active counter negative; these counters are observational, not a semaphore.
+	if p.stats.ActiveConnections > 0 {
+		p.stats.ActiveConnections--
+	}
+
 	p.stats.IdleConnections++
 	p.stats.mu.Unlock()
 }
@@ -223,17 +227,7 @@ func (p *Pool) Stats() Stats {
 	p.stats.mu.RLock()
 	defer p.stats.mu.RUnlock()
 
-	return Stats{
-		ActiveConnections:   p.stats.ActiveConnections,
-		IdleConnections:     p.stats.IdleConnections,
-		TotalConnections:    p.stats.TotalConnections,
-		FailedConnections:   p.stats.FailedConnections,
-		RequestsServed:      p.stats.RequestsServed,
-		BytesSent:           p.stats.BytesSent,
-		BytesReceived:       p.stats.BytesReceived,
-		AverageResponseTime: p.stats.AverageResponseTime,
-		mu:                  sync.RWMutex{},
-	}
+	return p.stats.Stats
 }
 
 // Close closes the connection pool.
