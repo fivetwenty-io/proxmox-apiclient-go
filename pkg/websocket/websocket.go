@@ -25,23 +25,48 @@ var (
 	errDisconnectedReconnecting = errors.New("disconnected, attempting to reconnect")
 	errReconnected              = errors.New("reconnected after %d attempts")
 	errFailedToReconnect        = errors.New("failed to reconnect after %d attempts")
+	errTooManyDeadlineFailures  = errors.New("too many consecutive read-deadline failures")
+)
+
+const (
+	// defaultMaxConcurrentHandlers bounds how many event handler goroutines
+	// may run at once across all event types when Config.MaxConcurrentHandlers
+	// is left at its zero value.
+	defaultMaxConcurrentHandlers = 100
+
+	// maxConsecutiveDeadlineFailures is how many SetReadDeadline failures in a
+	// row readLoop tolerates before treating the connection as dead.
+	maxConsecutiveDeadlineFailures = 3
+
+	// readDeadlineFailureBackoff is the pause between retries after a
+	// SetReadDeadline failure, so a broken conn does not busy-spin the CPU.
+	readDeadlineFailureBackoff = 50 * time.Millisecond
 )
 
 // Client represents a WebSocket client for PVE events.
 type Client struct {
-	conn       *websocket.Conn
-	config     *Config
-	url        *url.URL
-	headers    http.Header
-	dialer     *websocket.Dialer
-	handlers   map[string][]EventHandler
-	mu         sync.RWMutex
-	writeMu    sync.Mutex // serialises all ws writes (gorilla not concurrent-write-safe)
-	closed     bool
-	closeChan  chan struct{}
-	errorChan  chan error
-	reconnect  bool
-	pingTicker *time.Ticker
+	conn          *websocket.Conn
+	config        *Config
+	url           *url.URL
+	headers       http.Header
+	dialer        *websocket.Dialer
+	handlers      map[string][]handlerEntry
+	nextHandlerID uint64
+	handlerSem    chan struct{} // bounds concurrently-running handler goroutines
+	mu            sync.RWMutex
+	writeMu       sync.Mutex // serialises all ws writes (gorilla not concurrent-write-safe)
+	closed        bool
+	closeChan     chan struct{}
+	errorChan     chan error
+	reconnect     bool
+	pingTicker    *time.Ticker
+}
+
+// handlerEntry pairs a registered EventHandler with the ID used to
+// deregister it (see removeHandler / Subscription.Cancel).
+type handlerEntry struct {
+	id      uint64
+	handler EventHandler
 }
 
 // Config represents WebSocket client configuration.
@@ -81,23 +106,31 @@ type Config struct {
 
 	// BufferSize is the read/write buffer size.
 	BufferSize int
+
+	// MaxConcurrentHandlers bounds how many event handler goroutines may run
+	// concurrently across all event types (default: 100 if <= 0). Handler
+	// dispatch never blocks the read loop: once the limit is reached,
+	// additional handler invocations queue behind it rather than running
+	// unbounded in parallel.
+	MaxConcurrentHandlers int
 }
 
 // DefaultConfig returns the default WebSocket configuration.
 func DefaultConfig() *Config {
 	return &Config{
-		Host:                 "",
-		Port:                 constants.ProxmoxDefaultPort,
-		Path:                 "/api2/json/nodes/localhost/console",
-		Secure:               true,
-		TLSConfig:            nil,
-		HandshakeTimeout:     constants.WebSocketHandshakeTimeout(),
-		ReadTimeout:          constants.DefaultClientTimeout(),
-		WriteTimeout:         constants.ShortTimeout(),
-		PingInterval:         constants.DefaultClientTimeout(),
-		ReconnectInterval:    constants.WebSocketReconnectInterval(),
-		MaxReconnectAttempts: constants.WebSocketMaxReconnectAttempts,
-		BufferSize:           constants.LargeBufferSize,
+		Host:                  "",
+		Port:                  constants.ProxmoxDefaultPort,
+		Path:                  "/api2/json/nodes/localhost/console",
+		Secure:                true,
+		TLSConfig:             nil,
+		HandshakeTimeout:      constants.WebSocketHandshakeTimeout(),
+		ReadTimeout:           constants.DefaultClientTimeout(),
+		WriteTimeout:          constants.ShortTimeout(),
+		PingInterval:          constants.DefaultClientTimeout(),
+		ReconnectInterval:     constants.WebSocketReconnectInterval(),
+		MaxReconnectAttempts:  constants.WebSocketMaxReconnectAttempts,
+		BufferSize:            constants.LargeBufferSize,
+		MaxConcurrentHandlers: defaultMaxConcurrentHandlers,
 	}
 }
 
@@ -127,13 +160,37 @@ func New(config *Config) (*Client, error) {
 		return nil, errHostRequired
 	}
 
-	// Build WebSocket URL
+	maxConcurrentHandlers := config.MaxConcurrentHandlers
+	if maxConcurrentHandlers <= 0 {
+		maxConcurrentHandlers = defaultMaxConcurrentHandlers
+	}
+
+	return &Client{
+		conn:          nil,
+		config:        config,
+		url:           buildWSURL(config),
+		headers:       make(http.Header),
+		dialer:        buildDialer(config),
+		handlers:      make(map[string][]handlerEntry),
+		nextHandlerID: 0,
+		handlerSem:    make(chan struct{}, maxConcurrentHandlers),
+		mu:            sync.RWMutex{},
+		closed:        false,
+		closeChan:     make(chan struct{}),
+		errorChan:     make(chan error, constants.ErrorChannelSize),
+		reconnect:     true,
+		pingTicker:    nil,
+	}, nil
+}
+
+// buildWSURL constructs the target WebSocket URL from config.
+func buildWSURL(config *Config) *url.URL {
 	scheme := "wss"
 	if !config.Secure {
 		scheme = "ws"
 	}
 
-	wsURL := &url.URL{
+	return &url.URL{
 		Scheme:      scheme,
 		Opaque:      "",
 		User:        nil,
@@ -146,9 +203,11 @@ func New(config *Config) (*Client, error) {
 		Fragment:    "",
 		RawFragment: "",
 	}
+}
 
-	// Create dialer
-	dialer := &websocket.Dialer{
+// buildDialer constructs the gorilla websocket.Dialer used for Connect.
+func buildDialer(config *Config) *websocket.Dialer {
+	return &websocket.Dialer{
 		NetDial:           nil,
 		NetDialContext:    nil,
 		NetDialTLSContext: nil,
@@ -162,21 +221,6 @@ func New(config *Config) (*Client, error) {
 		EnableCompression: false,
 		Jar:               nil,
 	}
-
-	return &Client{
-		conn:       nil,
-		config:     config,
-		url:        wsURL,
-		headers:    make(http.Header),
-		dialer:     dialer,
-		handlers:   make(map[string][]EventHandler),
-		mu:         sync.RWMutex{},
-		closed:     false,
-		closeChan:  make(chan struct{}),
-		errorChan:  make(chan error, constants.ErrorChannelSize),
-		reconnect:  true,
-		pingTicker: nil,
-	}, nil
 }
 
 // SetHeaders sets custom headers for the WebSocket connection.
@@ -220,23 +264,30 @@ func (c *Client) Connect(ctx context.Context) error {
 		return fmt.Errorf("failed to connect: %w", err)
 	}
 
-	c.conn = conn
-	c.closed = false
-
-	// Set timeouts
+	// Configure deadlines on the freshly dialed conn before publishing it as
+	// c.conn. If either call fails, close the conn and return without ever
+	// setting c.conn, so the client stays reconnectable instead of getting
+	// stuck returning errAlreadyConnected forever with a leaked connection.
 	if c.config.ReadTimeout > 0 {
-		err := c.conn.SetReadDeadline(time.Now().Add(c.config.ReadTimeout))
+		err := conn.SetReadDeadline(time.Now().Add(c.config.ReadTimeout))
 		if err != nil {
+			_ = conn.Close()
+
 			return fmt.Errorf("failed to set read deadline: %w", err)
 		}
 	}
 
 	if c.config.WriteTimeout > 0 {
-		err := c.conn.SetWriteDeadline(time.Now().Add(c.config.WriteTimeout))
+		err := conn.SetWriteDeadline(time.Now().Add(c.config.WriteTimeout))
 		if err != nil {
+			_ = conn.Close()
+
 			return fmt.Errorf("failed to set write deadline: %w", err)
 		}
 	}
+
+	c.conn = conn
+	c.closed = false
 
 	// Set pong handler — close over local conn, not c.conn, to avoid a race
 	// when Disconnect nils c.conn concurrently.
@@ -339,12 +390,12 @@ func (c *Client) Disconnect() error {
 	return nil
 }
 
-// On registers an event handler for a specific event type.
+// On registers an event handler for a specific event type. Handlers run in
+// their own goroutines when a matching event arrives (see handleMessage),
+// bounded by Config.MaxConcurrentHandlers concurrently-running handlers
+// across the client.
 func (c *Client) On(eventType string, handler EventHandler) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	c.handlers[eventType] = append(c.handlers[eventType], handler)
+	c.registerHandler(eventType, handler)
 }
 
 // OnAll registers a handler for all events.
@@ -433,7 +484,7 @@ func (c *Client) IsConnected() bool {
 type Subscription struct {
 	client    *Client
 	eventType string
-	handler   EventHandler
+	handlerID uint64
 	cancel    context.CancelFunc
 }
 
@@ -444,7 +495,6 @@ func (c *Client) NewSubscription(eventType string, handler EventHandler) *Subscr
 	sub := &Subscription{
 		client:    c,
 		eventType: eventType,
-		handler:   handler,
 		cancel:    cancel,
 	}
 
@@ -458,16 +508,18 @@ func (c *Client) NewSubscription(eventType string, handler EventHandler) *Subscr
 		}
 	}
 
-	c.On(eventType, wrappedHandler)
+	sub.handlerID = c.registerHandler(eventType, wrappedHandler)
 
 	return sub
 }
 
-// Cancel cancels the subscription.
+// Cancel cancels the subscription: it stops the wrapped handler from
+// forwarding further events (via context) and deregisters it from the
+// client's handler map, so long-lived clients don't accumulate dead
+// closures. Safe to call more than once.
 func (s *Subscription) Cancel() {
 	s.cancel()
-	// Note: This doesn't remove the handler from the client's handler map
-	// In a production implementation, you'd want to track and remove handlers
+	s.client.removeHandler(s.eventType, s.handlerID)
 }
 
 // Stream provides a channel-based interface for events.
@@ -514,6 +566,38 @@ func (c *Client) NewStream(bufferSize int) *Stream {
 	return stream
 }
 
+// registerHandler is On's implementation, returning the ID assigned to the
+// handler so callers within the package (e.g. NewSubscription) can later
+// deregister that specific handler via removeHandler.
+func (c *Client) registerHandler(eventType string, handler EventHandler) uint64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.nextHandlerID++
+	id := c.nextHandlerID
+
+	c.handlers[eventType] = append(c.handlers[eventType], handlerEntry{id: id, handler: handler})
+
+	return id
+}
+
+// removeHandler deregisters the handler previously returned by registerHandler.
+// It is a no-op if the handler is already gone (e.g. Off was called, or
+// Cancel was called twice).
+func (c *Client) removeHandler(eventType string, handlerID uint64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	entries := c.handlers[eventType]
+	for i, entry := range entries {
+		if entry.id == handlerID {
+			c.handlers[eventType] = append(entries[:i], entries[i+1:]...)
+
+			return
+		}
+	}
+}
+
 func (c *Client) readLoop(ctx context.Context) {
 	// Capture conn once; Disconnect sets c.conn = nil but we hold our own
 	// reference for the lifetime of this goroutine.
@@ -529,19 +613,19 @@ func (c *Client) readLoop(ctx context.Context) {
 		c.handleDisconnect(ctx)
 	}()
 
+	deadlineFailures := 0
+
 	for {
 		select {
 		case <-c.closeChan:
 			return
 		default:
-			// Set read deadline
-			if c.config.ReadTimeout > 0 {
-				err := conn.SetReadDeadline(time.Now().Add(c.config.ReadTimeout))
-				if err != nil {
-					c.sendError(fmt.Errorf("failed to set read deadline: %w", err))
-
-					continue
-				}
+			switch c.refreshReadDeadline(conn, &deadlineFailures) {
+			case deadlineOutcomeFatal:
+				return
+			case deadlineOutcomeRetry:
+				continue
+			case deadlineOutcomeOK:
 			}
 
 			messageType, data, err := conn.ReadMessage()
@@ -558,6 +642,58 @@ func (c *Client) readLoop(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// deadlineOutcome is the result of one refreshReadDeadline call, telling
+// readLoop whether to proceed to ReadMessage, retry the loop iteration, or
+// give up on the connection entirely.
+type deadlineOutcome int
+
+const (
+	deadlineOutcomeOK deadlineOutcome = iota
+	deadlineOutcomeRetry
+	deadlineOutcomeFatal
+)
+
+// refreshReadDeadline sets conn's read deadline for the next readLoop
+// iteration. On failure it backs off (respecting closeChan) and reports
+// deadlineOutcomeRetry, unless *failures has reached
+// maxConsecutiveDeadlineFailures, in which case the conn is treated as dead
+// (same as a fatal ReadMessage error) and deadlineOutcomeFatal is reported.
+func (c *Client) refreshReadDeadline(conn *websocket.Conn, failures *int) deadlineOutcome {
+	if c.config.ReadTimeout <= 0 {
+		return deadlineOutcomeOK
+	}
+
+	err := conn.SetReadDeadline(time.Now().Add(c.config.ReadTimeout))
+	if err == nil {
+		*failures = 0
+
+		return deadlineOutcomeOK
+	}
+
+	*failures++
+
+	c.sendError(fmt.Errorf("failed to set read deadline: %w", err))
+
+	// A conn with a broken SetReadDeadline is almost always dead (e.g.
+	// already closed). Treat repeated failures as fatal, same as a fatal
+	// ReadMessage error, instead of retrying forever.
+	if *failures >= maxConsecutiveDeadlineFailures {
+		c.sendError(fmt.Errorf("%w: %d consecutive failures", errTooManyDeadlineFailures, *failures))
+
+		return deadlineOutcomeFatal
+	}
+
+	// Back off instead of busy-spinning the CPU on a dead conn, while still
+	// reacting promptly to Disconnect.
+	select {
+	case <-c.closeChan:
+		return deadlineOutcomeFatal
+	case <-time.After(readDeadlineFailureBackoff):
+	}
+
+	return deadlineOutcomeRetry
 }
 
 func (c *Client) pingLoop() {
@@ -622,18 +758,33 @@ func (c *Client) handleMessage(data []byte) {
 	defer c.mu.RUnlock()
 
 	// Call specific handlers
-	if handlers, ok := c.handlers[event.Type]; ok {
-		for _, handler := range handlers {
-			go handler(&event)
+	if entries, ok := c.handlers[event.Type]; ok {
+		for _, entry := range entries {
+			c.dispatch(entry.handler, &event)
 		}
 	}
 
 	// Call wildcard handlers
-	if handlers, ok := c.handlers["*"]; ok {
-		for _, handler := range handlers {
-			go handler(&event)
+	if entries, ok := c.handlers["*"]; ok {
+		for _, entry := range entries {
+			c.dispatch(entry.handler, &event)
 		}
 	}
+}
+
+// dispatch runs handler on event in its own goroutine, bounded by
+// handlerSem to at most cap(handlerSem) (Config.MaxConcurrentHandlers)
+// concurrently-running handlers across the whole client. The spawning
+// goroutine itself never blocks handleMessage/readLoop: it queues on the
+// semaphore, so a burst of messages cannot deadlock, it only bounds how
+// much user handler code runs in parallel.
+func (c *Client) dispatch(handler EventHandler, event *Event) {
+	go func() {
+		c.handlerSem <- struct{}{}
+		defer func() { <-c.handlerSem }()
+
+		handler(event)
+	}()
 }
 
 func (c *Client) handleDisconnect(ctx context.Context) {

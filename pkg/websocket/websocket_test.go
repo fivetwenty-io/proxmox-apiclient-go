@@ -694,6 +694,107 @@ func TestConnectWithRetry_ContextCancelled(t *testing.T) {
 	}
 }
 
+// --- Bounded handler concurrency ---
+
+// concurrencyTracker records, via a handler built by trackingHandler, how
+// many invocations are running at once (current/peak) and how many have
+// finished (done).
+type concurrencyTracker struct {
+	current int32
+	peak    int32
+	done    int32
+}
+
+// trackingHandler returns an EventHandler that updates ct's counters and
+// sleeps briefly to widen the window in which concurrent invocations overlap.
+func (ct *concurrencyTracker) trackingHandler() pkgws.EventHandler {
+	return func(_ *pkgws.Event) {
+		n := atomic.AddInt32(&ct.current, 1)
+
+		for {
+			p := atomic.LoadInt32(&ct.peak)
+			if n <= p || atomic.CompareAndSwapInt32(&ct.peak, p, n) {
+				break
+			}
+		}
+
+		time.Sleep(20 * time.Millisecond)
+
+		atomic.AddInt32(&ct.current, -1)
+		atomic.AddInt32(&ct.done, 1)
+	}
+}
+
+// burstClientConfig builds a Config pointed at srv with the given
+// MaxConcurrentHandlers, suitable for TestHandleMessage_BoundsConcurrentHandlers.
+func burstClientConfig(srv *httptest.Server, maxConcurrent int) *pkgws.Config {
+	cfg := pkgws.DefaultConfig()
+	cfg.PingInterval = 0
+	cfg.MaxConcurrentHandlers = maxConcurrent
+
+	host, port := hostPort(srv)
+	cfg.Host = host
+	cfg.Port = port
+	cfg.Secure = false
+	cfg.Path = "/ws"
+	cfg.HandshakeTimeout = 2 * time.Second
+	cfg.ReadTimeout = 2 * time.Second
+	cfg.WriteTimeout = 2 * time.Second
+	cfg.MaxReconnectAttempts = 1
+	cfg.ReconnectInterval = 10 * time.Millisecond
+
+	return cfg
+}
+
+// TestHandleMessage_BoundsConcurrentHandlers verifies MaxConcurrentHandlers
+// caps how many handler goroutines run at once: previously handleMessage
+// spawned `go handler(&event)` per handler per message with no bound at all.
+func TestHandleMessage_BoundsConcurrentHandlers(t *testing.T) {
+	t.Parallel()
+
+	const (
+		maxConcurrent = 2
+		numEvents     = 20
+	)
+
+	srv := newWSServer(t, `{"type":"burst","id":"ev"}`)
+	defer srv.Close()
+
+	wsClient, err := pkgws.New(burstClientConfig(srv, maxConcurrent))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	var tracker concurrencyTracker
+
+	// Register numEvents handlers for the same event type so the single
+	// incoming "burst" frame fans out to numEvents concurrent dispatches,
+	// which is exactly what MaxConcurrentHandlers must cap.
+	for range numEvents {
+		wsClient.On("burst", tracker.trackingHandler())
+	}
+
+	connectErr := wsClient.Connect(context.Background())
+	if connectErr != nil {
+		t.Fatalf("Connect: %v", connectErr)
+	}
+
+	defer wsClient.Disconnect() //nolint:errcheck
+
+	deadline := time.Now().Add(3 * time.Second)
+	for atomic.LoadInt32(&tracker.done) < numEvents && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	if got := atomic.LoadInt32(&tracker.done); got != numEvents {
+		t.Fatalf("expected all %d handlers to run, got %d", numEvents, got)
+	}
+
+	if got := atomic.LoadInt32(&tracker.peak); got > maxConcurrent {
+		t.Errorf("expected at most %d concurrently-running handlers, observed peak of %d", maxConcurrent, got)
+	}
+}
+
 // TestStream_StopIdempotent verifies that Stop can be called repeatedly and
 // concurrently without panicking. Previously Stop closed stopChan (and
 // eventChan) unconditionally, so a second call panicked on a double close.
