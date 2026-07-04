@@ -1,4 +1,16 @@
-// Package lxc provides API operations for LXC container management.
+// Package lxc is a hand-written convenience layer over a focused subset of
+// the PVE /nodes/{node}/lxc endpoints (list, create, status, lifecycle,
+// config, clone, resize). It trades the generated packages' full parameter
+// and response typing for a smaller, opinionated surface built around
+// map[string]interface{} and a handful of purpose-built structs.
+//
+// The complete typed API for LXC containers — every parameter, every
+// response field, every endpoint under /nodes/{node}/lxc — lives in the
+// generated package github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/api/nodes.
+// Prefer this package for common lifecycle operations (create, start, stop,
+// clone, resize) where the narrower surface reads more directly; reach for
+// pkg/api/nodes when you need a parameter or response field this package does
+// not expose, or when you want compile-time-checked request/response types.
 package lxc
 
 import (
@@ -13,6 +25,26 @@ import (
 // ErrUnexpectedResponseType is returned when the API response type is not what was expected.
 var ErrUnexpectedResponseType = errors.New("unexpected response type")
 
+// Service defines LXC container management operations for a single node.
+// Unlike the Service interfaces in the sibling qemu/network/storage/tasks/
+// cloudinit packages, the node is bound at construction time (via NewService
+// or NewClient) rather than passed per call — this mirrors Client's existing
+// method set, which was designed around a single node per instance.
+type Service interface {
+	List(ctx context.Context) ([]ContainerStatus, error)
+	Create(ctx context.Context, config ContainerConfig) (string, error)
+	Status(ctx context.Context, vmid int) (*ContainerStatus, error)
+	Start(ctx context.Context, vmid int) (string, error)
+	Stop(ctx context.Context, vmid int) (string, error)
+	Shutdown(ctx context.Context, vmid int, timeout int) (string, error)
+	Reboot(ctx context.Context, vmid int) (string, error)
+	Delete(ctx context.Context, vmid int, purge bool) (string, error)
+	GetConfig(ctx context.Context, vmid int) (map[string]interface{}, error)
+	UpdateConfig(ctx context.Context, vmid int, config map[string]interface{}) error
+	Clone(ctx context.Context, vmid int, newID int, opts CloneOptions) (string, error)
+	Resize(ctx context.Context, vmid int, disk string, size string) error
+}
+
 // Client provides LXC container management operations.
 type Client struct {
 	pveClient client.Client
@@ -25,6 +57,19 @@ func NewClient(pveClient client.Client, node string) *Client {
 		pveClient: pveClient,
 		node:      node,
 	}
+}
+
+// NewService returns a Service bound to the given node, mirroring the
+// New(c client.Client) Service factory used by the sibling qemu/network/
+// storage/tasks/cloudinit packages. Since LXC operations are inherently
+// per-node (list, create, and lifecycle calls all target one node's
+// /nodes/{node}/lxc endpoints), the node is supplied here rather than on
+// every call. The returned Service is the same concrete type as NewClient
+// returns, so existing callers of NewClient are unaffected.
+//
+//nolint:ireturn // Factory pattern - returns interface to encapsulate implementation and enable mocking
+func NewService(pveClient client.Client, node string) Service {
+	return NewClient(pveClient, node)
 }
 
 // ContainerConfig represents LXC container configuration.
