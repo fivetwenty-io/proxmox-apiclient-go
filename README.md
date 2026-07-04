@@ -188,6 +188,34 @@ the generated layer:
 - `pkg/api/storage` — Node-level storage operations
 - `pkg/api/tasks` — UPID task polling
 
+## Package layering
+
+The library is organized in three layers:
+
+- **Generated typed bindings** (`pkg/api/version`, `pkg/api/access`,
+  `pkg/api/cluster`, `pkg/api/clusterstorage`, `pkg/api/nodes`,
+  `pkg/api/pools`) — the primary API. Generated from `_data/apidoc.json`,
+  these cover all 667 PVE 9.x endpoints with full parameter and response
+  typing. Use these when you need a specific parameter or response field, or
+  compile-time-checked request/response shapes.
+
+- **Hand-written convenience helpers** (`pkg/api/qemu`, `pkg/api/lxc`,
+  `pkg/api/network`, `pkg/api/storage`, `pkg/api/tasks`,
+  `pkg/api/cloudinit`) — narrower, opinionated wrappers over a subset of the
+  same endpoints already covered by `pkg/api/nodes` (and, for storage
+  configuration, `pkg/api/clusterstorage`). They trade full typing for a
+  smaller surface built around `map[string]interface{}` and purpose-built
+  structs, and are a good starting point for common lifecycle operations
+  (create, start/stop, clone, snapshot, upload, task-wait).
+
+- **Standalone utilities** (`pkg/pool`, `pkg/batch`, `pkg/stream`,
+  `pkg/compatibility`) — opt-in packages not wired into `pkg/client.Client`.
+  `pkg/pool` accounts for concurrent use of a single shared `*http.Client`;
+  `pkg/batch` runs independent requests concurrently with retry; `pkg/stream`
+  reads a response body as a sequence of decoded items; `pkg/compatibility`
+  checks feature support against a parsed PVE version. Construct and use each
+  directly when its specific behavior is needed.
+
 ## Error handling
 
 `pkg/errors` defines sentinel errors for HTTP status classes:

@@ -1,4 +1,12 @@
-// Package batch provides request batching functionality for the PVE API client.
+// Package batch provides request batching functionality for the PVE API
+// client: collect Requests into a Batch, then run them concurrently (with a
+// configurable concurrency limit and per-request retry) via an Executor.
+//
+// This is a standalone opt-in utility: it is not wired into pkg/client.Client
+// and pkg/client.Client does not use it internally. Construct a batch.Batch
+// and batch.Executor directly, using an *http.Client (or anything
+// implementing batch.HTTPClient) as the executor's transport, when you want
+// to fan out multiple independent HTTP calls together.
 package batch
 
 import (

@@ -1,4 +1,11 @@
-// Package compatibility provides PVE version compatibility checking and feature support.
+// Package compatibility provides PVE version parsing/comparison, a feature
+// support matrix keyed by PVE version ranges, and migration-helper reports
+// (new/deprecated features, breaking changes) between two PVE versions.
+//
+// This is a standalone opt-in utility: it is not wired into pkg/client.Client
+// or the pkg/api/* packages, none of which consult it before making a
+// request. Use compatibility.NewChecker(pveVersion) directly when your
+// application needs to gate behavior on the PVE version it is talking to.
 package compatibility
 
 import (

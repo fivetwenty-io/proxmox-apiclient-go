@@ -1,3 +1,17 @@
+// Package network is a hand-written convenience layer over the PVE
+// /nodes/{node}/network endpoints, offering idempotent bridge helpers
+// (EnsureBridge, DeleteBridge, BridgeExists) and a Reload operation. It
+// trades the generated package's full parameter and response typing for a
+// smaller, opinionated surface built around map[string]interface{}.
+//
+// The complete typed API for node network configuration — every parameter,
+// every response field, every endpoint under /nodes/{node}/network — lives
+// in the generated package
+// github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/api/nodes. Prefer this
+// package when you want idempotent bridge create/delete without hand-rolling
+// the existence check; reach for pkg/api/nodes when you need a parameter or
+// response field this package does not expose, or when you want
+// compile-time-checked request/response types.
 package network
 
 import (

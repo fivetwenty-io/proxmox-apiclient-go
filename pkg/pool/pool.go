@@ -1,4 +1,19 @@
-// Package pool provides connection pooling for the PVE API client.
+// Package pool wraps a single shared *http.Client (and its *http.Transport)
+// behind a Get/Put/Do API, plus request-level accounting. It does not
+// maintain a pool of distinct client instances: every Get returns the same
+// *http.Client, and Put only decrements a counter. Actual TCP connection
+// reuse across concurrent requests comes from http.Transport's own internal
+// idle-connection pool (configured here via MaxConnections and
+// MaxConnectionsPerHost), not from anything this package does itself.
+//
+// Stats reflects that: ActiveConnections/IdleConnections/TotalConnections
+// count Get/Put calls (concurrent callers holding a reference to the shared
+// client), not distinct pooled network connections — the number of actual
+// open sockets is managed internally by http.Transport and is not exposed
+// here. This package is a standalone opt-in utility: it is not wired into
+// pkg/client.Client. Construct one directly (pool.New(cfg)) and use its
+// Do/DoWithContext methods, or pull the *http.Client via Get, when you want
+// this accounting layer around outbound HTTP calls.
 package pool
 
 import (
@@ -49,7 +64,10 @@ func DefaultConfig() *Config {
 	}
 }
 
-// Pool manages a pool of HTTP connections.
+// Pool wraps one shared *http.Client/*http.Transport pair with
+// concurrency-usage accounting. See the package doc: it does not hold a set
+// of distinct pooled connections itself — connection reuse is delegated to
+// http.Transport's internal idle-connection pool.
 type Pool struct {
 	config    *Config
 	transport *http.Transport
@@ -59,15 +77,32 @@ type Pool struct {
 	closed    bool
 }
 
-// Stats contains pool statistics.
+// Stats reports request-level usage of the shared client, not distinct
+// pooled network connections (there is only one *http.Client/*http.Transport
+// pair; see the package doc).
 type Stats struct {
-	ActiveConnections   int64
-	IdleConnections     int64
-	TotalConnections    int64
-	FailedConnections   int64
-	RequestsServed      int64
-	BytesSent           int64
-	BytesReceived       int64
+	// ActiveConnections counts Get calls not yet matched by a Put — i.e.
+	// callers currently holding a reference to the shared client.
+	ActiveConnections int64
+	// IdleConnections counts completed Put calls; it only ever increases and
+	// is not decremented by a subsequent Get. It is a lifetime counter of
+	// "checked back in" events, not a live count of idle sockets.
+	IdleConnections int64
+	// TotalConnections counts every Get call made against this Pool.
+	TotalConnections int64
+	// FailedConnections counts requests where client.Do returned an error.
+	FailedConnections int64
+	// RequestsServed counts every DoWithContext call, regardless of outcome.
+	RequestsServed int64
+	// BytesSent sums req.ContentLength across served requests that report a
+	// positive length; requests with unknown or chunked length are not counted.
+	BytesSent int64
+	// BytesReceived sums resp.ContentLength across served requests that
+	// report a positive length; responses with unknown or chunked length are
+	// not counted.
+	BytesReceived int64
+	// AverageResponseTime is a running average of Do/DoWithContext latency
+	// across served requests.
 	AverageResponseTime time.Duration
 }
 
@@ -130,7 +165,9 @@ func New(config *Config) *Pool {
 	}
 }
 
-// Get returns an HTTP client from the pool.
+// Get returns the shared *http.Client and increments the active/total usage
+// counters. It always returns the same *http.Client instance for the life
+// of the Pool; it does not check out a distinct connection.
 func (p *Pool) Get() (*http.Client, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
@@ -147,7 +184,11 @@ func (p *Pool) Get() (*http.Client, error) {
 	return p.client, nil
 }
 
-// Put returns a client to the pool.
+// Put records that a caller is done with the client obtained from Get,
+// decrementing ActiveConnections and incrementing IdleConnections. The
+// client parameter is accepted for symmetry with Get but is not used to
+// select or release an actual connection — there is only the one shared
+// *http.Client.
 func (p *Pool) Put(client *http.Client) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
