@@ -9,11 +9,14 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strconv"
+	"sync"
 	"testing"
 
 	"github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/api/access"
 	pveclient "github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/client"
 )
+
+var _ = json.RawMessage(nil)
 
 func smokeOptsFromServerURL(u string) pveclient.Options {
 	parsed, err := url.Parse(u)
@@ -36,18 +39,107 @@ func smokeOptsFromServerURL(u string) pveclient.Options {
 	}
 }
 
-func TestSmoke_Access_GeneratedMethods(t *testing.T) {
-	t.Parallel()
+// recordedRequest captures what the mock server observed for the most
+// recently dispatched request.
+type recordedRequest struct {
+	method string
+	path   string
+	query  url.Values
+	form   url.Values
+}
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"data":    map[string]any{},
-			"success": 1,
-		})
-	})
+// testHarness runs a single httptest.Server shared by every subtest in this
+// file. Subtests are never run in parallel (each sets the desired response
+// immediately before invoking the method under test, then reads back the
+// recorded request), so the mutex below only guards against the harness
+// goroutine and the test goroutine overlapping on a single in-flight
+// request, never against concurrent subtests.
+type testHarness struct {
+	mu       sync.Mutex
+	last     recordedRequest
+	nextCode int
+	nextBody string
+}
 
-	srv := httptest.NewServer(mux)
+// newTestHarness starts the mock server and returns it alongside the harness
+// used to configure responses and inspect recorded requests.
+func newTestHarness() (*httptest.Server, *testHarness) {
+	h := &testHarness{nextCode: http.StatusOK}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+
+		_ = r.ParseForm()
+		h.last = recordedRequest{
+			method: r.Method,
+			path:   r.URL.Path,
+			query:  r.URL.Query(),
+			form:   r.PostForm,
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(h.nextCode)
+		_, _ = w.Write([]byte(h.nextBody))
+	}))
+
+	return srv, h
+}
+
+// set configures the status code and body the next request will receive.
+func (h *testHarness) set(code int, body string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	h.nextCode = code
+	h.nextBody = body
+}
+
+// snapshot returns a copy of the most recently recorded request.
+func (h *testHarness) snapshot() recordedRequest {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	return h.last
+}
+
+// assertRequestLine fails the test when the recorded method or resolved
+// path does not exactly match what the endpoint's spec entry declares.
+func assertRequestLine(t *testing.T, got recordedRequest, wantMethod, wantPath string) {
+	t.Helper()
+
+	if got.method != wantMethod {
+		t.Errorf("method = %q, want %q", got.method, wantMethod)
+	}
+
+	if got.path != wantPath {
+		t.Errorf("path = %q, want %q", got.path, wantPath)
+	}
+}
+
+// assertParamValue fails the test when the wire-encoded value of key does
+// not exactly equal want.
+func assertParamValue(t *testing.T, values url.Values, key, want string) {
+	t.Helper()
+
+	if got := values.Get(key); got != want {
+		t.Errorf("param %q = %q, want %q", key, got, want)
+	}
+}
+
+// assertParamPresent fails the test when key is absent from values. Used for
+// required parameters whose wire encoding is not a simple comparable string
+// (e.g. json.RawMessage-typed fields).
+func assertParamPresent(t *testing.T, values url.Values, key string) {
+	t.Helper()
+
+	if _, ok := values[key]; !ok {
+		t.Errorf("param %q missing from request", key)
+	}
+}
+
+func TestGenerated_Access_Methods(t *testing.T) {
+	srv, harness := newTestHarness()
 	defer srv.Close()
 
 	c, err := pveclient.NewClient(smokeOptsFromServerURL(srv.URL))
@@ -59,79 +151,854 @@ func TestSmoke_Access_GeneratedMethods(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("ListAccess", func(t *testing.T) {
-		_, err := svc.ListAccess(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListAccess(ctx)
+		if err != nil {
+			t.Fatalf("ListAccess: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListAccess: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/access")
+
+		var nilCtx context.Context
+		if _, err := svc.ListAccess(nilCtx); err == nil {
+			t.Errorf("ListAccess: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListAcl", func(t *testing.T) {
-		_, err := svc.ListAcl(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListAcl(ctx)
+		if err != nil {
+			t.Fatalf("ListAcl: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListAcl: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/access/acl")
+
+		var nilCtx context.Context
+		if _, err := svc.ListAcl(nilCtx); err == nil {
+			t.Errorf("ListAcl: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateAcl", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateAcl(ctx, &access.UpdateAclParams{Path: "sample-path", Roles: "sample-roles"})
+		if err != nil {
+			t.Fatalf("UpdateAcl: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/access/acl")
+		assertParamValue(t, got.form, "path", "sample-path")
+		assertParamValue(t, got.form, "roles", "sample-roles")
+
+		var nilCtx context.Context
+		if err := svc.UpdateAcl(nilCtx, &access.UpdateAclParams{Path: "sample-path", Roles: "sample-roles"}); err == nil {
+			t.Errorf("UpdateAcl: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListDomains", func(t *testing.T) {
-		_, err := svc.ListDomains(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListDomains(ctx)
+		if err != nil {
+			t.Fatalf("ListDomains: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListDomains: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/access/domains")
+
+		var nilCtx context.Context
+		if _, err := svc.ListDomains(nilCtx); err == nil {
+			t.Errorf("ListDomains: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateDomains", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateDomains(ctx, &access.CreateDomainsParams{Realm: "sample-realm", Type: "sample-type"})
+		if err != nil {
+			t.Fatalf("CreateDomains: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/access/domains")
+		assertParamValue(t, got.form, "realm", "sample-realm")
+		assertParamValue(t, got.form, "type", "sample-type")
+
+		var nilCtx context.Context
+		if err := svc.CreateDomains(nilCtx, &access.CreateDomainsParams{Realm: "sample-realm", Type: "sample-type"}); err == nil {
+			t.Errorf("CreateDomains: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteDomains", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteDomains(ctx, "sample-realm")
+		if err != nil {
+			t.Fatalf("DeleteDomains: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/access/domains/sample-realm")
+
+		var nilCtx context.Context
+		if err := svc.DeleteDomains(nilCtx, "sample-realm"); err == nil {
+			t.Errorf("DeleteDomains: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetDomains", func(t *testing.T) {
-		_, err := svc.GetDomains(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.GetDomains(ctx, "sample-realm")
+		if err != nil {
+			t.Fatalf("GetDomains: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetDomains: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/access/domains/sample-realm")
+
+		var nilCtx context.Context
+		if _, err := svc.GetDomains(nilCtx, "sample-realm"); err == nil {
+			t.Errorf("GetDomains: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateDomains", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateDomains(ctx, "sample-realm", &access.UpdateDomainsParams{})
+		if err != nil {
+			t.Fatalf("UpdateDomains: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/access/domains/sample-realm")
+
+		var nilCtx context.Context
+		if err := svc.UpdateDomains(nilCtx, "sample-realm", &access.UpdateDomainsParams{}); err == nil {
+			t.Errorf("UpdateDomains: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateDomainsSync", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateDomainsSync(ctx, "sample-realm", &access.CreateDomainsSyncParams{})
+		if err != nil {
+			t.Fatalf("CreateDomainsSync: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateDomainsSync: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/access/domains/sample-realm/sync")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateDomainsSync(nilCtx, "sample-realm", &access.CreateDomainsSyncParams{}); err == nil {
+			t.Errorf("CreateDomainsSync: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListGroups", func(t *testing.T) {
-		_, err := svc.ListGroups(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListGroups(ctx)
+		if err != nil {
+			t.Fatalf("ListGroups: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListGroups: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/access/groups")
+
+		var nilCtx context.Context
+		if _, err := svc.ListGroups(nilCtx); err == nil {
+			t.Errorf("ListGroups: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateGroups", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateGroups(ctx, &access.CreateGroupsParams{Groupid: "sample-groupid"})
+		if err != nil {
+			t.Fatalf("CreateGroups: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/access/groups")
+		assertParamValue(t, got.form, "groupid", "sample-groupid")
+
+		var nilCtx context.Context
+		if err := svc.CreateGroups(nilCtx, &access.CreateGroupsParams{Groupid: "sample-groupid"}); err == nil {
+			t.Errorf("CreateGroups: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteGroups", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteGroups(ctx, "sample-groupid")
+		if err != nil {
+			t.Fatalf("DeleteGroups: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/access/groups/sample-groupid")
+
+		var nilCtx context.Context
+		if err := svc.DeleteGroups(nilCtx, "sample-groupid"); err == nil {
+			t.Errorf("DeleteGroups: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetGroups", func(t *testing.T) {
-		_, err := svc.GetGroups(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.GetGroups(ctx, "sample-groupid")
+		if err != nil {
+			t.Fatalf("GetGroups: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetGroups: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/access/groups/sample-groupid")
+
+		var nilCtx context.Context
+		if _, err := svc.GetGroups(nilCtx, "sample-groupid"); err == nil {
+			t.Errorf("GetGroups: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateGroups", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateGroups(ctx, "sample-groupid", &access.UpdateGroupsParams{})
+		if err != nil {
+			t.Fatalf("UpdateGroups: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/access/groups/sample-groupid")
+
+		var nilCtx context.Context
+		if err := svc.UpdateGroups(nilCtx, "sample-groupid", &access.UpdateGroupsParams{}); err == nil {
+			t.Errorf("UpdateGroups: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListOpenid", func(t *testing.T) {
-		_, err := svc.ListOpenid(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListOpenid(ctx)
+		if err != nil {
+			t.Fatalf("ListOpenid: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListOpenid: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/access/openid")
+
+		var nilCtx context.Context
+		if _, err := svc.ListOpenid(nilCtx); err == nil {
+			t.Errorf("ListOpenid: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateOpenidAuthUrl", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateOpenidAuthUrl(ctx, &access.CreateOpenidAuthUrlParams{Realm: "sample-realm", RedirectUrl: "sample-redirect-url"})
+		if err != nil {
+			t.Fatalf("CreateOpenidAuthUrl: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateOpenidAuthUrl: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/access/openid/auth-url")
+		assertParamValue(t, got.form, "realm", "sample-realm")
+		assertParamValue(t, got.form, "redirect-url", "sample-redirect-url")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateOpenidAuthUrl(nilCtx, &access.CreateOpenidAuthUrlParams{Realm: "sample-realm", RedirectUrl: "sample-redirect-url"}); err == nil {
+			t.Errorf("CreateOpenidAuthUrl: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateOpenidLogin", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateOpenidLogin(ctx, &access.CreateOpenidLoginParams{Code: "sample-code", RedirectUrl: "sample-redirect-url", State: "sample-state"})
+		if err != nil {
+			t.Fatalf("CreateOpenidLogin: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateOpenidLogin: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/access/openid/login")
+		assertParamValue(t, got.form, "code", "sample-code")
+		assertParamValue(t, got.form, "redirect-url", "sample-redirect-url")
+		assertParamValue(t, got.form, "state", "sample-state")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateOpenidLogin(nilCtx, &access.CreateOpenidLoginParams{Code: "sample-code", RedirectUrl: "sample-redirect-url", State: "sample-state"}); err == nil {
+			t.Errorf("CreateOpenidLogin: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdatePassword", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdatePassword(ctx, &access.UpdatePasswordParams{Password: "sample-password", Userid: "sample-userid"})
+		if err != nil {
+			t.Fatalf("UpdatePassword: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/access/password")
+		assertParamValue(t, got.form, "password", "sample-password")
+		assertParamValue(t, got.form, "userid", "sample-userid")
+
+		var nilCtx context.Context
+		if err := svc.UpdatePassword(nilCtx, &access.UpdatePasswordParams{Password: "sample-password", Userid: "sample-userid"}); err == nil {
+			t.Errorf("UpdatePassword: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListPermissions", func(t *testing.T) {
-		_, err := svc.ListPermissions(ctx, nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListPermissions(ctx, &access.ListPermissionsParams{})
+		if err != nil {
+			t.Fatalf("ListPermissions: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListPermissions: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/access/permissions")
+
+		var nilCtx context.Context
+		if _, err := svc.ListPermissions(nilCtx, &access.ListPermissionsParams{}); err == nil {
+			t.Errorf("ListPermissions: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListRoles", func(t *testing.T) {
-		_, err := svc.ListRoles(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListRoles(ctx)
+		if err != nil {
+			t.Fatalf("ListRoles: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListRoles: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/access/roles")
+
+		var nilCtx context.Context
+		if _, err := svc.ListRoles(nilCtx); err == nil {
+			t.Errorf("ListRoles: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateRoles", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateRoles(ctx, &access.CreateRolesParams{Roleid: "sample-roleid"})
+		if err != nil {
+			t.Fatalf("CreateRoles: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/access/roles")
+		assertParamValue(t, got.form, "roleid", "sample-roleid")
+
+		var nilCtx context.Context
+		if err := svc.CreateRoles(nilCtx, &access.CreateRolesParams{Roleid: "sample-roleid"}); err == nil {
+			t.Errorf("CreateRoles: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteRoles", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteRoles(ctx, "sample-roleid")
+		if err != nil {
+			t.Fatalf("DeleteRoles: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/access/roles/sample-roleid")
+
+		var nilCtx context.Context
+		if err := svc.DeleteRoles(nilCtx, "sample-roleid"); err == nil {
+			t.Errorf("DeleteRoles: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetRoles", func(t *testing.T) {
-		_, err := svc.GetRoles(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.GetRoles(ctx, "sample-roleid")
+		if err != nil {
+			t.Fatalf("GetRoles: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetRoles: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/access/roles/sample-roleid")
+
+		var nilCtx context.Context
+		if _, err := svc.GetRoles(nilCtx, "sample-roleid"); err == nil {
+			t.Errorf("GetRoles: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateRoles", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateRoles(ctx, "sample-roleid", &access.UpdateRolesParams{})
+		if err != nil {
+			t.Fatalf("UpdateRoles: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/access/roles/sample-roleid")
+
+		var nilCtx context.Context
+		if err := svc.UpdateRoles(nilCtx, "sample-roleid", &access.UpdateRolesParams{}); err == nil {
+			t.Errorf("UpdateRoles: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListTfa", func(t *testing.T) {
-		_, err := svc.ListTfa(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListTfa(ctx)
+		if err != nil {
+			t.Fatalf("ListTfa: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListTfa: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/access/tfa")
+
+		var nilCtx context.Context
+		if _, err := svc.ListTfa(nilCtx); err == nil {
+			t.Errorf("ListTfa: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetTfa", func(t *testing.T) {
-		_, err := svc.GetTfa(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.GetTfa(ctx, "sample-userid")
+		if err != nil {
+			t.Fatalf("GetTfa: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetTfa: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/access/tfa/sample-userid")
+
+		var nilCtx context.Context
+		if _, err := svc.GetTfa(nilCtx, "sample-userid"); err == nil {
+			t.Errorf("GetTfa: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateTfa", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateTfa(ctx, "sample-userid", &access.CreateTfaParams{Type: "sample-type"})
+		if err != nil {
+			t.Fatalf("CreateTfa: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateTfa: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/access/tfa/sample-userid")
+		assertParamValue(t, got.form, "type", "sample-type")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateTfa(nilCtx, "sample-userid", &access.CreateTfaParams{Type: "sample-type"}); err == nil {
+			t.Errorf("CreateTfa: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteTfa", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteTfa(ctx, "sample-userid", "sample-id", &access.DeleteTfaParams{})
+		if err != nil {
+			t.Fatalf("DeleteTfa: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/access/tfa/sample-userid/sample-id")
+
+		var nilCtx context.Context
+		if err := svc.DeleteTfa(nilCtx, "sample-userid", "sample-id", &access.DeleteTfaParams{}); err == nil {
+			t.Errorf("DeleteTfa: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetTfa2", func(t *testing.T) {
-		_, err := svc.GetTfa2(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.GetTfa2(ctx, "sample-userid", "sample-id")
+		if err != nil {
+			t.Fatalf("GetTfa2: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetTfa2: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/access/tfa/sample-userid/sample-id")
+
+		var nilCtx context.Context
+		if _, err := svc.GetTfa2(nilCtx, "sample-userid", "sample-id"); err == nil {
+			t.Errorf("GetTfa2: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateTfa", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateTfa(ctx, "sample-userid", "sample-id", &access.UpdateTfaParams{})
+		if err != nil {
+			t.Fatalf("UpdateTfa: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/access/tfa/sample-userid/sample-id")
+
+		var nilCtx context.Context
+		if err := svc.UpdateTfa(nilCtx, "sample-userid", "sample-id", &access.UpdateTfaParams{}); err == nil {
+			t.Errorf("UpdateTfa: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListTicket", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
 		err := svc.ListTicket(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		if err != nil {
+			t.Fatalf("ListTicket: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/access/ticket")
+
+		var nilCtx context.Context
+		if err := svc.ListTicket(nilCtx); err == nil {
+			t.Errorf("ListTicket: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateTicket", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateTicket(ctx, &access.CreateTicketParams{Password: "sample-password", Username: "sample-username"})
+		if err != nil {
+			t.Fatalf("CreateTicket: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateTicket: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/access/ticket")
+		assertParamValue(t, got.form, "password", "sample-password")
+		assertParamValue(t, got.form, "username", "sample-username")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateTicket(nilCtx, &access.CreateTicketParams{Password: "sample-password", Username: "sample-username"}); err == nil {
+			t.Errorf("CreateTicket: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListUsers", func(t *testing.T) {
-		_, err := svc.ListUsers(ctx, nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListUsers(ctx, &access.ListUsersParams{})
+		if err != nil {
+			t.Fatalf("ListUsers: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListUsers: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/access/users")
+
+		var nilCtx context.Context
+		if _, err := svc.ListUsers(nilCtx, &access.ListUsersParams{}); err == nil {
+			t.Errorf("ListUsers: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateUsers", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateUsers(ctx, &access.CreateUsersParams{Userid: "sample-userid"})
+		if err != nil {
+			t.Fatalf("CreateUsers: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/access/users")
+		assertParamValue(t, got.form, "userid", "sample-userid")
+
+		var nilCtx context.Context
+		if err := svc.CreateUsers(nilCtx, &access.CreateUsersParams{Userid: "sample-userid"}); err == nil {
+			t.Errorf("CreateUsers: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteUsers", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteUsers(ctx, "sample-userid")
+		if err != nil {
+			t.Fatalf("DeleteUsers: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/access/users/sample-userid")
+
+		var nilCtx context.Context
+		if err := svc.DeleteUsers(nilCtx, "sample-userid"); err == nil {
+			t.Errorf("DeleteUsers: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetUsers", func(t *testing.T) {
-		_, err := svc.GetUsers(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.GetUsers(ctx, "sample-userid")
+		if err != nil {
+			t.Fatalf("GetUsers: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetUsers: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/access/users/sample-userid")
+
+		var nilCtx context.Context
+		if _, err := svc.GetUsers(nilCtx, "sample-userid"); err == nil {
+			t.Errorf("GetUsers: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateUsers", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateUsers(ctx, "sample-userid", &access.UpdateUsersParams{})
+		if err != nil {
+			t.Fatalf("UpdateUsers: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/access/users/sample-userid")
+
+		var nilCtx context.Context
+		if err := svc.UpdateUsers(nilCtx, "sample-userid", &access.UpdateUsersParams{}); err == nil {
+			t.Errorf("UpdateUsers: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListUsersTfa", func(t *testing.T) {
-		_, err := svc.ListUsersTfa(ctx, "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListUsersTfa(ctx, "sample-userid", &access.ListUsersTfaParams{})
+		if err != nil {
+			t.Fatalf("ListUsersTfa: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListUsersTfa: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/access/users/sample-userid/tfa")
+
+		var nilCtx context.Context
+		if _, err := svc.ListUsersTfa(nilCtx, "sample-userid", &access.ListUsersTfaParams{}); err == nil {
+			t.Errorf("ListUsersTfa: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListUsersToken", func(t *testing.T) {
-		_, err := svc.ListUsersToken(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListUsersToken(ctx, "sample-userid")
+		if err != nil {
+			t.Fatalf("ListUsersToken: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListUsersToken: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/access/users/sample-userid/token")
+
+		var nilCtx context.Context
+		if _, err := svc.ListUsersToken(nilCtx, "sample-userid"); err == nil {
+			t.Errorf("ListUsersToken: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteUsersToken", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteUsersToken(ctx, "sample-userid", "sample-tokenid")
+		if err != nil {
+			t.Fatalf("DeleteUsersToken: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/access/users/sample-userid/token/sample-tokenid")
+
+		var nilCtx context.Context
+		if err := svc.DeleteUsersToken(nilCtx, "sample-userid", "sample-tokenid"); err == nil {
+			t.Errorf("DeleteUsersToken: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetUsersToken", func(t *testing.T) {
-		_, err := svc.GetUsersToken(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.GetUsersToken(ctx, "sample-userid", "sample-tokenid")
+		if err != nil {
+			t.Fatalf("GetUsersToken: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetUsersToken: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/access/users/sample-userid/token/sample-tokenid")
+
+		var nilCtx context.Context
+		if _, err := svc.GetUsersToken(nilCtx, "sample-userid", "sample-tokenid"); err == nil {
+			t.Errorf("GetUsersToken: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateUsersToken", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateUsersToken(ctx, "sample-userid", "sample-tokenid", &access.CreateUsersTokenParams{})
+		if err != nil {
+			t.Fatalf("CreateUsersToken: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateUsersToken: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/access/users/sample-userid/token/sample-tokenid")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateUsersToken(nilCtx, "sample-userid", "sample-tokenid", &access.CreateUsersTokenParams{}); err == nil {
+			t.Errorf("CreateUsersToken: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateUsersToken", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.UpdateUsersToken(ctx, "sample-userid", "sample-tokenid", &access.UpdateUsersTokenParams{})
+		if err != nil {
+			t.Fatalf("UpdateUsersToken: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("UpdateUsersToken: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/access/users/sample-userid/token/sample-tokenid")
+
+		var nilCtx context.Context
+		if _, err := svc.UpdateUsersToken(nilCtx, "sample-userid", "sample-tokenid", &access.UpdateUsersTokenParams{}); err == nil {
+			t.Errorf("UpdateUsersToken: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateUsersUnlockTfa", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.UpdateUsersUnlockTfa(ctx, "sample-userid")
+		if err != nil {
+			t.Fatalf("UpdateUsersUnlockTfa: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("UpdateUsersUnlockTfa: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/access/users/sample-userid/unlock-tfa")
+
+		var nilCtx context.Context
+		if _, err := svc.UpdateUsersUnlockTfa(nilCtx, "sample-userid"); err == nil {
+			t.Errorf("UpdateUsersUnlockTfa: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateVncticket", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateVncticket(ctx, &access.CreateVncticketParams{Authid: "sample-authid", Path: "sample-path", Privs: "sample-privs", Vncticket: "sample-vncticket"})
+		if err != nil {
+			t.Fatalf("CreateVncticket: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/access/vncticket")
+		assertParamValue(t, got.form, "authid", "sample-authid")
+		assertParamValue(t, got.form, "path", "sample-path")
+		assertParamValue(t, got.form, "privs", "sample-privs")
+		assertParamValue(t, got.form, "vncticket", "sample-vncticket")
+
+		var nilCtx context.Context
+		if err := svc.CreateVncticket(nilCtx, &access.CreateVncticketParams{Authid: "sample-authid", Path: "sample-path", Privs: "sample-privs", Vncticket: "sample-vncticket"}); err == nil {
+			t.Errorf("CreateVncticket: expected error for nil context, got nil")
+		}
+	})
+	t.Run("ErrorPath_GET", func(t *testing.T) {
+		harness.set(http.StatusInternalServerError, `{"data":null,"success":0,"message":"boom"}`)
+
+		_, err := svc.ListAccess(ctx)
+		if err == nil {
+			t.Fatalf("ListAccess: expected error on 500 response, got nil")
+		}
+	})
+	t.Run("ErrorPath_PUT", func(t *testing.T) {
+		harness.set(http.StatusInternalServerError, `{"data":null,"success":0,"message":"boom"}`)
+
+		err := svc.UpdateAcl(ctx, &access.UpdateAclParams{Path: "sample-path", Roles: "sample-roles"})
+		if err == nil {
+			t.Fatalf("UpdateAcl: expected error on 500 response, got nil")
+		}
+	})
+	t.Run("ErrorPath_POST", func(t *testing.T) {
+		harness.set(http.StatusInternalServerError, `{"data":null,"success":0,"message":"boom"}`)
+
+		err := svc.CreateDomains(ctx, &access.CreateDomainsParams{Realm: "sample-realm", Type: "sample-type"})
+		if err == nil {
+			t.Fatalf("CreateDomains: expected error on 500 response, got nil")
+		}
+	})
+	t.Run("ErrorPath_DELETE", func(t *testing.T) {
+		harness.set(http.StatusInternalServerError, `{"data":null,"success":0,"message":"boom"}`)
+
+		err := svc.DeleteDomains(ctx, "sample-realm")
+		if err == nil {
+			t.Fatalf("DeleteDomains: expected error on 500 response, got nil")
+		}
 	})
 }

@@ -49,4 +49,4 @@ examples/*/lxc-management
 examples/*/metrics-prom
 examples/*/vm-clone-start-cloudinit
 examples/*/vm-cloudinit-start
-pvegen
+/pvegen

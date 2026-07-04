@@ -9,11 +9,14 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strconv"
+	"sync"
 	"testing"
 
 	"github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/api/pools"
 	pveclient "github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/client"
 )
+
+var _ = json.RawMessage(nil)
 
 func smokeOptsFromServerURL(u string) pveclient.Options {
 	parsed, err := url.Parse(u)
@@ -36,18 +39,107 @@ func smokeOptsFromServerURL(u string) pveclient.Options {
 	}
 }
 
-func TestSmoke_Pools_GeneratedMethods(t *testing.T) {
-	t.Parallel()
+// recordedRequest captures what the mock server observed for the most
+// recently dispatched request.
+type recordedRequest struct {
+	method string
+	path   string
+	query  url.Values
+	form   url.Values
+}
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"data":    map[string]any{},
-			"success": 1,
-		})
-	})
+// testHarness runs a single httptest.Server shared by every subtest in this
+// file. Subtests are never run in parallel (each sets the desired response
+// immediately before invoking the method under test, then reads back the
+// recorded request), so the mutex below only guards against the harness
+// goroutine and the test goroutine overlapping on a single in-flight
+// request, never against concurrent subtests.
+type testHarness struct {
+	mu       sync.Mutex
+	last     recordedRequest
+	nextCode int
+	nextBody string
+}
 
-	srv := httptest.NewServer(mux)
+// newTestHarness starts the mock server and returns it alongside the harness
+// used to configure responses and inspect recorded requests.
+func newTestHarness() (*httptest.Server, *testHarness) {
+	h := &testHarness{nextCode: http.StatusOK}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+
+		_ = r.ParseForm()
+		h.last = recordedRequest{
+			method: r.Method,
+			path:   r.URL.Path,
+			query:  r.URL.Query(),
+			form:   r.PostForm,
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(h.nextCode)
+		_, _ = w.Write([]byte(h.nextBody))
+	}))
+
+	return srv, h
+}
+
+// set configures the status code and body the next request will receive.
+func (h *testHarness) set(code int, body string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	h.nextCode = code
+	h.nextBody = body
+}
+
+// snapshot returns a copy of the most recently recorded request.
+func (h *testHarness) snapshot() recordedRequest {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	return h.last
+}
+
+// assertRequestLine fails the test when the recorded method or resolved
+// path does not exactly match what the endpoint's spec entry declares.
+func assertRequestLine(t *testing.T, got recordedRequest, wantMethod, wantPath string) {
+	t.Helper()
+
+	if got.method != wantMethod {
+		t.Errorf("method = %q, want %q", got.method, wantMethod)
+	}
+
+	if got.path != wantPath {
+		t.Errorf("path = %q, want %q", got.path, wantPath)
+	}
+}
+
+// assertParamValue fails the test when the wire-encoded value of key does
+// not exactly equal want.
+func assertParamValue(t *testing.T, values url.Values, key, want string) {
+	t.Helper()
+
+	if got := values.Get(key); got != want {
+		t.Errorf("param %q = %q, want %q", key, got, want)
+	}
+}
+
+// assertParamPresent fails the test when key is absent from values. Used for
+// required parameters whose wire encoding is not a simple comparable string
+// (e.g. json.RawMessage-typed fields).
+func assertParamPresent(t *testing.T, values url.Values, key string) {
+	t.Helper()
+
+	if _, ok := values[key]; !ok {
+		t.Errorf("param %q missing from request", key)
+	}
+}
+
+func TestGenerated_Pools_Methods(t *testing.T) {
+	srv, harness := newTestHarness()
 	defer srv.Close()
 
 	c, err := pveclient.NewClient(smokeOptsFromServerURL(srv.URL))
@@ -58,12 +150,157 @@ func TestSmoke_Pools_GeneratedMethods(t *testing.T) {
 	svc := pools.New(c)
 	ctx := context.Background()
 
+	t.Run("DeletePools", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeletePools(ctx, &pools.DeletePoolsParams{Poolid: "sample-poolid"})
+		if err != nil {
+			t.Fatalf("DeletePools: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/pools")
+		assertParamValue(t, got.query, "poolid", "sample-poolid")
+
+		var nilCtx context.Context
+		if err := svc.DeletePools(nilCtx, &pools.DeletePoolsParams{Poolid: "sample-poolid"}); err == nil {
+			t.Errorf("DeletePools: expected error for nil context, got nil")
+		}
+	})
 	t.Run("ListPools", func(t *testing.T) {
-		_, err := svc.ListPools(ctx, nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListPools(ctx, &pools.ListPoolsParams{})
+		if err != nil {
+			t.Fatalf("ListPools: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListPools: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/pools")
+
+		var nilCtx context.Context
+		if _, err := svc.ListPools(nilCtx, &pools.ListPoolsParams{}); err == nil {
+			t.Errorf("ListPools: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreatePools", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreatePools(ctx, &pools.CreatePoolsParams{Poolid: "sample-poolid"})
+		if err != nil {
+			t.Fatalf("CreatePools: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/pools")
+		assertParamValue(t, got.form, "poolid", "sample-poolid")
+
+		var nilCtx context.Context
+		if err := svc.CreatePools(nilCtx, &pools.CreatePoolsParams{Poolid: "sample-poolid"}); err == nil {
+			t.Errorf("CreatePools: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdatePools", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdatePools(ctx, &pools.UpdatePoolsParams{Poolid: "sample-poolid"})
+		if err != nil {
+			t.Fatalf("UpdatePools: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/pools")
+		assertParamValue(t, got.form, "poolid", "sample-poolid")
+
+		var nilCtx context.Context
+		if err := svc.UpdatePools(nilCtx, &pools.UpdatePoolsParams{Poolid: "sample-poolid"}); err == nil {
+			t.Errorf("UpdatePools: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeletePools2", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeletePools2(ctx, "sample-poolid")
+		if err != nil {
+			t.Fatalf("DeletePools2: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/pools/sample-poolid")
+
+		var nilCtx context.Context
+		if err := svc.DeletePools2(nilCtx, "sample-poolid"); err == nil {
+			t.Errorf("DeletePools2: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetPools", func(t *testing.T) {
-		_, err := svc.GetPools(ctx, "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.GetPools(ctx, "sample-poolid", &pools.GetPoolsParams{})
+		if err != nil {
+			t.Fatalf("GetPools: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetPools: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/pools/sample-poolid")
+
+		var nilCtx context.Context
+		if _, err := svc.GetPools(nilCtx, "sample-poolid", &pools.GetPoolsParams{}); err == nil {
+			t.Errorf("GetPools: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdatePools2", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdatePools2(ctx, "sample-poolid", &pools.UpdatePools2Params{})
+		if err != nil {
+			t.Fatalf("UpdatePools2: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/pools/sample-poolid")
+
+		var nilCtx context.Context
+		if err := svc.UpdatePools2(nilCtx, "sample-poolid", &pools.UpdatePools2Params{}); err == nil {
+			t.Errorf("UpdatePools2: expected error for nil context, got nil")
+		}
+	})
+	t.Run("ErrorPath_DELETE", func(t *testing.T) {
+		harness.set(http.StatusInternalServerError, `{"data":null,"success":0,"message":"boom"}`)
+
+		err := svc.DeletePools(ctx, &pools.DeletePoolsParams{Poolid: "sample-poolid"})
+		if err == nil {
+			t.Fatalf("DeletePools: expected error on 500 response, got nil")
+		}
+	})
+	t.Run("ErrorPath_GET", func(t *testing.T) {
+		harness.set(http.StatusInternalServerError, `{"data":null,"success":0,"message":"boom"}`)
+
+		_, err := svc.ListPools(ctx, &pools.ListPoolsParams{})
+		if err == nil {
+			t.Fatalf("ListPools: expected error on 500 response, got nil")
+		}
+	})
+	t.Run("ErrorPath_POST", func(t *testing.T) {
+		harness.set(http.StatusInternalServerError, `{"data":null,"success":0,"message":"boom"}`)
+
+		err := svc.CreatePools(ctx, &pools.CreatePoolsParams{Poolid: "sample-poolid"})
+		if err == nil {
+			t.Fatalf("CreatePools: expected error on 500 response, got nil")
+		}
+	})
+	t.Run("ErrorPath_PUT", func(t *testing.T) {
+		harness.set(http.StatusInternalServerError, `{"data":null,"success":0,"message":"boom"}`)
+
+		err := svc.UpdatePools(ctx, &pools.UpdatePoolsParams{Poolid: "sample-poolid"})
+		if err == nil {
+			t.Fatalf("UpdatePools: expected error on 500 response, got nil")
+		}
 	})
 }

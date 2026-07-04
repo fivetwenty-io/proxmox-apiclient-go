@@ -9,11 +9,14 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strconv"
+	"sync"
 	"testing"
 
 	"github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/api/cluster"
 	pveclient "github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/client"
 )
+
+var _ = json.RawMessage(nil)
 
 func smokeOptsFromServerURL(u string) pveclient.Options {
 	parsed, err := url.Parse(u)
@@ -36,18 +39,107 @@ func smokeOptsFromServerURL(u string) pveclient.Options {
 	}
 }
 
-func TestSmoke_Cluster_GeneratedMethods(t *testing.T) {
-	t.Parallel()
+// recordedRequest captures what the mock server observed for the most
+// recently dispatched request.
+type recordedRequest struct {
+	method string
+	path   string
+	query  url.Values
+	form   url.Values
+}
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"data":    map[string]any{},
-			"success": 1,
-		})
-	})
+// testHarness runs a single httptest.Server shared by every subtest in this
+// file. Subtests are never run in parallel (each sets the desired response
+// immediately before invoking the method under test, then reads back the
+// recorded request), so the mutex below only guards against the harness
+// goroutine and the test goroutine overlapping on a single in-flight
+// request, never against concurrent subtests.
+type testHarness struct {
+	mu       sync.Mutex
+	last     recordedRequest
+	nextCode int
+	nextBody string
+}
 
-	srv := httptest.NewServer(mux)
+// newTestHarness starts the mock server and returns it alongside the harness
+// used to configure responses and inspect recorded requests.
+func newTestHarness() (*httptest.Server, *testHarness) {
+	h := &testHarness{nextCode: http.StatusOK}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+
+		_ = r.ParseForm()
+		h.last = recordedRequest{
+			method: r.Method,
+			path:   r.URL.Path,
+			query:  r.URL.Query(),
+			form:   r.PostForm,
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(h.nextCode)
+		_, _ = w.Write([]byte(h.nextBody))
+	}))
+
+	return srv, h
+}
+
+// set configures the status code and body the next request will receive.
+func (h *testHarness) set(code int, body string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	h.nextCode = code
+	h.nextBody = body
+}
+
+// snapshot returns a copy of the most recently recorded request.
+func (h *testHarness) snapshot() recordedRequest {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	return h.last
+}
+
+// assertRequestLine fails the test when the recorded method or resolved
+// path does not exactly match what the endpoint's spec entry declares.
+func assertRequestLine(t *testing.T, got recordedRequest, wantMethod, wantPath string) {
+	t.Helper()
+
+	if got.method != wantMethod {
+		t.Errorf("method = %q, want %q", got.method, wantMethod)
+	}
+
+	if got.path != wantPath {
+		t.Errorf("path = %q, want %q", got.path, wantPath)
+	}
+}
+
+// assertParamValue fails the test when the wire-encoded value of key does
+// not exactly equal want.
+func assertParamValue(t *testing.T, values url.Values, key, want string) {
+	t.Helper()
+
+	if got := values.Get(key); got != want {
+		t.Errorf("param %q = %q, want %q", key, got, want)
+	}
+}
+
+// assertParamPresent fails the test when key is absent from values. Used for
+// required parameters whose wire encoding is not a simple comparable string
+// (e.g. json.RawMessage-typed fields).
+func assertParamPresent(t *testing.T, values url.Values, key string) {
+	t.Helper()
+
+	if _, ok := values[key]; !ok {
+		t.Errorf("param %q missing from request", key)
+	}
+}
+
+func TestGenerated_Cluster_Methods(t *testing.T) {
+	srv, harness := newTestHarness()
 	defer srv.Close()
 
 	c, err := pveclient.NewClient(smokeOptsFromServerURL(srv.URL))
@@ -59,515 +151,4709 @@ func TestSmoke_Cluster_GeneratedMethods(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("ListCluster", func(t *testing.T) {
-		_, err := svc.ListCluster(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListCluster(ctx)
+		if err != nil {
+			t.Fatalf("ListCluster: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListCluster: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster")
+
+		var nilCtx context.Context
+		if _, err := svc.ListCluster(nilCtx); err == nil {
+			t.Errorf("ListCluster: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListAcme", func(t *testing.T) {
-		_, err := svc.ListAcme(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListAcme(ctx)
+		if err != nil {
+			t.Fatalf("ListAcme: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListAcme: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/acme")
+
+		var nilCtx context.Context
+		if _, err := svc.ListAcme(nilCtx); err == nil {
+			t.Errorf("ListAcme: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListAcmeAccount", func(t *testing.T) {
-		_, err := svc.ListAcmeAccount(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListAcmeAccount(ctx)
+		if err != nil {
+			t.Fatalf("ListAcmeAccount: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListAcmeAccount: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/acme/account")
+
+		var nilCtx context.Context
+		if _, err := svc.ListAcmeAccount(nilCtx); err == nil {
+			t.Errorf("ListAcmeAccount: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateAcmeAccount", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateAcmeAccount(ctx, &cluster.CreateAcmeAccountParams{Contact: "sample-contact"})
+		if err != nil {
+			t.Fatalf("CreateAcmeAccount: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateAcmeAccount: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/cluster/acme/account")
+		assertParamValue(t, got.form, "contact", "sample-contact")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateAcmeAccount(nilCtx, &cluster.CreateAcmeAccountParams{Contact: "sample-contact"}); err == nil {
+			t.Errorf("CreateAcmeAccount: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteAcmeAccount", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.DeleteAcmeAccount(ctx, "sample-name")
+		if err != nil {
+			t.Fatalf("DeleteAcmeAccount: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("DeleteAcmeAccount: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/cluster/acme/account/sample-name")
+
+		var nilCtx context.Context
+		if _, err := svc.DeleteAcmeAccount(nilCtx, "sample-name"); err == nil {
+			t.Errorf("DeleteAcmeAccount: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetAcmeAccount", func(t *testing.T) {
-		_, err := svc.GetAcmeAccount(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.GetAcmeAccount(ctx, "sample-name")
+		if err != nil {
+			t.Fatalf("GetAcmeAccount: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetAcmeAccount: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/acme/account/sample-name")
+
+		var nilCtx context.Context
+		if _, err := svc.GetAcmeAccount(nilCtx, "sample-name"); err == nil {
+			t.Errorf("GetAcmeAccount: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateAcmeAccount", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.UpdateAcmeAccount(ctx, "sample-name", &cluster.UpdateAcmeAccountParams{})
+		if err != nil {
+			t.Fatalf("UpdateAcmeAccount: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("UpdateAcmeAccount: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/cluster/acme/account/sample-name")
+
+		var nilCtx context.Context
+		if _, err := svc.UpdateAcmeAccount(nilCtx, "sample-name", &cluster.UpdateAcmeAccountParams{}); err == nil {
+			t.Errorf("UpdateAcmeAccount: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListAcmeChallengeSchema", func(t *testing.T) {
-		_, err := svc.ListAcmeChallengeSchema(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListAcmeChallengeSchema(ctx)
+		if err != nil {
+			t.Fatalf("ListAcmeChallengeSchema: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListAcmeChallengeSchema: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/acme/challenge-schema")
+
+		var nilCtx context.Context
+		if _, err := svc.ListAcmeChallengeSchema(nilCtx); err == nil {
+			t.Errorf("ListAcmeChallengeSchema: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListAcmeDirectories", func(t *testing.T) {
-		_, err := svc.ListAcmeDirectories(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListAcmeDirectories(ctx)
+		if err != nil {
+			t.Fatalf("ListAcmeDirectories: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListAcmeDirectories: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/acme/directories")
+
+		var nilCtx context.Context
+		if _, err := svc.ListAcmeDirectories(nilCtx); err == nil {
+			t.Errorf("ListAcmeDirectories: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListAcmeMeta", func(t *testing.T) {
-		_, err := svc.ListAcmeMeta(ctx, nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListAcmeMeta(ctx, &cluster.ListAcmeMetaParams{})
+		if err != nil {
+			t.Fatalf("ListAcmeMeta: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListAcmeMeta: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/acme/meta")
+
+		var nilCtx context.Context
+		if _, err := svc.ListAcmeMeta(nilCtx, &cluster.ListAcmeMetaParams{}); err == nil {
+			t.Errorf("ListAcmeMeta: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListAcmePlugins", func(t *testing.T) {
-		_, err := svc.ListAcmePlugins(ctx, nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListAcmePlugins(ctx, &cluster.ListAcmePluginsParams{})
+		if err != nil {
+			t.Fatalf("ListAcmePlugins: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListAcmePlugins: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/acme/plugins")
+
+		var nilCtx context.Context
+		if _, err := svc.ListAcmePlugins(nilCtx, &cluster.ListAcmePluginsParams{}); err == nil {
+			t.Errorf("ListAcmePlugins: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateAcmePlugins", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateAcmePlugins(ctx, &cluster.CreateAcmePluginsParams{Id: "sample-id", Type: "sample-type"})
+		if err != nil {
+			t.Fatalf("CreateAcmePlugins: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/cluster/acme/plugins")
+		assertParamValue(t, got.form, "id", "sample-id")
+		assertParamValue(t, got.form, "type", "sample-type")
+
+		var nilCtx context.Context
+		if err := svc.CreateAcmePlugins(nilCtx, &cluster.CreateAcmePluginsParams{Id: "sample-id", Type: "sample-type"}); err == nil {
+			t.Errorf("CreateAcmePlugins: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteAcmePlugins", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteAcmePlugins(ctx, "sample-id")
+		if err != nil {
+			t.Fatalf("DeleteAcmePlugins: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/cluster/acme/plugins/sample-id")
+
+		var nilCtx context.Context
+		if err := svc.DeleteAcmePlugins(nilCtx, "sample-id"); err == nil {
+			t.Errorf("DeleteAcmePlugins: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetAcmePlugins", func(t *testing.T) {
-		_, err := svc.GetAcmePlugins(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.GetAcmePlugins(ctx, "sample-id")
+		if err != nil {
+			t.Fatalf("GetAcmePlugins: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetAcmePlugins: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/acme/plugins/sample-id")
+
+		var nilCtx context.Context
+		if _, err := svc.GetAcmePlugins(nilCtx, "sample-id"); err == nil {
+			t.Errorf("GetAcmePlugins: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateAcmePlugins", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateAcmePlugins(ctx, "sample-id", &cluster.UpdateAcmePluginsParams{})
+		if err != nil {
+			t.Fatalf("UpdateAcmePlugins: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/cluster/acme/plugins/sample-id")
+
+		var nilCtx context.Context
+		if err := svc.UpdateAcmePlugins(nilCtx, "sample-id", &cluster.UpdateAcmePluginsParams{}); err == nil {
+			t.Errorf("UpdateAcmePlugins: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListAcmeTos", func(t *testing.T) {
-		_, err := svc.ListAcmeTos(ctx, nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListAcmeTos(ctx, &cluster.ListAcmeTosParams{})
+		if err != nil {
+			t.Fatalf("ListAcmeTos: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListAcmeTos: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/acme/tos")
+
+		var nilCtx context.Context
+		if _, err := svc.ListAcmeTos(nilCtx, &cluster.ListAcmeTosParams{}); err == nil {
+			t.Errorf("ListAcmeTos: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListBackup", func(t *testing.T) {
-		_, err := svc.ListBackup(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListBackup(ctx)
+		if err != nil {
+			t.Fatalf("ListBackup: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListBackup: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/backup")
+
+		var nilCtx context.Context
+		if _, err := svc.ListBackup(nilCtx); err == nil {
+			t.Errorf("ListBackup: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateBackup", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateBackup(ctx, &cluster.CreateBackupParams{})
+		if err != nil {
+			t.Fatalf("CreateBackup: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/cluster/backup")
+
+		var nilCtx context.Context
+		if err := svc.CreateBackup(nilCtx, &cluster.CreateBackupParams{}); err == nil {
+			t.Errorf("CreateBackup: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListBackupInfo", func(t *testing.T) {
-		_, err := svc.ListBackupInfo(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListBackupInfo(ctx)
+		if err != nil {
+			t.Fatalf("ListBackupInfo: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListBackupInfo: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/backup-info")
+
+		var nilCtx context.Context
+		if _, err := svc.ListBackupInfo(nilCtx); err == nil {
+			t.Errorf("ListBackupInfo: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListBackupInfoNotBackedUp", func(t *testing.T) {
-		_, err := svc.ListBackupInfoNotBackedUp(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListBackupInfoNotBackedUp(ctx)
+		if err != nil {
+			t.Fatalf("ListBackupInfoNotBackedUp: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListBackupInfoNotBackedUp: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/backup-info/not-backed-up")
+
+		var nilCtx context.Context
+		if _, err := svc.ListBackupInfoNotBackedUp(nilCtx); err == nil {
+			t.Errorf("ListBackupInfoNotBackedUp: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteBackup", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteBackup(ctx, "sample-id")
+		if err != nil {
+			t.Fatalf("DeleteBackup: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/cluster/backup/sample-id")
+
+		var nilCtx context.Context
+		if err := svc.DeleteBackup(nilCtx, "sample-id"); err == nil {
+			t.Errorf("DeleteBackup: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetBackup", func(t *testing.T) {
-		_, err := svc.GetBackup(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.GetBackup(ctx, "sample-id")
+		if err != nil {
+			t.Fatalf("GetBackup: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetBackup: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/backup/sample-id")
+
+		var nilCtx context.Context
+		if _, err := svc.GetBackup(nilCtx, "sample-id"); err == nil {
+			t.Errorf("GetBackup: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateBackup", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateBackup(ctx, "sample-id", &cluster.UpdateBackupParams{})
+		if err != nil {
+			t.Fatalf("UpdateBackup: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/cluster/backup/sample-id")
+
+		var nilCtx context.Context
+		if err := svc.UpdateBackup(nilCtx, "sample-id", &cluster.UpdateBackupParams{}); err == nil {
+			t.Errorf("UpdateBackup: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListBackupIncludedVolumes", func(t *testing.T) {
-		_, err := svc.ListBackupIncludedVolumes(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListBackupIncludedVolumes(ctx, "sample-id")
+		if err != nil {
+			t.Fatalf("ListBackupIncludedVolumes: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListBackupIncludedVolumes: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/backup/sample-id/included_volumes")
+
+		var nilCtx context.Context
+		if _, err := svc.ListBackupIncludedVolumes(nilCtx, "sample-id"); err == nil {
+			t.Errorf("ListBackupIncludedVolumes: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListBulkAction", func(t *testing.T) {
-		_, err := svc.ListBulkAction(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListBulkAction(ctx)
+		if err != nil {
+			t.Fatalf("ListBulkAction: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListBulkAction: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/bulk-action")
+
+		var nilCtx context.Context
+		if _, err := svc.ListBulkAction(nilCtx); err == nil {
+			t.Errorf("ListBulkAction: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListBulkActionGuest", func(t *testing.T) {
-		_, err := svc.ListBulkActionGuest(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListBulkActionGuest(ctx)
+		if err != nil {
+			t.Fatalf("ListBulkActionGuest: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListBulkActionGuest: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/bulk-action/guest")
+
+		var nilCtx context.Context
+		if _, err := svc.ListBulkActionGuest(nilCtx); err == nil {
+			t.Errorf("ListBulkActionGuest: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateBulkActionGuestMigrate", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateBulkActionGuestMigrate(ctx, &cluster.CreateBulkActionGuestMigrateParams{Target: "sample-target"})
+		if err != nil {
+			t.Fatalf("CreateBulkActionGuestMigrate: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateBulkActionGuestMigrate: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/cluster/bulk-action/guest/migrate")
+		assertParamValue(t, got.form, "target", "sample-target")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateBulkActionGuestMigrate(nilCtx, &cluster.CreateBulkActionGuestMigrateParams{Target: "sample-target"}); err == nil {
+			t.Errorf("CreateBulkActionGuestMigrate: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateBulkActionGuestShutdown", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateBulkActionGuestShutdown(ctx, &cluster.CreateBulkActionGuestShutdownParams{})
+		if err != nil {
+			t.Fatalf("CreateBulkActionGuestShutdown: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateBulkActionGuestShutdown: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/cluster/bulk-action/guest/shutdown")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateBulkActionGuestShutdown(nilCtx, &cluster.CreateBulkActionGuestShutdownParams{}); err == nil {
+			t.Errorf("CreateBulkActionGuestShutdown: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateBulkActionGuestStart", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateBulkActionGuestStart(ctx, &cluster.CreateBulkActionGuestStartParams{})
+		if err != nil {
+			t.Fatalf("CreateBulkActionGuestStart: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateBulkActionGuestStart: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/cluster/bulk-action/guest/start")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateBulkActionGuestStart(nilCtx, &cluster.CreateBulkActionGuestStartParams{}); err == nil {
+			t.Errorf("CreateBulkActionGuestStart: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateBulkActionGuestSuspend", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateBulkActionGuestSuspend(ctx, &cluster.CreateBulkActionGuestSuspendParams{})
+		if err != nil {
+			t.Fatalf("CreateBulkActionGuestSuspend: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateBulkActionGuestSuspend: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/cluster/bulk-action/guest/suspend")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateBulkActionGuestSuspend(nilCtx, &cluster.CreateBulkActionGuestSuspendParams{}); err == nil {
+			t.Errorf("CreateBulkActionGuestSuspend: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListCeph", func(t *testing.T) {
-		_, err := svc.ListCeph(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListCeph(ctx)
+		if err != nil {
+			t.Fatalf("ListCeph: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListCeph: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/ceph")
+
+		var nilCtx context.Context
+		if _, err := svc.ListCeph(nilCtx); err == nil {
+			t.Errorf("ListCeph: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListCephFlags", func(t *testing.T) {
-		_, err := svc.ListCephFlags(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListCephFlags(ctx)
+		if err != nil {
+			t.Fatalf("ListCephFlags: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListCephFlags: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/ceph/flags")
+
+		var nilCtx context.Context
+		if _, err := svc.ListCephFlags(nilCtx); err == nil {
+			t.Errorf("ListCephFlags: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateCephFlags", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.UpdateCephFlags(ctx, &cluster.UpdateCephFlagsParams{})
+		if err != nil {
+			t.Fatalf("UpdateCephFlags: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("UpdateCephFlags: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/cluster/ceph/flags")
+
+		var nilCtx context.Context
+		if _, err := svc.UpdateCephFlags(nilCtx, &cluster.UpdateCephFlagsParams{}); err == nil {
+			t.Errorf("UpdateCephFlags: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetCephFlags", func(t *testing.T) {
-		_, err := svc.GetCephFlags(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.GetCephFlags(ctx, "sample-flag")
+		if err != nil {
+			t.Fatalf("GetCephFlags: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetCephFlags: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/ceph/flags/sample-flag")
+
+		var nilCtx context.Context
+		if _, err := svc.GetCephFlags(nilCtx, "sample-flag"); err == nil {
+			t.Errorf("GetCephFlags: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateCephFlags2", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateCephFlags2(ctx, "sample-flag", &cluster.UpdateCephFlags2Params{Value: true})
+		if err != nil {
+			t.Fatalf("UpdateCephFlags2: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/cluster/ceph/flags/sample-flag")
+		assertParamValue(t, got.form, "value", "1")
+
+		var nilCtx context.Context
+		if err := svc.UpdateCephFlags2(nilCtx, "sample-flag", &cluster.UpdateCephFlags2Params{Value: true}); err == nil {
+			t.Errorf("UpdateCephFlags2: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListCephMetadata", func(t *testing.T) {
-		_, err := svc.ListCephMetadata(ctx, nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListCephMetadata(ctx, &cluster.ListCephMetadataParams{})
+		if err != nil {
+			t.Fatalf("ListCephMetadata: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListCephMetadata: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/ceph/metadata")
+
+		var nilCtx context.Context
+		if _, err := svc.ListCephMetadata(nilCtx, &cluster.ListCephMetadataParams{}); err == nil {
+			t.Errorf("ListCephMetadata: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListCephStatus", func(t *testing.T) {
-		_, err := svc.ListCephStatus(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListCephStatus(ctx)
+		if err != nil {
+			t.Fatalf("ListCephStatus: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListCephStatus: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/ceph/status")
+
+		var nilCtx context.Context
+		if _, err := svc.ListCephStatus(nilCtx); err == nil {
+			t.Errorf("ListCephStatus: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListConfig", func(t *testing.T) {
-		_, err := svc.ListConfig(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListConfig(ctx)
+		if err != nil {
+			t.Fatalf("ListConfig: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListConfig: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/config")
+
+		var nilCtx context.Context
+		if _, err := svc.ListConfig(nilCtx); err == nil {
+			t.Errorf("ListConfig: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateConfig", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateConfig(ctx, &cluster.CreateConfigParams{Clustername: "sample-clustername"})
+		if err != nil {
+			t.Fatalf("CreateConfig: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateConfig: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/cluster/config")
+		assertParamValue(t, got.form, "clustername", "sample-clustername")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateConfig(nilCtx, &cluster.CreateConfigParams{Clustername: "sample-clustername"}); err == nil {
+			t.Errorf("CreateConfig: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListConfigApiversion", func(t *testing.T) {
-		_, err := svc.ListConfigApiversion(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListConfigApiversion(ctx)
+		if err != nil {
+			t.Fatalf("ListConfigApiversion: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListConfigApiversion: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/config/apiversion")
+
+		var nilCtx context.Context
+		if _, err := svc.ListConfigApiversion(nilCtx); err == nil {
+			t.Errorf("ListConfigApiversion: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListConfigJoin", func(t *testing.T) {
-		_, err := svc.ListConfigJoin(ctx, nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListConfigJoin(ctx, &cluster.ListConfigJoinParams{})
+		if err != nil {
+			t.Fatalf("ListConfigJoin: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListConfigJoin: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/config/join")
+
+		var nilCtx context.Context
+		if _, err := svc.ListConfigJoin(nilCtx, &cluster.ListConfigJoinParams{}); err == nil {
+			t.Errorf("ListConfigJoin: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateConfigJoin", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateConfigJoin(ctx, &cluster.CreateConfigJoinParams{Fingerprint: "sample-fingerprint", Hostname: "sample-hostname", Password: "sample-password"})
+		if err != nil {
+			t.Fatalf("CreateConfigJoin: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateConfigJoin: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/cluster/config/join")
+		assertParamValue(t, got.form, "fingerprint", "sample-fingerprint")
+		assertParamValue(t, got.form, "hostname", "sample-hostname")
+		assertParamValue(t, got.form, "password", "sample-password")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateConfigJoin(nilCtx, &cluster.CreateConfigJoinParams{Fingerprint: "sample-fingerprint", Hostname: "sample-hostname", Password: "sample-password"}); err == nil {
+			t.Errorf("CreateConfigJoin: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListConfigNodes", func(t *testing.T) {
-		_, err := svc.ListConfigNodes(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListConfigNodes(ctx)
+		if err != nil {
+			t.Fatalf("ListConfigNodes: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListConfigNodes: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/config/nodes")
+
+		var nilCtx context.Context
+		if _, err := svc.ListConfigNodes(nilCtx); err == nil {
+			t.Errorf("ListConfigNodes: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteConfigNodes", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteConfigNodes(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("DeleteConfigNodes: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/cluster/config/nodes/sample-node")
+
+		var nilCtx context.Context
+		if err := svc.DeleteConfigNodes(nilCtx, "sample-node"); err == nil {
+			t.Errorf("DeleteConfigNodes: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateConfigNodes", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateConfigNodes(ctx, "sample-node", &cluster.CreateConfigNodesParams{})
+		if err != nil {
+			t.Fatalf("CreateConfigNodes: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateConfigNodes: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/cluster/config/nodes/sample-node")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateConfigNodes(nilCtx, "sample-node", &cluster.CreateConfigNodesParams{}); err == nil {
+			t.Errorf("CreateConfigNodes: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListConfigQdevice", func(t *testing.T) {
-		_, err := svc.ListConfigQdevice(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListConfigQdevice(ctx)
+		if err != nil {
+			t.Fatalf("ListConfigQdevice: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListConfigQdevice: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/config/qdevice")
+
+		var nilCtx context.Context
+		if _, err := svc.ListConfigQdevice(nilCtx); err == nil {
+			t.Errorf("ListConfigQdevice: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListConfigTotem", func(t *testing.T) {
-		_, err := svc.ListConfigTotem(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListConfigTotem(ctx)
+		if err != nil {
+			t.Fatalf("ListConfigTotem: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListConfigTotem: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/config/totem")
+
+		var nilCtx context.Context
+		if _, err := svc.ListConfigTotem(nilCtx); err == nil {
+			t.Errorf("ListConfigTotem: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListFirewall", func(t *testing.T) {
-		_, err := svc.ListFirewall(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListFirewall(ctx)
+		if err != nil {
+			t.Fatalf("ListFirewall: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListFirewall: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/firewall")
+
+		var nilCtx context.Context
+		if _, err := svc.ListFirewall(nilCtx); err == nil {
+			t.Errorf("ListFirewall: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListFirewallAliases", func(t *testing.T) {
-		_, err := svc.ListFirewallAliases(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListFirewallAliases(ctx)
+		if err != nil {
+			t.Fatalf("ListFirewallAliases: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListFirewallAliases: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/firewall/aliases")
+
+		var nilCtx context.Context
+		if _, err := svc.ListFirewallAliases(nilCtx); err == nil {
+			t.Errorf("ListFirewallAliases: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateFirewallAliases", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateFirewallAliases(ctx, &cluster.CreateFirewallAliasesParams{Cidr: "sample-cidr", Name: "sample-name"})
+		if err != nil {
+			t.Fatalf("CreateFirewallAliases: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/cluster/firewall/aliases")
+		assertParamValue(t, got.form, "cidr", "sample-cidr")
+		assertParamValue(t, got.form, "name", "sample-name")
+
+		var nilCtx context.Context
+		if err := svc.CreateFirewallAliases(nilCtx, &cluster.CreateFirewallAliasesParams{Cidr: "sample-cidr", Name: "sample-name"}); err == nil {
+			t.Errorf("CreateFirewallAliases: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteFirewallAliases", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteFirewallAliases(ctx, "sample-name", &cluster.DeleteFirewallAliasesParams{})
+		if err != nil {
+			t.Fatalf("DeleteFirewallAliases: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/cluster/firewall/aliases/sample-name")
+
+		var nilCtx context.Context
+		if err := svc.DeleteFirewallAliases(nilCtx, "sample-name", &cluster.DeleteFirewallAliasesParams{}); err == nil {
+			t.Errorf("DeleteFirewallAliases: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetFirewallAliases", func(t *testing.T) {
-		_, err := svc.GetFirewallAliases(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.GetFirewallAliases(ctx, "sample-name")
+		if err != nil {
+			t.Fatalf("GetFirewallAliases: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetFirewallAliases: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/firewall/aliases/sample-name")
+
+		var nilCtx context.Context
+		if _, err := svc.GetFirewallAliases(nilCtx, "sample-name"); err == nil {
+			t.Errorf("GetFirewallAliases: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateFirewallAliases", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateFirewallAliases(ctx, "sample-name", &cluster.UpdateFirewallAliasesParams{Cidr: "sample-cidr"})
+		if err != nil {
+			t.Fatalf("UpdateFirewallAliases: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/cluster/firewall/aliases/sample-name")
+		assertParamValue(t, got.form, "cidr", "sample-cidr")
+
+		var nilCtx context.Context
+		if err := svc.UpdateFirewallAliases(nilCtx, "sample-name", &cluster.UpdateFirewallAliasesParams{Cidr: "sample-cidr"}); err == nil {
+			t.Errorf("UpdateFirewallAliases: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListFirewallGroups", func(t *testing.T) {
-		_, err := svc.ListFirewallGroups(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListFirewallGroups(ctx)
+		if err != nil {
+			t.Fatalf("ListFirewallGroups: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListFirewallGroups: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/firewall/groups")
+
+		var nilCtx context.Context
+		if _, err := svc.ListFirewallGroups(nilCtx); err == nil {
+			t.Errorf("ListFirewallGroups: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateFirewallGroups", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateFirewallGroups(ctx, &cluster.CreateFirewallGroupsParams{Group: "sample-group"})
+		if err != nil {
+			t.Fatalf("CreateFirewallGroups: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/cluster/firewall/groups")
+		assertParamValue(t, got.form, "group", "sample-group")
+
+		var nilCtx context.Context
+		if err := svc.CreateFirewallGroups(nilCtx, &cluster.CreateFirewallGroupsParams{Group: "sample-group"}); err == nil {
+			t.Errorf("CreateFirewallGroups: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteFirewallGroups", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteFirewallGroups(ctx, "sample-group")
+		if err != nil {
+			t.Fatalf("DeleteFirewallGroups: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/cluster/firewall/groups/sample-group")
+
+		var nilCtx context.Context
+		if err := svc.DeleteFirewallGroups(nilCtx, "sample-group"); err == nil {
+			t.Errorf("DeleteFirewallGroups: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetFirewallGroups", func(t *testing.T) {
-		_, err := svc.GetFirewallGroups(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.GetFirewallGroups(ctx, "sample-group")
+		if err != nil {
+			t.Fatalf("GetFirewallGroups: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetFirewallGroups: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/firewall/groups/sample-group")
+
+		var nilCtx context.Context
+		if _, err := svc.GetFirewallGroups(nilCtx, "sample-group"); err == nil {
+			t.Errorf("GetFirewallGroups: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateFirewallGroups2", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateFirewallGroups2(ctx, "sample-group", &cluster.CreateFirewallGroups2Params{Action: "sample-action", Type: "sample-type"})
+		if err != nil {
+			t.Fatalf("CreateFirewallGroups2: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/cluster/firewall/groups/sample-group")
+		assertParamValue(t, got.form, "action", "sample-action")
+		assertParamValue(t, got.form, "type", "sample-type")
+
+		var nilCtx context.Context
+		if err := svc.CreateFirewallGroups2(nilCtx, "sample-group", &cluster.CreateFirewallGroups2Params{Action: "sample-action", Type: "sample-type"}); err == nil {
+			t.Errorf("CreateFirewallGroups2: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteFirewallGroups2", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteFirewallGroups2(ctx, "sample-group", "sample-pos", &cluster.DeleteFirewallGroups2Params{})
+		if err != nil {
+			t.Fatalf("DeleteFirewallGroups2: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/cluster/firewall/groups/sample-group/sample-pos")
+
+		var nilCtx context.Context
+		if err := svc.DeleteFirewallGroups2(nilCtx, "sample-group", "sample-pos", &cluster.DeleteFirewallGroups2Params{}); err == nil {
+			t.Errorf("DeleteFirewallGroups2: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetFirewallGroups2", func(t *testing.T) {
-		_, err := svc.GetFirewallGroups2(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.GetFirewallGroups2(ctx, "sample-group", "sample-pos")
+		if err != nil {
+			t.Fatalf("GetFirewallGroups2: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetFirewallGroups2: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/firewall/groups/sample-group/sample-pos")
+
+		var nilCtx context.Context
+		if _, err := svc.GetFirewallGroups2(nilCtx, "sample-group", "sample-pos"); err == nil {
+			t.Errorf("GetFirewallGroups2: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateFirewallGroups", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateFirewallGroups(ctx, "sample-group", "sample-pos", &cluster.UpdateFirewallGroupsParams{})
+		if err != nil {
+			t.Fatalf("UpdateFirewallGroups: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/cluster/firewall/groups/sample-group/sample-pos")
+
+		var nilCtx context.Context
+		if err := svc.UpdateFirewallGroups(nilCtx, "sample-group", "sample-pos", &cluster.UpdateFirewallGroupsParams{}); err == nil {
+			t.Errorf("UpdateFirewallGroups: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListFirewallIpset", func(t *testing.T) {
-		_, err := svc.ListFirewallIpset(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListFirewallIpset(ctx)
+		if err != nil {
+			t.Fatalf("ListFirewallIpset: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListFirewallIpset: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/firewall/ipset")
+
+		var nilCtx context.Context
+		if _, err := svc.ListFirewallIpset(nilCtx); err == nil {
+			t.Errorf("ListFirewallIpset: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateFirewallIpset", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateFirewallIpset(ctx, &cluster.CreateFirewallIpsetParams{Name: "sample-name"})
+		if err != nil {
+			t.Fatalf("CreateFirewallIpset: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/cluster/firewall/ipset")
+		assertParamValue(t, got.form, "name", "sample-name")
+
+		var nilCtx context.Context
+		if err := svc.CreateFirewallIpset(nilCtx, &cluster.CreateFirewallIpsetParams{Name: "sample-name"}); err == nil {
+			t.Errorf("CreateFirewallIpset: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteFirewallIpset", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteFirewallIpset(ctx, "sample-name", &cluster.DeleteFirewallIpsetParams{})
+		if err != nil {
+			t.Fatalf("DeleteFirewallIpset: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/cluster/firewall/ipset/sample-name")
+
+		var nilCtx context.Context
+		if err := svc.DeleteFirewallIpset(nilCtx, "sample-name", &cluster.DeleteFirewallIpsetParams{}); err == nil {
+			t.Errorf("DeleteFirewallIpset: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetFirewallIpset", func(t *testing.T) {
-		_, err := svc.GetFirewallIpset(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.GetFirewallIpset(ctx, "sample-name")
+		if err != nil {
+			t.Fatalf("GetFirewallIpset: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetFirewallIpset: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/firewall/ipset/sample-name")
+
+		var nilCtx context.Context
+		if _, err := svc.GetFirewallIpset(nilCtx, "sample-name"); err == nil {
+			t.Errorf("GetFirewallIpset: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateFirewallIpset2", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateFirewallIpset2(ctx, "sample-name", &cluster.CreateFirewallIpset2Params{Cidr: "sample-cidr"})
+		if err != nil {
+			t.Fatalf("CreateFirewallIpset2: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/cluster/firewall/ipset/sample-name")
+		assertParamValue(t, got.form, "cidr", "sample-cidr")
+
+		var nilCtx context.Context
+		if err := svc.CreateFirewallIpset2(nilCtx, "sample-name", &cluster.CreateFirewallIpset2Params{Cidr: "sample-cidr"}); err == nil {
+			t.Errorf("CreateFirewallIpset2: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteFirewallIpset2", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteFirewallIpset2(ctx, "sample-name", "sample-cidr", &cluster.DeleteFirewallIpset2Params{})
+		if err != nil {
+			t.Fatalf("DeleteFirewallIpset2: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/cluster/firewall/ipset/sample-name/sample-cidr")
+
+		var nilCtx context.Context
+		if err := svc.DeleteFirewallIpset2(nilCtx, "sample-name", "sample-cidr", &cluster.DeleteFirewallIpset2Params{}); err == nil {
+			t.Errorf("DeleteFirewallIpset2: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetFirewallIpset2", func(t *testing.T) {
-		_, err := svc.GetFirewallIpset2(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.GetFirewallIpset2(ctx, "sample-name", "sample-cidr")
+		if err != nil {
+			t.Fatalf("GetFirewallIpset2: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetFirewallIpset2: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/firewall/ipset/sample-name/sample-cidr")
+
+		var nilCtx context.Context
+		if _, err := svc.GetFirewallIpset2(nilCtx, "sample-name", "sample-cidr"); err == nil {
+			t.Errorf("GetFirewallIpset2: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateFirewallIpset", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateFirewallIpset(ctx, "sample-name", "sample-cidr", &cluster.UpdateFirewallIpsetParams{})
+		if err != nil {
+			t.Fatalf("UpdateFirewallIpset: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/cluster/firewall/ipset/sample-name/sample-cidr")
+
+		var nilCtx context.Context
+		if err := svc.UpdateFirewallIpset(nilCtx, "sample-name", "sample-cidr", &cluster.UpdateFirewallIpsetParams{}); err == nil {
+			t.Errorf("UpdateFirewallIpset: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListFirewallMacros", func(t *testing.T) {
-		_, err := svc.ListFirewallMacros(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListFirewallMacros(ctx)
+		if err != nil {
+			t.Fatalf("ListFirewallMacros: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListFirewallMacros: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/firewall/macros")
+
+		var nilCtx context.Context
+		if _, err := svc.ListFirewallMacros(nilCtx); err == nil {
+			t.Errorf("ListFirewallMacros: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListFirewallOptions", func(t *testing.T) {
-		_, err := svc.ListFirewallOptions(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListFirewallOptions(ctx)
+		if err != nil {
+			t.Fatalf("ListFirewallOptions: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListFirewallOptions: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/firewall/options")
+
+		var nilCtx context.Context
+		if _, err := svc.ListFirewallOptions(nilCtx); err == nil {
+			t.Errorf("ListFirewallOptions: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateFirewallOptions", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateFirewallOptions(ctx, &cluster.UpdateFirewallOptionsParams{})
+		if err != nil {
+			t.Fatalf("UpdateFirewallOptions: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/cluster/firewall/options")
+
+		var nilCtx context.Context
+		if err := svc.UpdateFirewallOptions(nilCtx, &cluster.UpdateFirewallOptionsParams{}); err == nil {
+			t.Errorf("UpdateFirewallOptions: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListFirewallRefs", func(t *testing.T) {
-		_, err := svc.ListFirewallRefs(ctx, nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListFirewallRefs(ctx, &cluster.ListFirewallRefsParams{})
+		if err != nil {
+			t.Fatalf("ListFirewallRefs: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListFirewallRefs: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/firewall/refs")
+
+		var nilCtx context.Context
+		if _, err := svc.ListFirewallRefs(nilCtx, &cluster.ListFirewallRefsParams{}); err == nil {
+			t.Errorf("ListFirewallRefs: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListFirewallRules", func(t *testing.T) {
-		_, err := svc.ListFirewallRules(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListFirewallRules(ctx)
+		if err != nil {
+			t.Fatalf("ListFirewallRules: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListFirewallRules: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/firewall/rules")
+
+		var nilCtx context.Context
+		if _, err := svc.ListFirewallRules(nilCtx); err == nil {
+			t.Errorf("ListFirewallRules: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateFirewallRules", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateFirewallRules(ctx, &cluster.CreateFirewallRulesParams{Action: "sample-action", Type: "sample-type"})
+		if err != nil {
+			t.Fatalf("CreateFirewallRules: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/cluster/firewall/rules")
+		assertParamValue(t, got.form, "action", "sample-action")
+		assertParamValue(t, got.form, "type", "sample-type")
+
+		var nilCtx context.Context
+		if err := svc.CreateFirewallRules(nilCtx, &cluster.CreateFirewallRulesParams{Action: "sample-action", Type: "sample-type"}); err == nil {
+			t.Errorf("CreateFirewallRules: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteFirewallRules", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteFirewallRules(ctx, "sample-pos", &cluster.DeleteFirewallRulesParams{})
+		if err != nil {
+			t.Fatalf("DeleteFirewallRules: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/cluster/firewall/rules/sample-pos")
+
+		var nilCtx context.Context
+		if err := svc.DeleteFirewallRules(nilCtx, "sample-pos", &cluster.DeleteFirewallRulesParams{}); err == nil {
+			t.Errorf("DeleteFirewallRules: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetFirewallRules", func(t *testing.T) {
-		_, err := svc.GetFirewallRules(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.GetFirewallRules(ctx, "sample-pos")
+		if err != nil {
+			t.Fatalf("GetFirewallRules: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetFirewallRules: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/firewall/rules/sample-pos")
+
+		var nilCtx context.Context
+		if _, err := svc.GetFirewallRules(nilCtx, "sample-pos"); err == nil {
+			t.Errorf("GetFirewallRules: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateFirewallRules", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateFirewallRules(ctx, "sample-pos", &cluster.UpdateFirewallRulesParams{})
+		if err != nil {
+			t.Fatalf("UpdateFirewallRules: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/cluster/firewall/rules/sample-pos")
+
+		var nilCtx context.Context
+		if err := svc.UpdateFirewallRules(nilCtx, "sample-pos", &cluster.UpdateFirewallRulesParams{}); err == nil {
+			t.Errorf("UpdateFirewallRules: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListHa", func(t *testing.T) {
-		_, err := svc.ListHa(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListHa(ctx)
+		if err != nil {
+			t.Fatalf("ListHa: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListHa: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/ha")
+
+		var nilCtx context.Context
+		if _, err := svc.ListHa(nilCtx); err == nil {
+			t.Errorf("ListHa: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListHaGroups", func(t *testing.T) {
-		_, err := svc.ListHaGroups(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListHaGroups(ctx)
+		if err != nil {
+			t.Fatalf("ListHaGroups: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListHaGroups: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/ha/groups")
+
+		var nilCtx context.Context
+		if _, err := svc.ListHaGroups(nilCtx); err == nil {
+			t.Errorf("ListHaGroups: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateHaGroups", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateHaGroups(ctx, &cluster.CreateHaGroupsParams{Group: "sample-group", Nodes: "sample-nodes"})
+		if err != nil {
+			t.Fatalf("CreateHaGroups: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/cluster/ha/groups")
+		assertParamValue(t, got.form, "group", "sample-group")
+		assertParamValue(t, got.form, "nodes", "sample-nodes")
+
+		var nilCtx context.Context
+		if err := svc.CreateHaGroups(nilCtx, &cluster.CreateHaGroupsParams{Group: "sample-group", Nodes: "sample-nodes"}); err == nil {
+			t.Errorf("CreateHaGroups: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteHaGroups", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteHaGroups(ctx, "sample-group")
+		if err != nil {
+			t.Fatalf("DeleteHaGroups: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/cluster/ha/groups/sample-group")
+
+		var nilCtx context.Context
+		if err := svc.DeleteHaGroups(nilCtx, "sample-group"); err == nil {
+			t.Errorf("DeleteHaGroups: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetHaGroups", func(t *testing.T) {
-		_, err := svc.GetHaGroups(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.GetHaGroups(ctx, "sample-group")
+		if err != nil {
+			t.Fatalf("GetHaGroups: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetHaGroups: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/ha/groups/sample-group")
+
+		var nilCtx context.Context
+		if _, err := svc.GetHaGroups(nilCtx, "sample-group"); err == nil {
+			t.Errorf("GetHaGroups: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateHaGroups", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateHaGroups(ctx, "sample-group", &cluster.UpdateHaGroupsParams{})
+		if err != nil {
+			t.Fatalf("UpdateHaGroups: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/cluster/ha/groups/sample-group")
+
+		var nilCtx context.Context
+		if err := svc.UpdateHaGroups(nilCtx, "sample-group", &cluster.UpdateHaGroupsParams{}); err == nil {
+			t.Errorf("UpdateHaGroups: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListHaResources", func(t *testing.T) {
-		_, err := svc.ListHaResources(ctx, nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListHaResources(ctx, &cluster.ListHaResourcesParams{})
+		if err != nil {
+			t.Fatalf("ListHaResources: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListHaResources: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/ha/resources")
+
+		var nilCtx context.Context
+		if _, err := svc.ListHaResources(nilCtx, &cluster.ListHaResourcesParams{}); err == nil {
+			t.Errorf("ListHaResources: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateHaResources", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateHaResources(ctx, &cluster.CreateHaResourcesParams{Sid: "sample-sid"})
+		if err != nil {
+			t.Fatalf("CreateHaResources: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/cluster/ha/resources")
+		assertParamValue(t, got.form, "sid", "sample-sid")
+
+		var nilCtx context.Context
+		if err := svc.CreateHaResources(nilCtx, &cluster.CreateHaResourcesParams{Sid: "sample-sid"}); err == nil {
+			t.Errorf("CreateHaResources: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteHaResources", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteHaResources(ctx, "sample-sid", &cluster.DeleteHaResourcesParams{})
+		if err != nil {
+			t.Fatalf("DeleteHaResources: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/cluster/ha/resources/sample-sid")
+
+		var nilCtx context.Context
+		if err := svc.DeleteHaResources(nilCtx, "sample-sid", &cluster.DeleteHaResourcesParams{}); err == nil {
+			t.Errorf("DeleteHaResources: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetHaResources", func(t *testing.T) {
-		_, err := svc.GetHaResources(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.GetHaResources(ctx, "sample-sid")
+		if err != nil {
+			t.Fatalf("GetHaResources: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetHaResources: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/ha/resources/sample-sid")
+
+		var nilCtx context.Context
+		if _, err := svc.GetHaResources(nilCtx, "sample-sid"); err == nil {
+			t.Errorf("GetHaResources: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateHaResources", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateHaResources(ctx, "sample-sid", &cluster.UpdateHaResourcesParams{})
+		if err != nil {
+			t.Fatalf("UpdateHaResources: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/cluster/ha/resources/sample-sid")
+
+		var nilCtx context.Context
+		if err := svc.UpdateHaResources(nilCtx, "sample-sid", &cluster.UpdateHaResourcesParams{}); err == nil {
+			t.Errorf("UpdateHaResources: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateHaResourcesMigrate", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateHaResourcesMigrate(ctx, "sample-sid", &cluster.CreateHaResourcesMigrateParams{Node: "sample-node"})
+		if err != nil {
+			t.Fatalf("CreateHaResourcesMigrate: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateHaResourcesMigrate: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/cluster/ha/resources/sample-sid/migrate")
+		assertParamValue(t, got.form, "node", "sample-node")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateHaResourcesMigrate(nilCtx, "sample-sid", &cluster.CreateHaResourcesMigrateParams{Node: "sample-node"}); err == nil {
+			t.Errorf("CreateHaResourcesMigrate: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateHaResourcesRelocate", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateHaResourcesRelocate(ctx, "sample-sid", &cluster.CreateHaResourcesRelocateParams{Node: "sample-node"})
+		if err != nil {
+			t.Fatalf("CreateHaResourcesRelocate: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateHaResourcesRelocate: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/cluster/ha/resources/sample-sid/relocate")
+		assertParamValue(t, got.form, "node", "sample-node")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateHaResourcesRelocate(nilCtx, "sample-sid", &cluster.CreateHaResourcesRelocateParams{Node: "sample-node"}); err == nil {
+			t.Errorf("CreateHaResourcesRelocate: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListHaRules", func(t *testing.T) {
-		_, err := svc.ListHaRules(ctx, nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListHaRules(ctx, &cluster.ListHaRulesParams{})
+		if err != nil {
+			t.Fatalf("ListHaRules: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListHaRules: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/ha/rules")
+
+		var nilCtx context.Context
+		if _, err := svc.ListHaRules(nilCtx, &cluster.ListHaRulesParams{}); err == nil {
+			t.Errorf("ListHaRules: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateHaRules", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateHaRules(ctx, &cluster.CreateHaRulesParams{Resources: "sample-resources", Rule: "sample-rule", Type: "sample-type"})
+		if err != nil {
+			t.Fatalf("CreateHaRules: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/cluster/ha/rules")
+		assertParamValue(t, got.form, "resources", "sample-resources")
+		assertParamValue(t, got.form, "rule", "sample-rule")
+		assertParamValue(t, got.form, "type", "sample-type")
+
+		var nilCtx context.Context
+		if err := svc.CreateHaRules(nilCtx, &cluster.CreateHaRulesParams{Resources: "sample-resources", Rule: "sample-rule", Type: "sample-type"}); err == nil {
+			t.Errorf("CreateHaRules: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteHaRules", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteHaRules(ctx, "sample-rule")
+		if err != nil {
+			t.Fatalf("DeleteHaRules: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/cluster/ha/rules/sample-rule")
+
+		var nilCtx context.Context
+		if err := svc.DeleteHaRules(nilCtx, "sample-rule"); err == nil {
+			t.Errorf("DeleteHaRules: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetHaRules", func(t *testing.T) {
-		_, err := svc.GetHaRules(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.GetHaRules(ctx, "sample-rule")
+		if err != nil {
+			t.Fatalf("GetHaRules: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetHaRules: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/ha/rules/sample-rule")
+
+		var nilCtx context.Context
+		if _, err := svc.GetHaRules(nilCtx, "sample-rule"); err == nil {
+			t.Errorf("GetHaRules: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateHaRules", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateHaRules(ctx, "sample-rule", &cluster.UpdateHaRulesParams{Type: "sample-type"})
+		if err != nil {
+			t.Fatalf("UpdateHaRules: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/cluster/ha/rules/sample-rule")
+		assertParamValue(t, got.form, "type", "sample-type")
+
+		var nilCtx context.Context
+		if err := svc.UpdateHaRules(nilCtx, "sample-rule", &cluster.UpdateHaRulesParams{Type: "sample-type"}); err == nil {
+			t.Errorf("UpdateHaRules: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListHaStatus", func(t *testing.T) {
-		_, err := svc.ListHaStatus(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListHaStatus(ctx)
+		if err != nil {
+			t.Fatalf("ListHaStatus: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListHaStatus: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/ha/status")
+
+		var nilCtx context.Context
+		if _, err := svc.ListHaStatus(nilCtx); err == nil {
+			t.Errorf("ListHaStatus: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateHaStatusArmHa", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateHaStatusArmHa(ctx)
+		if err != nil {
+			t.Fatalf("CreateHaStatusArmHa: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/cluster/ha/status/arm-ha")
+
+		var nilCtx context.Context
+		if err := svc.CreateHaStatusArmHa(nilCtx); err == nil {
+			t.Errorf("CreateHaStatusArmHa: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListHaStatusCurrent", func(t *testing.T) {
-		_, err := svc.ListHaStatusCurrent(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListHaStatusCurrent(ctx)
+		if err != nil {
+			t.Fatalf("ListHaStatusCurrent: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListHaStatusCurrent: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/ha/status/current")
+
+		var nilCtx context.Context
+		if _, err := svc.ListHaStatusCurrent(nilCtx); err == nil {
+			t.Errorf("ListHaStatusCurrent: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateHaStatusDisarmHa", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateHaStatusDisarmHa(ctx, &cluster.CreateHaStatusDisarmHaParams{ResourceMode: "sample-resource-mode"})
+		if err != nil {
+			t.Fatalf("CreateHaStatusDisarmHa: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/cluster/ha/status/disarm-ha")
+		assertParamValue(t, got.form, "resource-mode", "sample-resource-mode")
+
+		var nilCtx context.Context
+		if err := svc.CreateHaStatusDisarmHa(nilCtx, &cluster.CreateHaStatusDisarmHaParams{ResourceMode: "sample-resource-mode"}); err == nil {
+			t.Errorf("CreateHaStatusDisarmHa: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListHaStatusManagerStatus", func(t *testing.T) {
-		_, err := svc.ListHaStatusManagerStatus(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListHaStatusManagerStatus(ctx)
+		if err != nil {
+			t.Fatalf("ListHaStatusManagerStatus: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListHaStatusManagerStatus: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/ha/status/manager_status")
+
+		var nilCtx context.Context
+		if _, err := svc.ListHaStatusManagerStatus(nilCtx); err == nil {
+			t.Errorf("ListHaStatusManagerStatus: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListJobs", func(t *testing.T) {
-		_, err := svc.ListJobs(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListJobs(ctx)
+		if err != nil {
+			t.Fatalf("ListJobs: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListJobs: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/jobs")
+
+		var nilCtx context.Context
+		if _, err := svc.ListJobs(nilCtx); err == nil {
+			t.Errorf("ListJobs: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListJobsRealmSync", func(t *testing.T) {
-		_, err := svc.ListJobsRealmSync(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListJobsRealmSync(ctx)
+		if err != nil {
+			t.Fatalf("ListJobsRealmSync: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListJobsRealmSync: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/jobs/realm-sync")
+
+		var nilCtx context.Context
+		if _, err := svc.ListJobsRealmSync(nilCtx); err == nil {
+			t.Errorf("ListJobsRealmSync: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteJobsRealmSync", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteJobsRealmSync(ctx, "sample-id")
+		if err != nil {
+			t.Fatalf("DeleteJobsRealmSync: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/cluster/jobs/realm-sync/sample-id")
+
+		var nilCtx context.Context
+		if err := svc.DeleteJobsRealmSync(nilCtx, "sample-id"); err == nil {
+			t.Errorf("DeleteJobsRealmSync: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetJobsRealmSync", func(t *testing.T) {
-		_, err := svc.GetJobsRealmSync(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.GetJobsRealmSync(ctx, "sample-id")
+		if err != nil {
+			t.Fatalf("GetJobsRealmSync: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetJobsRealmSync: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/jobs/realm-sync/sample-id")
+
+		var nilCtx context.Context
+		if _, err := svc.GetJobsRealmSync(nilCtx, "sample-id"); err == nil {
+			t.Errorf("GetJobsRealmSync: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateJobsRealmSync", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateJobsRealmSync(ctx, "sample-id", &cluster.CreateJobsRealmSyncParams{Schedule: "sample-schedule"})
+		if err != nil {
+			t.Fatalf("CreateJobsRealmSync: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/cluster/jobs/realm-sync/sample-id")
+		assertParamValue(t, got.form, "schedule", "sample-schedule")
+
+		var nilCtx context.Context
+		if err := svc.CreateJobsRealmSync(nilCtx, "sample-id", &cluster.CreateJobsRealmSyncParams{Schedule: "sample-schedule"}); err == nil {
+			t.Errorf("CreateJobsRealmSync: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateJobsRealmSync", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateJobsRealmSync(ctx, "sample-id", &cluster.UpdateJobsRealmSyncParams{Schedule: "sample-schedule"})
+		if err != nil {
+			t.Fatalf("UpdateJobsRealmSync: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/cluster/jobs/realm-sync/sample-id")
+		assertParamValue(t, got.form, "schedule", "sample-schedule")
+
+		var nilCtx context.Context
+		if err := svc.UpdateJobsRealmSync(nilCtx, "sample-id", &cluster.UpdateJobsRealmSyncParams{Schedule: "sample-schedule"}); err == nil {
+			t.Errorf("UpdateJobsRealmSync: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListJobsScheduleAnalyze", func(t *testing.T) {
-		_, err := svc.ListJobsScheduleAnalyze(ctx, nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListJobsScheduleAnalyze(ctx, &cluster.ListJobsScheduleAnalyzeParams{Schedule: "sample-schedule"})
+		if err != nil {
+			t.Fatalf("ListJobsScheduleAnalyze: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListJobsScheduleAnalyze: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/jobs/schedule-analyze")
+		assertParamValue(t, got.query, "schedule", "sample-schedule")
+
+		var nilCtx context.Context
+		if _, err := svc.ListJobsScheduleAnalyze(nilCtx, &cluster.ListJobsScheduleAnalyzeParams{Schedule: "sample-schedule"}); err == nil {
+			t.Errorf("ListJobsScheduleAnalyze: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListLog", func(t *testing.T) {
-		_, err := svc.ListLog(ctx, nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListLog(ctx, &cluster.ListLogParams{})
+		if err != nil {
+			t.Fatalf("ListLog: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListLog: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/log")
+
+		var nilCtx context.Context
+		if _, err := svc.ListLog(nilCtx, &cluster.ListLogParams{}); err == nil {
+			t.Errorf("ListLog: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListMapping", func(t *testing.T) {
-		_, err := svc.ListMapping(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListMapping(ctx)
+		if err != nil {
+			t.Fatalf("ListMapping: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListMapping: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/mapping")
+
+		var nilCtx context.Context
+		if _, err := svc.ListMapping(nilCtx); err == nil {
+			t.Errorf("ListMapping: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListMappingDir", func(t *testing.T) {
-		_, err := svc.ListMappingDir(ctx, nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListMappingDir(ctx, &cluster.ListMappingDirParams{})
+		if err != nil {
+			t.Fatalf("ListMappingDir: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListMappingDir: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/mapping/dir")
+
+		var nilCtx context.Context
+		if _, err := svc.ListMappingDir(nilCtx, &cluster.ListMappingDirParams{}); err == nil {
+			t.Errorf("ListMappingDir: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateMappingDir", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateMappingDir(ctx, &cluster.CreateMappingDirParams{Id: "sample-id", Map: []string{"sample-map"}})
+		if err != nil {
+			t.Fatalf("CreateMappingDir: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/cluster/mapping/dir")
+		assertParamValue(t, got.form, "id", "sample-id")
+		assertParamValue(t, got.form, "map", "sample-map")
+
+		var nilCtx context.Context
+		if err := svc.CreateMappingDir(nilCtx, &cluster.CreateMappingDirParams{Id: "sample-id", Map: []string{"sample-map"}}); err == nil {
+			t.Errorf("CreateMappingDir: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteMappingDir", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteMappingDir(ctx, "sample-id")
+		if err != nil {
+			t.Fatalf("DeleteMappingDir: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/cluster/mapping/dir/sample-id")
+
+		var nilCtx context.Context
+		if err := svc.DeleteMappingDir(nilCtx, "sample-id"); err == nil {
+			t.Errorf("DeleteMappingDir: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetMappingDir", func(t *testing.T) {
-		_, err := svc.GetMappingDir(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.GetMappingDir(ctx, "sample-id")
+		if err != nil {
+			t.Fatalf("GetMappingDir: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetMappingDir: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/mapping/dir/sample-id")
+
+		var nilCtx context.Context
+		if _, err := svc.GetMappingDir(nilCtx, "sample-id"); err == nil {
+			t.Errorf("GetMappingDir: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateMappingDir", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateMappingDir(ctx, "sample-id", &cluster.UpdateMappingDirParams{})
+		if err != nil {
+			t.Fatalf("UpdateMappingDir: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/cluster/mapping/dir/sample-id")
+
+		var nilCtx context.Context
+		if err := svc.UpdateMappingDir(nilCtx, "sample-id", &cluster.UpdateMappingDirParams{}); err == nil {
+			t.Errorf("UpdateMappingDir: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListMappingPci", func(t *testing.T) {
-		_, err := svc.ListMappingPci(ctx, nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListMappingPci(ctx, &cluster.ListMappingPciParams{})
+		if err != nil {
+			t.Fatalf("ListMappingPci: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListMappingPci: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/mapping/pci")
+
+		var nilCtx context.Context
+		if _, err := svc.ListMappingPci(nilCtx, &cluster.ListMappingPciParams{}); err == nil {
+			t.Errorf("ListMappingPci: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateMappingPci", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateMappingPci(ctx, &cluster.CreateMappingPciParams{Id: "sample-id", Map: []string{"sample-map"}})
+		if err != nil {
+			t.Fatalf("CreateMappingPci: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/cluster/mapping/pci")
+		assertParamValue(t, got.form, "id", "sample-id")
+		assertParamValue(t, got.form, "map", "sample-map")
+
+		var nilCtx context.Context
+		if err := svc.CreateMappingPci(nilCtx, &cluster.CreateMappingPciParams{Id: "sample-id", Map: []string{"sample-map"}}); err == nil {
+			t.Errorf("CreateMappingPci: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteMappingPci", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteMappingPci(ctx, "sample-id")
+		if err != nil {
+			t.Fatalf("DeleteMappingPci: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/cluster/mapping/pci/sample-id")
+
+		var nilCtx context.Context
+		if err := svc.DeleteMappingPci(nilCtx, "sample-id"); err == nil {
+			t.Errorf("DeleteMappingPci: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetMappingPci", func(t *testing.T) {
-		_, err := svc.GetMappingPci(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.GetMappingPci(ctx, "sample-id")
+		if err != nil {
+			t.Fatalf("GetMappingPci: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetMappingPci: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/mapping/pci/sample-id")
+
+		var nilCtx context.Context
+		if _, err := svc.GetMappingPci(nilCtx, "sample-id"); err == nil {
+			t.Errorf("GetMappingPci: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateMappingPci", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateMappingPci(ctx, "sample-id", &cluster.UpdateMappingPciParams{})
+		if err != nil {
+			t.Fatalf("UpdateMappingPci: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/cluster/mapping/pci/sample-id")
+
+		var nilCtx context.Context
+		if err := svc.UpdateMappingPci(nilCtx, "sample-id", &cluster.UpdateMappingPciParams{}); err == nil {
+			t.Errorf("UpdateMappingPci: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListMappingUsb", func(t *testing.T) {
-		_, err := svc.ListMappingUsb(ctx, nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListMappingUsb(ctx, &cluster.ListMappingUsbParams{})
+		if err != nil {
+			t.Fatalf("ListMappingUsb: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListMappingUsb: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/mapping/usb")
+
+		var nilCtx context.Context
+		if _, err := svc.ListMappingUsb(nilCtx, &cluster.ListMappingUsbParams{}); err == nil {
+			t.Errorf("ListMappingUsb: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateMappingUsb", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateMappingUsb(ctx, &cluster.CreateMappingUsbParams{Id: "sample-id", Map: []string{"sample-map"}})
+		if err != nil {
+			t.Fatalf("CreateMappingUsb: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/cluster/mapping/usb")
+		assertParamValue(t, got.form, "id", "sample-id")
+		assertParamValue(t, got.form, "map", "sample-map")
+
+		var nilCtx context.Context
+		if err := svc.CreateMappingUsb(nilCtx, &cluster.CreateMappingUsbParams{Id: "sample-id", Map: []string{"sample-map"}}); err == nil {
+			t.Errorf("CreateMappingUsb: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteMappingUsb", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteMappingUsb(ctx, "sample-id")
+		if err != nil {
+			t.Fatalf("DeleteMappingUsb: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/cluster/mapping/usb/sample-id")
+
+		var nilCtx context.Context
+		if err := svc.DeleteMappingUsb(nilCtx, "sample-id"); err == nil {
+			t.Errorf("DeleteMappingUsb: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetMappingUsb", func(t *testing.T) {
-		_, err := svc.GetMappingUsb(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.GetMappingUsb(ctx, "sample-id")
+		if err != nil {
+			t.Fatalf("GetMappingUsb: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetMappingUsb: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/mapping/usb/sample-id")
+
+		var nilCtx context.Context
+		if _, err := svc.GetMappingUsb(nilCtx, "sample-id"); err == nil {
+			t.Errorf("GetMappingUsb: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateMappingUsb", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateMappingUsb(ctx, "sample-id", &cluster.UpdateMappingUsbParams{Map: []string{"sample-map"}})
+		if err != nil {
+			t.Fatalf("UpdateMappingUsb: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/cluster/mapping/usb/sample-id")
+		assertParamValue(t, got.form, "map", "sample-map")
+
+		var nilCtx context.Context
+		if err := svc.UpdateMappingUsb(nilCtx, "sample-id", &cluster.UpdateMappingUsbParams{Map: []string{"sample-map"}}); err == nil {
+			t.Errorf("UpdateMappingUsb: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListMetrics", func(t *testing.T) {
-		_, err := svc.ListMetrics(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListMetrics(ctx)
+		if err != nil {
+			t.Fatalf("ListMetrics: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListMetrics: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/metrics")
+
+		var nilCtx context.Context
+		if _, err := svc.ListMetrics(nilCtx); err == nil {
+			t.Errorf("ListMetrics: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListMetricsExport", func(t *testing.T) {
-		_, err := svc.ListMetricsExport(ctx, nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListMetricsExport(ctx, &cluster.ListMetricsExportParams{})
+		if err != nil {
+			t.Fatalf("ListMetricsExport: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListMetricsExport: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/metrics/export")
+
+		var nilCtx context.Context
+		if _, err := svc.ListMetricsExport(nilCtx, &cluster.ListMetricsExportParams{}); err == nil {
+			t.Errorf("ListMetricsExport: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListMetricsServer", func(t *testing.T) {
-		_, err := svc.ListMetricsServer(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListMetricsServer(ctx)
+		if err != nil {
+			t.Fatalf("ListMetricsServer: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListMetricsServer: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/metrics/server")
+
+		var nilCtx context.Context
+		if _, err := svc.ListMetricsServer(nilCtx); err == nil {
+			t.Errorf("ListMetricsServer: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteMetricsServer", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteMetricsServer(ctx, "sample-id")
+		if err != nil {
+			t.Fatalf("DeleteMetricsServer: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/cluster/metrics/server/sample-id")
+
+		var nilCtx context.Context
+		if err := svc.DeleteMetricsServer(nilCtx, "sample-id"); err == nil {
+			t.Errorf("DeleteMetricsServer: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetMetricsServer", func(t *testing.T) {
-		_, err := svc.GetMetricsServer(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.GetMetricsServer(ctx, "sample-id")
+		if err != nil {
+			t.Fatalf("GetMetricsServer: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetMetricsServer: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/metrics/server/sample-id")
+
+		var nilCtx context.Context
+		if _, err := svc.GetMetricsServer(nilCtx, "sample-id"); err == nil {
+			t.Errorf("GetMetricsServer: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateMetricsServer", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateMetricsServer(ctx, "sample-id", &cluster.CreateMetricsServerParams{Port: 42, Server: "sample-server", Type: "sample-type"})
+		if err != nil {
+			t.Fatalf("CreateMetricsServer: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/cluster/metrics/server/sample-id")
+		assertParamValue(t, got.form, "port", "42")
+		assertParamValue(t, got.form, "server", "sample-server")
+		assertParamValue(t, got.form, "type", "sample-type")
+
+		var nilCtx context.Context
+		if err := svc.CreateMetricsServer(nilCtx, "sample-id", &cluster.CreateMetricsServerParams{Port: 42, Server: "sample-server", Type: "sample-type"}); err == nil {
+			t.Errorf("CreateMetricsServer: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateMetricsServer", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateMetricsServer(ctx, "sample-id", &cluster.UpdateMetricsServerParams{Port: 42, Server: "sample-server"})
+		if err != nil {
+			t.Fatalf("UpdateMetricsServer: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/cluster/metrics/server/sample-id")
+		assertParamValue(t, got.form, "port", "42")
+		assertParamValue(t, got.form, "server", "sample-server")
+
+		var nilCtx context.Context
+		if err := svc.UpdateMetricsServer(nilCtx, "sample-id", &cluster.UpdateMetricsServerParams{Port: 42, Server: "sample-server"}); err == nil {
+			t.Errorf("UpdateMetricsServer: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListNextid", func(t *testing.T) {
-		_, err := svc.ListNextid(ctx, nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListNextid(ctx, &cluster.ListNextidParams{})
+		if err != nil {
+			t.Fatalf("ListNextid: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListNextid: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/nextid")
+
+		var nilCtx context.Context
+		if _, err := svc.ListNextid(nilCtx, &cluster.ListNextidParams{}); err == nil {
+			t.Errorf("ListNextid: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListNotifications", func(t *testing.T) {
-		_, err := svc.ListNotifications(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListNotifications(ctx)
+		if err != nil {
+			t.Fatalf("ListNotifications: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListNotifications: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/notifications")
+
+		var nilCtx context.Context
+		if _, err := svc.ListNotifications(nilCtx); err == nil {
+			t.Errorf("ListNotifications: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListNotificationsEndpoints", func(t *testing.T) {
-		_, err := svc.ListNotificationsEndpoints(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListNotificationsEndpoints(ctx)
+		if err != nil {
+			t.Fatalf("ListNotificationsEndpoints: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListNotificationsEndpoints: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/notifications/endpoints")
+
+		var nilCtx context.Context
+		if _, err := svc.ListNotificationsEndpoints(nilCtx); err == nil {
+			t.Errorf("ListNotificationsEndpoints: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListNotificationsEndpointsGotify", func(t *testing.T) {
-		_, err := svc.ListNotificationsEndpointsGotify(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListNotificationsEndpointsGotify(ctx)
+		if err != nil {
+			t.Fatalf("ListNotificationsEndpointsGotify: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListNotificationsEndpointsGotify: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/notifications/endpoints/gotify")
+
+		var nilCtx context.Context
+		if _, err := svc.ListNotificationsEndpointsGotify(nilCtx); err == nil {
+			t.Errorf("ListNotificationsEndpointsGotify: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateNotificationsEndpointsGotify", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateNotificationsEndpointsGotify(ctx, &cluster.CreateNotificationsEndpointsGotifyParams{Name: "sample-name", Server: "sample-server", Token: "sample-token"})
+		if err != nil {
+			t.Fatalf("CreateNotificationsEndpointsGotify: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/cluster/notifications/endpoints/gotify")
+		assertParamValue(t, got.form, "name", "sample-name")
+		assertParamValue(t, got.form, "server", "sample-server")
+		assertParamValue(t, got.form, "token", "sample-token")
+
+		var nilCtx context.Context
+		if err := svc.CreateNotificationsEndpointsGotify(nilCtx, &cluster.CreateNotificationsEndpointsGotifyParams{Name: "sample-name", Server: "sample-server", Token: "sample-token"}); err == nil {
+			t.Errorf("CreateNotificationsEndpointsGotify: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteNotificationsEndpointsGotify", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteNotificationsEndpointsGotify(ctx, "sample-name")
+		if err != nil {
+			t.Fatalf("DeleteNotificationsEndpointsGotify: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/cluster/notifications/endpoints/gotify/sample-name")
+
+		var nilCtx context.Context
+		if err := svc.DeleteNotificationsEndpointsGotify(nilCtx, "sample-name"); err == nil {
+			t.Errorf("DeleteNotificationsEndpointsGotify: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetNotificationsEndpointsGotify", func(t *testing.T) {
-		_, err := svc.GetNotificationsEndpointsGotify(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.GetNotificationsEndpointsGotify(ctx, "sample-name")
+		if err != nil {
+			t.Fatalf("GetNotificationsEndpointsGotify: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetNotificationsEndpointsGotify: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/notifications/endpoints/gotify/sample-name")
+
+		var nilCtx context.Context
+		if _, err := svc.GetNotificationsEndpointsGotify(nilCtx, "sample-name"); err == nil {
+			t.Errorf("GetNotificationsEndpointsGotify: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateNotificationsEndpointsGotify", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateNotificationsEndpointsGotify(ctx, "sample-name", &cluster.UpdateNotificationsEndpointsGotifyParams{})
+		if err != nil {
+			t.Fatalf("UpdateNotificationsEndpointsGotify: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/cluster/notifications/endpoints/gotify/sample-name")
+
+		var nilCtx context.Context
+		if err := svc.UpdateNotificationsEndpointsGotify(nilCtx, "sample-name", &cluster.UpdateNotificationsEndpointsGotifyParams{}); err == nil {
+			t.Errorf("UpdateNotificationsEndpointsGotify: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListNotificationsEndpointsSendmail", func(t *testing.T) {
-		_, err := svc.ListNotificationsEndpointsSendmail(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListNotificationsEndpointsSendmail(ctx)
+		if err != nil {
+			t.Fatalf("ListNotificationsEndpointsSendmail: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListNotificationsEndpointsSendmail: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/notifications/endpoints/sendmail")
+
+		var nilCtx context.Context
+		if _, err := svc.ListNotificationsEndpointsSendmail(nilCtx); err == nil {
+			t.Errorf("ListNotificationsEndpointsSendmail: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateNotificationsEndpointsSendmail", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateNotificationsEndpointsSendmail(ctx, &cluster.CreateNotificationsEndpointsSendmailParams{Name: "sample-name"})
+		if err != nil {
+			t.Fatalf("CreateNotificationsEndpointsSendmail: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/cluster/notifications/endpoints/sendmail")
+		assertParamValue(t, got.form, "name", "sample-name")
+
+		var nilCtx context.Context
+		if err := svc.CreateNotificationsEndpointsSendmail(nilCtx, &cluster.CreateNotificationsEndpointsSendmailParams{Name: "sample-name"}); err == nil {
+			t.Errorf("CreateNotificationsEndpointsSendmail: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteNotificationsEndpointsSendmail", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteNotificationsEndpointsSendmail(ctx, "sample-name")
+		if err != nil {
+			t.Fatalf("DeleteNotificationsEndpointsSendmail: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/cluster/notifications/endpoints/sendmail/sample-name")
+
+		var nilCtx context.Context
+		if err := svc.DeleteNotificationsEndpointsSendmail(nilCtx, "sample-name"); err == nil {
+			t.Errorf("DeleteNotificationsEndpointsSendmail: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetNotificationsEndpointsSendmail", func(t *testing.T) {
-		_, err := svc.GetNotificationsEndpointsSendmail(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.GetNotificationsEndpointsSendmail(ctx, "sample-name")
+		if err != nil {
+			t.Fatalf("GetNotificationsEndpointsSendmail: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetNotificationsEndpointsSendmail: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/notifications/endpoints/sendmail/sample-name")
+
+		var nilCtx context.Context
+		if _, err := svc.GetNotificationsEndpointsSendmail(nilCtx, "sample-name"); err == nil {
+			t.Errorf("GetNotificationsEndpointsSendmail: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateNotificationsEndpointsSendmail", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateNotificationsEndpointsSendmail(ctx, "sample-name", &cluster.UpdateNotificationsEndpointsSendmailParams{})
+		if err != nil {
+			t.Fatalf("UpdateNotificationsEndpointsSendmail: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/cluster/notifications/endpoints/sendmail/sample-name")
+
+		var nilCtx context.Context
+		if err := svc.UpdateNotificationsEndpointsSendmail(nilCtx, "sample-name", &cluster.UpdateNotificationsEndpointsSendmailParams{}); err == nil {
+			t.Errorf("UpdateNotificationsEndpointsSendmail: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListNotificationsEndpointsSmtp", func(t *testing.T) {
-		_, err := svc.ListNotificationsEndpointsSmtp(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListNotificationsEndpointsSmtp(ctx)
+		if err != nil {
+			t.Fatalf("ListNotificationsEndpointsSmtp: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListNotificationsEndpointsSmtp: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/notifications/endpoints/smtp")
+
+		var nilCtx context.Context
+		if _, err := svc.ListNotificationsEndpointsSmtp(nilCtx); err == nil {
+			t.Errorf("ListNotificationsEndpointsSmtp: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateNotificationsEndpointsSmtp", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateNotificationsEndpointsSmtp(ctx, &cluster.CreateNotificationsEndpointsSmtpParams{FromAddress: "sample-from-address", Name: "sample-name", Server: "sample-server"})
+		if err != nil {
+			t.Fatalf("CreateNotificationsEndpointsSmtp: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/cluster/notifications/endpoints/smtp")
+		assertParamValue(t, got.form, "from-address", "sample-from-address")
+		assertParamValue(t, got.form, "name", "sample-name")
+		assertParamValue(t, got.form, "server", "sample-server")
+
+		var nilCtx context.Context
+		if err := svc.CreateNotificationsEndpointsSmtp(nilCtx, &cluster.CreateNotificationsEndpointsSmtpParams{FromAddress: "sample-from-address", Name: "sample-name", Server: "sample-server"}); err == nil {
+			t.Errorf("CreateNotificationsEndpointsSmtp: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteNotificationsEndpointsSmtp", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteNotificationsEndpointsSmtp(ctx, "sample-name")
+		if err != nil {
+			t.Fatalf("DeleteNotificationsEndpointsSmtp: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/cluster/notifications/endpoints/smtp/sample-name")
+
+		var nilCtx context.Context
+		if err := svc.DeleteNotificationsEndpointsSmtp(nilCtx, "sample-name"); err == nil {
+			t.Errorf("DeleteNotificationsEndpointsSmtp: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetNotificationsEndpointsSmtp", func(t *testing.T) {
-		_, err := svc.GetNotificationsEndpointsSmtp(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.GetNotificationsEndpointsSmtp(ctx, "sample-name")
+		if err != nil {
+			t.Fatalf("GetNotificationsEndpointsSmtp: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetNotificationsEndpointsSmtp: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/notifications/endpoints/smtp/sample-name")
+
+		var nilCtx context.Context
+		if _, err := svc.GetNotificationsEndpointsSmtp(nilCtx, "sample-name"); err == nil {
+			t.Errorf("GetNotificationsEndpointsSmtp: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateNotificationsEndpointsSmtp", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateNotificationsEndpointsSmtp(ctx, "sample-name", &cluster.UpdateNotificationsEndpointsSmtpParams{})
+		if err != nil {
+			t.Fatalf("UpdateNotificationsEndpointsSmtp: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/cluster/notifications/endpoints/smtp/sample-name")
+
+		var nilCtx context.Context
+		if err := svc.UpdateNotificationsEndpointsSmtp(nilCtx, "sample-name", &cluster.UpdateNotificationsEndpointsSmtpParams{}); err == nil {
+			t.Errorf("UpdateNotificationsEndpointsSmtp: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListNotificationsEndpointsWebhook", func(t *testing.T) {
-		_, err := svc.ListNotificationsEndpointsWebhook(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListNotificationsEndpointsWebhook(ctx)
+		if err != nil {
+			t.Fatalf("ListNotificationsEndpointsWebhook: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListNotificationsEndpointsWebhook: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/notifications/endpoints/webhook")
+
+		var nilCtx context.Context
+		if _, err := svc.ListNotificationsEndpointsWebhook(nilCtx); err == nil {
+			t.Errorf("ListNotificationsEndpointsWebhook: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateNotificationsEndpointsWebhook", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateNotificationsEndpointsWebhook(ctx, &cluster.CreateNotificationsEndpointsWebhookParams{Method: "sample-method", Name: "sample-name", Url: "sample-url"})
+		if err != nil {
+			t.Fatalf("CreateNotificationsEndpointsWebhook: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/cluster/notifications/endpoints/webhook")
+		assertParamValue(t, got.form, "method", "sample-method")
+		assertParamValue(t, got.form, "name", "sample-name")
+		assertParamValue(t, got.form, "url", "sample-url")
+
+		var nilCtx context.Context
+		if err := svc.CreateNotificationsEndpointsWebhook(nilCtx, &cluster.CreateNotificationsEndpointsWebhookParams{Method: "sample-method", Name: "sample-name", Url: "sample-url"}); err == nil {
+			t.Errorf("CreateNotificationsEndpointsWebhook: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteNotificationsEndpointsWebhook", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteNotificationsEndpointsWebhook(ctx, "sample-name")
+		if err != nil {
+			t.Fatalf("DeleteNotificationsEndpointsWebhook: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/cluster/notifications/endpoints/webhook/sample-name")
+
+		var nilCtx context.Context
+		if err := svc.DeleteNotificationsEndpointsWebhook(nilCtx, "sample-name"); err == nil {
+			t.Errorf("DeleteNotificationsEndpointsWebhook: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetNotificationsEndpointsWebhook", func(t *testing.T) {
-		_, err := svc.GetNotificationsEndpointsWebhook(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.GetNotificationsEndpointsWebhook(ctx, "sample-name")
+		if err != nil {
+			t.Fatalf("GetNotificationsEndpointsWebhook: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetNotificationsEndpointsWebhook: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/notifications/endpoints/webhook/sample-name")
+
+		var nilCtx context.Context
+		if _, err := svc.GetNotificationsEndpointsWebhook(nilCtx, "sample-name"); err == nil {
+			t.Errorf("GetNotificationsEndpointsWebhook: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateNotificationsEndpointsWebhook", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateNotificationsEndpointsWebhook(ctx, "sample-name", &cluster.UpdateNotificationsEndpointsWebhookParams{})
+		if err != nil {
+			t.Fatalf("UpdateNotificationsEndpointsWebhook: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/cluster/notifications/endpoints/webhook/sample-name")
+
+		var nilCtx context.Context
+		if err := svc.UpdateNotificationsEndpointsWebhook(nilCtx, "sample-name", &cluster.UpdateNotificationsEndpointsWebhookParams{}); err == nil {
+			t.Errorf("UpdateNotificationsEndpointsWebhook: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListNotificationsMatcherFieldValues", func(t *testing.T) {
-		_, err := svc.ListNotificationsMatcherFieldValues(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListNotificationsMatcherFieldValues(ctx)
+		if err != nil {
+			t.Fatalf("ListNotificationsMatcherFieldValues: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListNotificationsMatcherFieldValues: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/notifications/matcher-field-values")
+
+		var nilCtx context.Context
+		if _, err := svc.ListNotificationsMatcherFieldValues(nilCtx); err == nil {
+			t.Errorf("ListNotificationsMatcherFieldValues: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListNotificationsMatcherFields", func(t *testing.T) {
-		_, err := svc.ListNotificationsMatcherFields(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListNotificationsMatcherFields(ctx)
+		if err != nil {
+			t.Fatalf("ListNotificationsMatcherFields: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListNotificationsMatcherFields: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/notifications/matcher-fields")
+
+		var nilCtx context.Context
+		if _, err := svc.ListNotificationsMatcherFields(nilCtx); err == nil {
+			t.Errorf("ListNotificationsMatcherFields: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListNotificationsMatchers", func(t *testing.T) {
-		_, err := svc.ListNotificationsMatchers(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListNotificationsMatchers(ctx)
+		if err != nil {
+			t.Fatalf("ListNotificationsMatchers: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListNotificationsMatchers: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/notifications/matchers")
+
+		var nilCtx context.Context
+		if _, err := svc.ListNotificationsMatchers(nilCtx); err == nil {
+			t.Errorf("ListNotificationsMatchers: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateNotificationsMatchers", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateNotificationsMatchers(ctx, &cluster.CreateNotificationsMatchersParams{Name: "sample-name"})
+		if err != nil {
+			t.Fatalf("CreateNotificationsMatchers: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/cluster/notifications/matchers")
+		assertParamValue(t, got.form, "name", "sample-name")
+
+		var nilCtx context.Context
+		if err := svc.CreateNotificationsMatchers(nilCtx, &cluster.CreateNotificationsMatchersParams{Name: "sample-name"}); err == nil {
+			t.Errorf("CreateNotificationsMatchers: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteNotificationsMatchers", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteNotificationsMatchers(ctx, "sample-name")
+		if err != nil {
+			t.Fatalf("DeleteNotificationsMatchers: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/cluster/notifications/matchers/sample-name")
+
+		var nilCtx context.Context
+		if err := svc.DeleteNotificationsMatchers(nilCtx, "sample-name"); err == nil {
+			t.Errorf("DeleteNotificationsMatchers: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetNotificationsMatchers", func(t *testing.T) {
-		_, err := svc.GetNotificationsMatchers(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.GetNotificationsMatchers(ctx, "sample-name")
+		if err != nil {
+			t.Fatalf("GetNotificationsMatchers: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetNotificationsMatchers: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/notifications/matchers/sample-name")
+
+		var nilCtx context.Context
+		if _, err := svc.GetNotificationsMatchers(nilCtx, "sample-name"); err == nil {
+			t.Errorf("GetNotificationsMatchers: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateNotificationsMatchers", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateNotificationsMatchers(ctx, "sample-name", &cluster.UpdateNotificationsMatchersParams{})
+		if err != nil {
+			t.Fatalf("UpdateNotificationsMatchers: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/cluster/notifications/matchers/sample-name")
+
+		var nilCtx context.Context
+		if err := svc.UpdateNotificationsMatchers(nilCtx, "sample-name", &cluster.UpdateNotificationsMatchersParams{}); err == nil {
+			t.Errorf("UpdateNotificationsMatchers: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListNotificationsTargets", func(t *testing.T) {
-		_, err := svc.ListNotificationsTargets(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListNotificationsTargets(ctx)
+		if err != nil {
+			t.Fatalf("ListNotificationsTargets: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListNotificationsTargets: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/notifications/targets")
+
+		var nilCtx context.Context
+		if _, err := svc.ListNotificationsTargets(nilCtx); err == nil {
+			t.Errorf("ListNotificationsTargets: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateNotificationsTargetsTest", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateNotificationsTargetsTest(ctx, "sample-name")
+		if err != nil {
+			t.Fatalf("CreateNotificationsTargetsTest: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/cluster/notifications/targets/sample-name/test")
+
+		var nilCtx context.Context
+		if err := svc.CreateNotificationsTargetsTest(nilCtx, "sample-name"); err == nil {
+			t.Errorf("CreateNotificationsTargetsTest: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListOptions", func(t *testing.T) {
-		_, err := svc.ListOptions(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListOptions(ctx)
+		if err != nil {
+			t.Fatalf("ListOptions: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListOptions: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/options")
+
+		var nilCtx context.Context
+		if _, err := svc.ListOptions(nilCtx); err == nil {
+			t.Errorf("ListOptions: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateOptions", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateOptions(ctx, &cluster.UpdateOptionsParams{})
+		if err != nil {
+			t.Fatalf("UpdateOptions: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/cluster/options")
+
+		var nilCtx context.Context
+		if err := svc.UpdateOptions(nilCtx, &cluster.UpdateOptionsParams{}); err == nil {
+			t.Errorf("UpdateOptions: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListQemu", func(t *testing.T) {
-		_, err := svc.ListQemu(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListQemu(ctx)
+		if err != nil {
+			t.Fatalf("ListQemu: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListQemu: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/qemu")
+
+		var nilCtx context.Context
+		if _, err := svc.ListQemu(nilCtx); err == nil {
+			t.Errorf("ListQemu: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListQemuCpuFlags", func(t *testing.T) {
-		_, err := svc.ListQemuCpuFlags(ctx, nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListQemuCpuFlags(ctx, &cluster.ListQemuCpuFlagsParams{})
+		if err != nil {
+			t.Fatalf("ListQemuCpuFlags: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListQemuCpuFlags: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/qemu/cpu-flags")
+
+		var nilCtx context.Context
+		if _, err := svc.ListQemuCpuFlags(nilCtx, &cluster.ListQemuCpuFlagsParams{}); err == nil {
+			t.Errorf("ListQemuCpuFlags: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListQemuCustomCpuModels", func(t *testing.T) {
-		_, err := svc.ListQemuCustomCpuModels(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListQemuCustomCpuModels(ctx)
+		if err != nil {
+			t.Fatalf("ListQemuCustomCpuModels: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListQemuCustomCpuModels: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/qemu/custom-cpu-models")
+
+		var nilCtx context.Context
+		if _, err := svc.ListQemuCustomCpuModels(nilCtx); err == nil {
+			t.Errorf("ListQemuCustomCpuModels: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateQemuCustomCpuModels", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateQemuCustomCpuModels(ctx, &cluster.CreateQemuCustomCpuModelsParams{Cputype: "sample-cputype", ReportedModel: "sample-reported-model"})
+		if err != nil {
+			t.Fatalf("CreateQemuCustomCpuModels: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/cluster/qemu/custom-cpu-models")
+		assertParamValue(t, got.form, "cputype", "sample-cputype")
+		assertParamValue(t, got.form, "reported-model", "sample-reported-model")
+
+		var nilCtx context.Context
+		if err := svc.CreateQemuCustomCpuModels(nilCtx, &cluster.CreateQemuCustomCpuModelsParams{Cputype: "sample-cputype", ReportedModel: "sample-reported-model"}); err == nil {
+			t.Errorf("CreateQemuCustomCpuModels: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteQemuCustomCpuModels", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteQemuCustomCpuModels(ctx, "sample-cputype")
+		if err != nil {
+			t.Fatalf("DeleteQemuCustomCpuModels: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/cluster/qemu/custom-cpu-models/sample-cputype")
+
+		var nilCtx context.Context
+		if err := svc.DeleteQemuCustomCpuModels(nilCtx, "sample-cputype"); err == nil {
+			t.Errorf("DeleteQemuCustomCpuModels: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetQemuCustomCpuModels", func(t *testing.T) {
-		_, err := svc.GetQemuCustomCpuModels(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.GetQemuCustomCpuModels(ctx, "sample-cputype")
+		if err != nil {
+			t.Fatalf("GetQemuCustomCpuModels: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetQemuCustomCpuModels: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/qemu/custom-cpu-models/sample-cputype")
+
+		var nilCtx context.Context
+		if _, err := svc.GetQemuCustomCpuModels(nilCtx, "sample-cputype"); err == nil {
+			t.Errorf("GetQemuCustomCpuModels: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateQemuCustomCpuModels", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateQemuCustomCpuModels(ctx, "sample-cputype", &cluster.UpdateQemuCustomCpuModelsParams{})
+		if err != nil {
+			t.Fatalf("UpdateQemuCustomCpuModels: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/cluster/qemu/custom-cpu-models/sample-cputype")
+
+		var nilCtx context.Context
+		if err := svc.UpdateQemuCustomCpuModels(nilCtx, "sample-cputype", &cluster.UpdateQemuCustomCpuModelsParams{}); err == nil {
+			t.Errorf("UpdateQemuCustomCpuModels: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListReplication", func(t *testing.T) {
-		_, err := svc.ListReplication(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListReplication(ctx)
+		if err != nil {
+			t.Fatalf("ListReplication: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListReplication: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/replication")
+
+		var nilCtx context.Context
+		if _, err := svc.ListReplication(nilCtx); err == nil {
+			t.Errorf("ListReplication: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateReplication", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateReplication(ctx, &cluster.CreateReplicationParams{Id: "sample-id", Target: "sample-target", Type: "sample-type"})
+		if err != nil {
+			t.Fatalf("CreateReplication: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/cluster/replication")
+		assertParamValue(t, got.form, "id", "sample-id")
+		assertParamValue(t, got.form, "target", "sample-target")
+		assertParamValue(t, got.form, "type", "sample-type")
+
+		var nilCtx context.Context
+		if err := svc.CreateReplication(nilCtx, &cluster.CreateReplicationParams{Id: "sample-id", Target: "sample-target", Type: "sample-type"}); err == nil {
+			t.Errorf("CreateReplication: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteReplication", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteReplication(ctx, "sample-id", &cluster.DeleteReplicationParams{})
+		if err != nil {
+			t.Fatalf("DeleteReplication: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/cluster/replication/sample-id")
+
+		var nilCtx context.Context
+		if err := svc.DeleteReplication(nilCtx, "sample-id", &cluster.DeleteReplicationParams{}); err == nil {
+			t.Errorf("DeleteReplication: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetReplication", func(t *testing.T) {
-		_, err := svc.GetReplication(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.GetReplication(ctx, "sample-id")
+		if err != nil {
+			t.Fatalf("GetReplication: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetReplication: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/replication/sample-id")
+
+		var nilCtx context.Context
+		if _, err := svc.GetReplication(nilCtx, "sample-id"); err == nil {
+			t.Errorf("GetReplication: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateReplication", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateReplication(ctx, "sample-id", &cluster.UpdateReplicationParams{})
+		if err != nil {
+			t.Fatalf("UpdateReplication: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/cluster/replication/sample-id")
+
+		var nilCtx context.Context
+		if err := svc.UpdateReplication(nilCtx, "sample-id", &cluster.UpdateReplicationParams{}); err == nil {
+			t.Errorf("UpdateReplication: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListResources", func(t *testing.T) {
-		_, err := svc.ListResources(ctx, nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListResources(ctx, &cluster.ListResourcesParams{})
+		if err != nil {
+			t.Fatalf("ListResources: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListResources: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/resources")
+
+		var nilCtx context.Context
+		if _, err := svc.ListResources(nilCtx, &cluster.ListResourcesParams{}); err == nil {
+			t.Errorf("ListResources: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListSdn", func(t *testing.T) {
-		_, err := svc.ListSdn(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListSdn(ctx)
+		if err != nil {
+			t.Fatalf("ListSdn: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListSdn: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/sdn")
+
+		var nilCtx context.Context
+		if _, err := svc.ListSdn(nilCtx); err == nil {
+			t.Errorf("ListSdn: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateSdn", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.UpdateSdn(ctx, &cluster.UpdateSdnParams{})
+		if err != nil {
+			t.Fatalf("UpdateSdn: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("UpdateSdn: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/cluster/sdn")
+
+		var nilCtx context.Context
+		if _, err := svc.UpdateSdn(nilCtx, &cluster.UpdateSdnParams{}); err == nil {
+			t.Errorf("UpdateSdn: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListSdnControllers", func(t *testing.T) {
-		_, err := svc.ListSdnControllers(ctx, nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListSdnControllers(ctx, &cluster.ListSdnControllersParams{})
+		if err != nil {
+			t.Fatalf("ListSdnControllers: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListSdnControllers: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/sdn/controllers")
+
+		var nilCtx context.Context
+		if _, err := svc.ListSdnControllers(nilCtx, &cluster.ListSdnControllersParams{}); err == nil {
+			t.Errorf("ListSdnControllers: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateSdnControllers", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateSdnControllers(ctx, &cluster.CreateSdnControllersParams{Controller: "sample-controller", Type: "sample-type"})
+		if err != nil {
+			t.Fatalf("CreateSdnControllers: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/cluster/sdn/controllers")
+		assertParamValue(t, got.form, "controller", "sample-controller")
+		assertParamValue(t, got.form, "type", "sample-type")
+
+		var nilCtx context.Context
+		if err := svc.CreateSdnControllers(nilCtx, &cluster.CreateSdnControllersParams{Controller: "sample-controller", Type: "sample-type"}); err == nil {
+			t.Errorf("CreateSdnControllers: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteSdnControllers", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteSdnControllers(ctx, "sample-controller", &cluster.DeleteSdnControllersParams{})
+		if err != nil {
+			t.Fatalf("DeleteSdnControllers: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/cluster/sdn/controllers/sample-controller")
+
+		var nilCtx context.Context
+		if err := svc.DeleteSdnControllers(nilCtx, "sample-controller", &cluster.DeleteSdnControllersParams{}); err == nil {
+			t.Errorf("DeleteSdnControllers: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetSdnControllers", func(t *testing.T) {
-		_, err := svc.GetSdnControllers(ctx, "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.GetSdnControllers(ctx, "sample-controller", &cluster.GetSdnControllersParams{})
+		if err != nil {
+			t.Fatalf("GetSdnControllers: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetSdnControllers: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/sdn/controllers/sample-controller")
+
+		var nilCtx context.Context
+		if _, err := svc.GetSdnControllers(nilCtx, "sample-controller", &cluster.GetSdnControllersParams{}); err == nil {
+			t.Errorf("GetSdnControllers: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateSdnControllers", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateSdnControllers(ctx, "sample-controller", &cluster.UpdateSdnControllersParams{})
+		if err != nil {
+			t.Fatalf("UpdateSdnControllers: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/cluster/sdn/controllers/sample-controller")
+
+		var nilCtx context.Context
+		if err := svc.UpdateSdnControllers(nilCtx, "sample-controller", &cluster.UpdateSdnControllersParams{}); err == nil {
+			t.Errorf("UpdateSdnControllers: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListSdnDns", func(t *testing.T) {
-		_, err := svc.ListSdnDns(ctx, nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListSdnDns(ctx, &cluster.ListSdnDnsParams{})
+		if err != nil {
+			t.Fatalf("ListSdnDns: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListSdnDns: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/sdn/dns")
+
+		var nilCtx context.Context
+		if _, err := svc.ListSdnDns(nilCtx, &cluster.ListSdnDnsParams{}); err == nil {
+			t.Errorf("ListSdnDns: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateSdnDns", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateSdnDns(ctx, &cluster.CreateSdnDnsParams{Dns: "sample-dns", Key: "sample-key", Type: "sample-type", Url: "sample-url"})
+		if err != nil {
+			t.Fatalf("CreateSdnDns: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/cluster/sdn/dns")
+		assertParamValue(t, got.form, "dns", "sample-dns")
+		assertParamValue(t, got.form, "key", "sample-key")
+		assertParamValue(t, got.form, "type", "sample-type")
+		assertParamValue(t, got.form, "url", "sample-url")
+
+		var nilCtx context.Context
+		if err := svc.CreateSdnDns(nilCtx, &cluster.CreateSdnDnsParams{Dns: "sample-dns", Key: "sample-key", Type: "sample-type", Url: "sample-url"}); err == nil {
+			t.Errorf("CreateSdnDns: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteSdnDns", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteSdnDns(ctx, "sample-dns", &cluster.DeleteSdnDnsParams{})
+		if err != nil {
+			t.Fatalf("DeleteSdnDns: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/cluster/sdn/dns/sample-dns")
+
+		var nilCtx context.Context
+		if err := svc.DeleteSdnDns(nilCtx, "sample-dns", &cluster.DeleteSdnDnsParams{}); err == nil {
+			t.Errorf("DeleteSdnDns: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetSdnDns", func(t *testing.T) {
-		_, err := svc.GetSdnDns(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.GetSdnDns(ctx, "sample-dns")
+		if err != nil {
+			t.Fatalf("GetSdnDns: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetSdnDns: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/sdn/dns/sample-dns")
+
+		var nilCtx context.Context
+		if _, err := svc.GetSdnDns(nilCtx, "sample-dns"); err == nil {
+			t.Errorf("GetSdnDns: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateSdnDns", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateSdnDns(ctx, "sample-dns", &cluster.UpdateSdnDnsParams{})
+		if err != nil {
+			t.Fatalf("UpdateSdnDns: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/cluster/sdn/dns/sample-dns")
+
+		var nilCtx context.Context
+		if err := svc.UpdateSdnDns(nilCtx, "sample-dns", &cluster.UpdateSdnDnsParams{}); err == nil {
+			t.Errorf("UpdateSdnDns: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListSdnDryRun", func(t *testing.T) {
-		_, err := svc.ListSdnDryRun(ctx, nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListSdnDryRun(ctx, &cluster.ListSdnDryRunParams{Node: "sample-node"})
+		if err != nil {
+			t.Fatalf("ListSdnDryRun: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListSdnDryRun: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/sdn/dry-run")
+		assertParamValue(t, got.query, "node", "sample-node")
+
+		var nilCtx context.Context
+		if _, err := svc.ListSdnDryRun(nilCtx, &cluster.ListSdnDryRunParams{Node: "sample-node"}); err == nil {
+			t.Errorf("ListSdnDryRun: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListSdnFabrics", func(t *testing.T) {
-		_, err := svc.ListSdnFabrics(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListSdnFabrics(ctx)
+		if err != nil {
+			t.Fatalf("ListSdnFabrics: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListSdnFabrics: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/sdn/fabrics")
+
+		var nilCtx context.Context
+		if _, err := svc.ListSdnFabrics(nilCtx); err == nil {
+			t.Errorf("ListSdnFabrics: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListSdnFabricsAll", func(t *testing.T) {
-		_, err := svc.ListSdnFabricsAll(ctx, nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListSdnFabricsAll(ctx, &cluster.ListSdnFabricsAllParams{})
+		if err != nil {
+			t.Fatalf("ListSdnFabricsAll: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListSdnFabricsAll: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/sdn/fabrics/all")
+
+		var nilCtx context.Context
+		if _, err := svc.ListSdnFabricsAll(nilCtx, &cluster.ListSdnFabricsAllParams{}); err == nil {
+			t.Errorf("ListSdnFabricsAll: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListSdnFabricsFabric", func(t *testing.T) {
-		_, err := svc.ListSdnFabricsFabric(ctx, nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListSdnFabricsFabric(ctx, &cluster.ListSdnFabricsFabricParams{})
+		if err != nil {
+			t.Fatalf("ListSdnFabricsFabric: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListSdnFabricsFabric: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/sdn/fabrics/fabric")
+
+		var nilCtx context.Context
+		if _, err := svc.ListSdnFabricsFabric(nilCtx, &cluster.ListSdnFabricsFabricParams{}); err == nil {
+			t.Errorf("ListSdnFabricsFabric: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateSdnFabricsFabric", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateSdnFabricsFabric(ctx, &cluster.CreateSdnFabricsFabricParams{Id: "sample-id", Protocol: "sample-protocol", Redistribute: []json.RawMessage{json.RawMessage("{}")}})
+		if err != nil {
+			t.Fatalf("CreateSdnFabricsFabric: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/cluster/sdn/fabrics/fabric")
+		assertParamValue(t, got.form, "id", "sample-id")
+		assertParamValue(t, got.form, "protocol", "sample-protocol")
+		assertParamPresent(t, got.form, "redistribute")
+
+		var nilCtx context.Context
+		if err := svc.CreateSdnFabricsFabric(nilCtx, &cluster.CreateSdnFabricsFabricParams{Id: "sample-id", Protocol: "sample-protocol", Redistribute: []json.RawMessage{json.RawMessage("{}")}}); err == nil {
+			t.Errorf("CreateSdnFabricsFabric: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteSdnFabricsFabric", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteSdnFabricsFabric(ctx, "sample-id")
+		if err != nil {
+			t.Fatalf("DeleteSdnFabricsFabric: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/cluster/sdn/fabrics/fabric/sample-id")
+
+		var nilCtx context.Context
+		if err := svc.DeleteSdnFabricsFabric(nilCtx, "sample-id"); err == nil {
+			t.Errorf("DeleteSdnFabricsFabric: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetSdnFabricsFabric", func(t *testing.T) {
-		_, err := svc.GetSdnFabricsFabric(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.GetSdnFabricsFabric(ctx, "sample-id")
+		if err != nil {
+			t.Fatalf("GetSdnFabricsFabric: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetSdnFabricsFabric: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/sdn/fabrics/fabric/sample-id")
+
+		var nilCtx context.Context
+		if _, err := svc.GetSdnFabricsFabric(nilCtx, "sample-id"); err == nil {
+			t.Errorf("GetSdnFabricsFabric: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateSdnFabricsFabric", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateSdnFabricsFabric(ctx, "sample-id", &cluster.UpdateSdnFabricsFabricParams{Delete: []json.RawMessage{json.RawMessage("{}")}, Protocol: "sample-protocol", Redistribute: []json.RawMessage{json.RawMessage("{}")}})
+		if err != nil {
+			t.Fatalf("UpdateSdnFabricsFabric: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/cluster/sdn/fabrics/fabric/sample-id")
+		assertParamPresent(t, got.form, "delete")
+		assertParamValue(t, got.form, "protocol", "sample-protocol")
+		assertParamPresent(t, got.form, "redistribute")
+
+		var nilCtx context.Context
+		if err := svc.UpdateSdnFabricsFabric(nilCtx, "sample-id", &cluster.UpdateSdnFabricsFabricParams{Delete: []json.RawMessage{json.RawMessage("{}")}, Protocol: "sample-protocol", Redistribute: []json.RawMessage{json.RawMessage("{}")}}); err == nil {
+			t.Errorf("UpdateSdnFabricsFabric: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListSdnFabricsNode", func(t *testing.T) {
-		_, err := svc.ListSdnFabricsNode(ctx, nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListSdnFabricsNode(ctx, &cluster.ListSdnFabricsNodeParams{})
+		if err != nil {
+			t.Fatalf("ListSdnFabricsNode: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListSdnFabricsNode: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/sdn/fabrics/node")
+
+		var nilCtx context.Context
+		if _, err := svc.ListSdnFabricsNode(nilCtx, &cluster.ListSdnFabricsNodeParams{}); err == nil {
+			t.Errorf("ListSdnFabricsNode: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetSdnFabricsNode", func(t *testing.T) {
-		_, err := svc.GetSdnFabricsNode(ctx, "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.GetSdnFabricsNode(ctx, "sample-fabric_id", &cluster.GetSdnFabricsNodeParams{})
+		if err != nil {
+			t.Fatalf("GetSdnFabricsNode: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetSdnFabricsNode: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/sdn/fabrics/node/sample-fabric_id")
+
+		var nilCtx context.Context
+		if _, err := svc.GetSdnFabricsNode(nilCtx, "sample-fabric_id", &cluster.GetSdnFabricsNodeParams{}); err == nil {
+			t.Errorf("GetSdnFabricsNode: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateSdnFabricsNode", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateSdnFabricsNode(ctx, "sample-fabric_id", &cluster.CreateSdnFabricsNodeParams{Interfaces: []json.RawMessage{json.RawMessage("{}")}, NodeId: "sample-node_id", Protocol: "sample-protocol"})
+		if err != nil {
+			t.Fatalf("CreateSdnFabricsNode: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/cluster/sdn/fabrics/node/sample-fabric_id")
+		assertParamPresent(t, got.form, "interfaces")
+		assertParamValue(t, got.form, "node_id", "sample-node_id")
+		assertParamValue(t, got.form, "protocol", "sample-protocol")
+
+		var nilCtx context.Context
+		if err := svc.CreateSdnFabricsNode(nilCtx, "sample-fabric_id", &cluster.CreateSdnFabricsNodeParams{Interfaces: []json.RawMessage{json.RawMessage("{}")}, NodeId: "sample-node_id", Protocol: "sample-protocol"}); err == nil {
+			t.Errorf("CreateSdnFabricsNode: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteSdnFabricsNode", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteSdnFabricsNode(ctx, "sample-fabric_id", "sample-node_id")
+		if err != nil {
+			t.Fatalf("DeleteSdnFabricsNode: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/cluster/sdn/fabrics/node/sample-fabric_id/sample-node_id")
+
+		var nilCtx context.Context
+		if err := svc.DeleteSdnFabricsNode(nilCtx, "sample-fabric_id", "sample-node_id"); err == nil {
+			t.Errorf("DeleteSdnFabricsNode: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetSdnFabricsNode2", func(t *testing.T) {
-		_, err := svc.GetSdnFabricsNode2(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.GetSdnFabricsNode2(ctx, "sample-fabric_id", "sample-node_id")
+		if err != nil {
+			t.Fatalf("GetSdnFabricsNode2: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetSdnFabricsNode2: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/sdn/fabrics/node/sample-fabric_id/sample-node_id")
+
+		var nilCtx context.Context
+		if _, err := svc.GetSdnFabricsNode2(nilCtx, "sample-fabric_id", "sample-node_id"); err == nil {
+			t.Errorf("GetSdnFabricsNode2: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateSdnFabricsNode", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateSdnFabricsNode(ctx, "sample-fabric_id", "sample-node_id", &cluster.UpdateSdnFabricsNodeParams{Delete: []json.RawMessage{json.RawMessage("{}")}, Interfaces: []json.RawMessage{json.RawMessage("{}")}, Protocol: "sample-protocol"})
+		if err != nil {
+			t.Fatalf("UpdateSdnFabricsNode: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/cluster/sdn/fabrics/node/sample-fabric_id/sample-node_id")
+		assertParamPresent(t, got.form, "delete")
+		assertParamPresent(t, got.form, "interfaces")
+		assertParamValue(t, got.form, "protocol", "sample-protocol")
+
+		var nilCtx context.Context
+		if err := svc.UpdateSdnFabricsNode(nilCtx, "sample-fabric_id", "sample-node_id", &cluster.UpdateSdnFabricsNodeParams{Delete: []json.RawMessage{json.RawMessage("{}")}, Interfaces: []json.RawMessage{json.RawMessage("{}")}, Protocol: "sample-protocol"}); err == nil {
+			t.Errorf("UpdateSdnFabricsNode: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListSdnIpams", func(t *testing.T) {
-		_, err := svc.ListSdnIpams(ctx, nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListSdnIpams(ctx, &cluster.ListSdnIpamsParams{})
+		if err != nil {
+			t.Fatalf("ListSdnIpams: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListSdnIpams: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/sdn/ipams")
+
+		var nilCtx context.Context
+		if _, err := svc.ListSdnIpams(nilCtx, &cluster.ListSdnIpamsParams{}); err == nil {
+			t.Errorf("ListSdnIpams: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateSdnIpams", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateSdnIpams(ctx, &cluster.CreateSdnIpamsParams{Ipam: "sample-ipam", Type: "sample-type"})
+		if err != nil {
+			t.Fatalf("CreateSdnIpams: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/cluster/sdn/ipams")
+		assertParamValue(t, got.form, "ipam", "sample-ipam")
+		assertParamValue(t, got.form, "type", "sample-type")
+
+		var nilCtx context.Context
+		if err := svc.CreateSdnIpams(nilCtx, &cluster.CreateSdnIpamsParams{Ipam: "sample-ipam", Type: "sample-type"}); err == nil {
+			t.Errorf("CreateSdnIpams: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteSdnIpams", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteSdnIpams(ctx, "sample-ipam", &cluster.DeleteSdnIpamsParams{})
+		if err != nil {
+			t.Fatalf("DeleteSdnIpams: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/cluster/sdn/ipams/sample-ipam")
+
+		var nilCtx context.Context
+		if err := svc.DeleteSdnIpams(nilCtx, "sample-ipam", &cluster.DeleteSdnIpamsParams{}); err == nil {
+			t.Errorf("DeleteSdnIpams: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetSdnIpams", func(t *testing.T) {
-		_, err := svc.GetSdnIpams(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.GetSdnIpams(ctx, "sample-ipam")
+		if err != nil {
+			t.Fatalf("GetSdnIpams: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetSdnIpams: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/sdn/ipams/sample-ipam")
+
+		var nilCtx context.Context
+		if _, err := svc.GetSdnIpams(nilCtx, "sample-ipam"); err == nil {
+			t.Errorf("GetSdnIpams: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateSdnIpams", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateSdnIpams(ctx, "sample-ipam", &cluster.UpdateSdnIpamsParams{})
+		if err != nil {
+			t.Fatalf("UpdateSdnIpams: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/cluster/sdn/ipams/sample-ipam")
+
+		var nilCtx context.Context
+		if err := svc.UpdateSdnIpams(nilCtx, "sample-ipam", &cluster.UpdateSdnIpamsParams{}); err == nil {
+			t.Errorf("UpdateSdnIpams: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListSdnIpamsStatus", func(t *testing.T) {
-		_, err := svc.ListSdnIpamsStatus(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListSdnIpamsStatus(ctx, "sample-ipam")
+		if err != nil {
+			t.Fatalf("ListSdnIpamsStatus: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListSdnIpamsStatus: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/sdn/ipams/sample-ipam/status")
+
+		var nilCtx context.Context
+		if _, err := svc.ListSdnIpamsStatus(nilCtx, "sample-ipam"); err == nil {
+			t.Errorf("ListSdnIpamsStatus: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteSdnLock", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteSdnLock(ctx, &cluster.DeleteSdnLockParams{})
+		if err != nil {
+			t.Fatalf("DeleteSdnLock: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/cluster/sdn/lock")
+
+		var nilCtx context.Context
+		if err := svc.DeleteSdnLock(nilCtx, &cluster.DeleteSdnLockParams{}); err == nil {
+			t.Errorf("DeleteSdnLock: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateSdnLock", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateSdnLock(ctx, &cluster.CreateSdnLockParams{})
+		if err != nil {
+			t.Fatalf("CreateSdnLock: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateSdnLock: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/cluster/sdn/lock")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateSdnLock(nilCtx, &cluster.CreateSdnLockParams{}); err == nil {
+			t.Errorf("CreateSdnLock: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListSdnPrefixLists", func(t *testing.T) {
-		_, err := svc.ListSdnPrefixLists(ctx, nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListSdnPrefixLists(ctx, &cluster.ListSdnPrefixListsParams{})
+		if err != nil {
+			t.Fatalf("ListSdnPrefixLists: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListSdnPrefixLists: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/sdn/prefix-lists")
+
+		var nilCtx context.Context
+		if _, err := svc.ListSdnPrefixLists(nilCtx, &cluster.ListSdnPrefixListsParams{}); err == nil {
+			t.Errorf("ListSdnPrefixLists: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateSdnPrefixLists", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateSdnPrefixLists(ctx, &cluster.CreateSdnPrefixListsParams{Id: "sample-id"})
+		if err != nil {
+			t.Fatalf("CreateSdnPrefixLists: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/cluster/sdn/prefix-lists")
+		assertParamValue(t, got.form, "id", "sample-id")
+
+		var nilCtx context.Context
+		if err := svc.CreateSdnPrefixLists(nilCtx, &cluster.CreateSdnPrefixListsParams{Id: "sample-id"}); err == nil {
+			t.Errorf("CreateSdnPrefixLists: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteSdnPrefixLists", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteSdnPrefixLists(ctx, "sample-id", &cluster.DeleteSdnPrefixListsParams{})
+		if err != nil {
+			t.Fatalf("DeleteSdnPrefixLists: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/cluster/sdn/prefix-lists/sample-id")
+
+		var nilCtx context.Context
+		if err := svc.DeleteSdnPrefixLists(nilCtx, "sample-id", &cluster.DeleteSdnPrefixListsParams{}); err == nil {
+			t.Errorf("DeleteSdnPrefixLists: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetSdnPrefixLists", func(t *testing.T) {
-		_, err := svc.GetSdnPrefixLists(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.GetSdnPrefixLists(ctx, "sample-id")
+		if err != nil {
+			t.Fatalf("GetSdnPrefixLists: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetSdnPrefixLists: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/sdn/prefix-lists/sample-id")
+
+		var nilCtx context.Context
+		if _, err := svc.GetSdnPrefixLists(nilCtx, "sample-id"); err == nil {
+			t.Errorf("GetSdnPrefixLists: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateSdnPrefixLists", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateSdnPrefixLists(ctx, "sample-id", &cluster.UpdateSdnPrefixListsParams{})
+		if err != nil {
+			t.Fatalf("UpdateSdnPrefixLists: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/cluster/sdn/prefix-lists/sample-id")
+
+		var nilCtx context.Context
+		if err := svc.UpdateSdnPrefixLists(nilCtx, "sample-id", &cluster.UpdateSdnPrefixListsParams{}); err == nil {
+			t.Errorf("UpdateSdnPrefixLists: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListSdnPrefixListsEntries", func(t *testing.T) {
-		_, err := svc.ListSdnPrefixListsEntries(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListSdnPrefixListsEntries(ctx, "sample-id")
+		if err != nil {
+			t.Fatalf("ListSdnPrefixListsEntries: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListSdnPrefixListsEntries: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/sdn/prefix-lists/sample-id/entries")
+
+		var nilCtx context.Context
+		if _, err := svc.ListSdnPrefixListsEntries(nilCtx, "sample-id"); err == nil {
+			t.Errorf("ListSdnPrefixListsEntries: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateSdnPrefixListsEntries", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateSdnPrefixListsEntries(ctx, "sample-id", &cluster.CreateSdnPrefixListsEntriesParams{Action: "sample-action", Prefix: "sample-prefix"})
+		if err != nil {
+			t.Fatalf("CreateSdnPrefixListsEntries: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/cluster/sdn/prefix-lists/sample-id/entries")
+		assertParamValue(t, got.form, "action", "sample-action")
+		assertParamValue(t, got.form, "prefix", "sample-prefix")
+
+		var nilCtx context.Context
+		if err := svc.CreateSdnPrefixListsEntries(nilCtx, "sample-id", &cluster.CreateSdnPrefixListsEntriesParams{Action: "sample-action", Prefix: "sample-prefix"}); err == nil {
+			t.Errorf("CreateSdnPrefixListsEntries: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteSdnPrefixListsEntries", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteSdnPrefixListsEntries(ctx, "sample-id", "sample-url_seq", &cluster.DeleteSdnPrefixListsEntriesParams{})
+		if err != nil {
+			t.Fatalf("DeleteSdnPrefixListsEntries: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/cluster/sdn/prefix-lists/sample-id/entries/sample-url_seq")
+
+		var nilCtx context.Context
+		if err := svc.DeleteSdnPrefixListsEntries(nilCtx, "sample-id", "sample-url_seq", &cluster.DeleteSdnPrefixListsEntriesParams{}); err == nil {
+			t.Errorf("DeleteSdnPrefixListsEntries: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetSdnPrefixListsEntries", func(t *testing.T) {
-		_, err := svc.GetSdnPrefixListsEntries(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.GetSdnPrefixListsEntries(ctx, "sample-id", "sample-url_seq")
+		if err != nil {
+			t.Fatalf("GetSdnPrefixListsEntries: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetSdnPrefixListsEntries: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/sdn/prefix-lists/sample-id/entries/sample-url_seq")
+
+		var nilCtx context.Context
+		if _, err := svc.GetSdnPrefixListsEntries(nilCtx, "sample-id", "sample-url_seq"); err == nil {
+			t.Errorf("GetSdnPrefixListsEntries: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateSdnPrefixListsEntries", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateSdnPrefixListsEntries(ctx, "sample-id", "sample-url_seq", &cluster.UpdateSdnPrefixListsEntriesParams{})
+		if err != nil {
+			t.Fatalf("UpdateSdnPrefixListsEntries: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/cluster/sdn/prefix-lists/sample-id/entries/sample-url_seq")
+
+		var nilCtx context.Context
+		if err := svc.UpdateSdnPrefixListsEntries(nilCtx, "sample-id", "sample-url_seq", &cluster.UpdateSdnPrefixListsEntriesParams{}); err == nil {
+			t.Errorf("UpdateSdnPrefixListsEntries: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateSdnRollback", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateSdnRollback(ctx, &cluster.CreateSdnRollbackParams{})
+		if err != nil {
+			t.Fatalf("CreateSdnRollback: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/cluster/sdn/rollback")
+
+		var nilCtx context.Context
+		if err := svc.CreateSdnRollback(nilCtx, &cluster.CreateSdnRollbackParams{}); err == nil {
+			t.Errorf("CreateSdnRollback: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListSdnRouteMaps", func(t *testing.T) {
-		_, err := svc.ListSdnRouteMaps(ctx, nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListSdnRouteMaps(ctx, &cluster.ListSdnRouteMapsParams{})
+		if err != nil {
+			t.Fatalf("ListSdnRouteMaps: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListSdnRouteMaps: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/sdn/route-maps")
+
+		var nilCtx context.Context
+		if _, err := svc.ListSdnRouteMaps(nilCtx, &cluster.ListSdnRouteMapsParams{}); err == nil {
+			t.Errorf("ListSdnRouteMaps: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListSdnRouteMapsEntries", func(t *testing.T) {
-		_, err := svc.ListSdnRouteMapsEntries(ctx, nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListSdnRouteMapsEntries(ctx, &cluster.ListSdnRouteMapsEntriesParams{})
+		if err != nil {
+			t.Fatalf("ListSdnRouteMapsEntries: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListSdnRouteMapsEntries: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/sdn/route-maps/entries")
+
+		var nilCtx context.Context
+		if _, err := svc.ListSdnRouteMapsEntries(nilCtx, &cluster.ListSdnRouteMapsEntriesParams{}); err == nil {
+			t.Errorf("ListSdnRouteMapsEntries: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateSdnRouteMapsEntries", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateSdnRouteMapsEntries(ctx, &cluster.CreateSdnRouteMapsEntriesParams{Action: "sample-action", Order: 42, RouteMapId: "sample-route-map-id"})
+		if err != nil {
+			t.Fatalf("CreateSdnRouteMapsEntries: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/cluster/sdn/route-maps/entries")
+		assertParamValue(t, got.form, "action", "sample-action")
+		assertParamValue(t, got.form, "order", "42")
+		assertParamValue(t, got.form, "route-map-id", "sample-route-map-id")
+
+		var nilCtx context.Context
+		if err := svc.CreateSdnRouteMapsEntries(nilCtx, &cluster.CreateSdnRouteMapsEntriesParams{Action: "sample-action", Order: 42, RouteMapId: "sample-route-map-id"}); err == nil {
+			t.Errorf("CreateSdnRouteMapsEntries: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetSdnRouteMapsEntries", func(t *testing.T) {
-		_, err := svc.GetSdnRouteMapsEntries(ctx, "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.GetSdnRouteMapsEntries(ctx, "sample-route-map-id", &cluster.GetSdnRouteMapsEntriesParams{})
+		if err != nil {
+			t.Fatalf("GetSdnRouteMapsEntries: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetSdnRouteMapsEntries: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/sdn/route-maps/entries/sample-route-map-id")
+
+		var nilCtx context.Context
+		if _, err := svc.GetSdnRouteMapsEntries(nilCtx, "sample-route-map-id", &cluster.GetSdnRouteMapsEntriesParams{}); err == nil {
+			t.Errorf("GetSdnRouteMapsEntries: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteSdnRouteMapsEntriesEntry", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteSdnRouteMapsEntriesEntry(ctx, "sample-route-map-id", "sample-order", &cluster.DeleteSdnRouteMapsEntriesEntryParams{})
+		if err != nil {
+			t.Fatalf("DeleteSdnRouteMapsEntriesEntry: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/cluster/sdn/route-maps/entries/sample-route-map-id/entry/sample-order")
+
+		var nilCtx context.Context
+		if err := svc.DeleteSdnRouteMapsEntriesEntry(nilCtx, "sample-route-map-id", "sample-order", &cluster.DeleteSdnRouteMapsEntriesEntryParams{}); err == nil {
+			t.Errorf("DeleteSdnRouteMapsEntriesEntry: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetSdnRouteMapsEntriesEntry", func(t *testing.T) {
-		_, err := svc.GetSdnRouteMapsEntriesEntry(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.GetSdnRouteMapsEntriesEntry(ctx, "sample-route-map-id", "sample-order")
+		if err != nil {
+			t.Fatalf("GetSdnRouteMapsEntriesEntry: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetSdnRouteMapsEntriesEntry: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/sdn/route-maps/entries/sample-route-map-id/entry/sample-order")
+
+		var nilCtx context.Context
+		if _, err := svc.GetSdnRouteMapsEntriesEntry(nilCtx, "sample-route-map-id", "sample-order"); err == nil {
+			t.Errorf("GetSdnRouteMapsEntriesEntry: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateSdnRouteMapsEntriesEntry", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateSdnRouteMapsEntriesEntry(ctx, "sample-route-map-id", "sample-order", &cluster.UpdateSdnRouteMapsEntriesEntryParams{})
+		if err != nil {
+			t.Fatalf("UpdateSdnRouteMapsEntriesEntry: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/cluster/sdn/route-maps/entries/sample-route-map-id/entry/sample-order")
+
+		var nilCtx context.Context
+		if err := svc.UpdateSdnRouteMapsEntriesEntry(nilCtx, "sample-route-map-id", "sample-order", &cluster.UpdateSdnRouteMapsEntriesEntryParams{}); err == nil {
+			t.Errorf("UpdateSdnRouteMapsEntriesEntry: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListSdnVnets", func(t *testing.T) {
-		_, err := svc.ListSdnVnets(ctx, nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListSdnVnets(ctx, &cluster.ListSdnVnetsParams{})
+		if err != nil {
+			t.Fatalf("ListSdnVnets: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListSdnVnets: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/sdn/vnets")
+
+		var nilCtx context.Context
+		if _, err := svc.ListSdnVnets(nilCtx, &cluster.ListSdnVnetsParams{}); err == nil {
+			t.Errorf("ListSdnVnets: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateSdnVnets", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateSdnVnets(ctx, &cluster.CreateSdnVnetsParams{Vnet: "sample-vnet", Zone: "sample-zone"})
+		if err != nil {
+			t.Fatalf("CreateSdnVnets: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/cluster/sdn/vnets")
+		assertParamValue(t, got.form, "vnet", "sample-vnet")
+		assertParamValue(t, got.form, "zone", "sample-zone")
+
+		var nilCtx context.Context
+		if err := svc.CreateSdnVnets(nilCtx, &cluster.CreateSdnVnetsParams{Vnet: "sample-vnet", Zone: "sample-zone"}); err == nil {
+			t.Errorf("CreateSdnVnets: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteSdnVnets", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteSdnVnets(ctx, "sample-vnet", &cluster.DeleteSdnVnetsParams{})
+		if err != nil {
+			t.Fatalf("DeleteSdnVnets: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/cluster/sdn/vnets/sample-vnet")
+
+		var nilCtx context.Context
+		if err := svc.DeleteSdnVnets(nilCtx, "sample-vnet", &cluster.DeleteSdnVnetsParams{}); err == nil {
+			t.Errorf("DeleteSdnVnets: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetSdnVnets", func(t *testing.T) {
-		_, err := svc.GetSdnVnets(ctx, "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.GetSdnVnets(ctx, "sample-vnet", &cluster.GetSdnVnetsParams{})
+		if err != nil {
+			t.Fatalf("GetSdnVnets: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetSdnVnets: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/sdn/vnets/sample-vnet")
+
+		var nilCtx context.Context
+		if _, err := svc.GetSdnVnets(nilCtx, "sample-vnet", &cluster.GetSdnVnetsParams{}); err == nil {
+			t.Errorf("GetSdnVnets: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateSdnVnets", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateSdnVnets(ctx, "sample-vnet", &cluster.UpdateSdnVnetsParams{})
+		if err != nil {
+			t.Fatalf("UpdateSdnVnets: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/cluster/sdn/vnets/sample-vnet")
+
+		var nilCtx context.Context
+		if err := svc.UpdateSdnVnets(nilCtx, "sample-vnet", &cluster.UpdateSdnVnetsParams{}); err == nil {
+			t.Errorf("UpdateSdnVnets: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListSdnVnetsFirewall", func(t *testing.T) {
-		_, err := svc.ListSdnVnetsFirewall(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListSdnVnetsFirewall(ctx, "sample-vnet")
+		if err != nil {
+			t.Fatalf("ListSdnVnetsFirewall: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListSdnVnetsFirewall: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/sdn/vnets/sample-vnet/firewall")
+
+		var nilCtx context.Context
+		if _, err := svc.ListSdnVnetsFirewall(nilCtx, "sample-vnet"); err == nil {
+			t.Errorf("ListSdnVnetsFirewall: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListSdnVnetsFirewallOptions", func(t *testing.T) {
-		_, err := svc.ListSdnVnetsFirewallOptions(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListSdnVnetsFirewallOptions(ctx, "sample-vnet")
+		if err != nil {
+			t.Fatalf("ListSdnVnetsFirewallOptions: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListSdnVnetsFirewallOptions: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/sdn/vnets/sample-vnet/firewall/options")
+
+		var nilCtx context.Context
+		if _, err := svc.ListSdnVnetsFirewallOptions(nilCtx, "sample-vnet"); err == nil {
+			t.Errorf("ListSdnVnetsFirewallOptions: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateSdnVnetsFirewallOptions", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateSdnVnetsFirewallOptions(ctx, "sample-vnet", &cluster.UpdateSdnVnetsFirewallOptionsParams{})
+		if err != nil {
+			t.Fatalf("UpdateSdnVnetsFirewallOptions: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/cluster/sdn/vnets/sample-vnet/firewall/options")
+
+		var nilCtx context.Context
+		if err := svc.UpdateSdnVnetsFirewallOptions(nilCtx, "sample-vnet", &cluster.UpdateSdnVnetsFirewallOptionsParams{}); err == nil {
+			t.Errorf("UpdateSdnVnetsFirewallOptions: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListSdnVnetsFirewallRules", func(t *testing.T) {
-		_, err := svc.ListSdnVnetsFirewallRules(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListSdnVnetsFirewallRules(ctx, "sample-vnet")
+		if err != nil {
+			t.Fatalf("ListSdnVnetsFirewallRules: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListSdnVnetsFirewallRules: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/sdn/vnets/sample-vnet/firewall/rules")
+
+		var nilCtx context.Context
+		if _, err := svc.ListSdnVnetsFirewallRules(nilCtx, "sample-vnet"); err == nil {
+			t.Errorf("ListSdnVnetsFirewallRules: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateSdnVnetsFirewallRules", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateSdnVnetsFirewallRules(ctx, "sample-vnet", &cluster.CreateSdnVnetsFirewallRulesParams{Action: "sample-action", Type: "sample-type"})
+		if err != nil {
+			t.Fatalf("CreateSdnVnetsFirewallRules: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/cluster/sdn/vnets/sample-vnet/firewall/rules")
+		assertParamValue(t, got.form, "action", "sample-action")
+		assertParamValue(t, got.form, "type", "sample-type")
+
+		var nilCtx context.Context
+		if err := svc.CreateSdnVnetsFirewallRules(nilCtx, "sample-vnet", &cluster.CreateSdnVnetsFirewallRulesParams{Action: "sample-action", Type: "sample-type"}); err == nil {
+			t.Errorf("CreateSdnVnetsFirewallRules: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteSdnVnetsFirewallRules", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteSdnVnetsFirewallRules(ctx, "sample-vnet", "sample-pos", &cluster.DeleteSdnVnetsFirewallRulesParams{})
+		if err != nil {
+			t.Fatalf("DeleteSdnVnetsFirewallRules: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/cluster/sdn/vnets/sample-vnet/firewall/rules/sample-pos")
+
+		var nilCtx context.Context
+		if err := svc.DeleteSdnVnetsFirewallRules(nilCtx, "sample-vnet", "sample-pos", &cluster.DeleteSdnVnetsFirewallRulesParams{}); err == nil {
+			t.Errorf("DeleteSdnVnetsFirewallRules: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetSdnVnetsFirewallRules", func(t *testing.T) {
-		_, err := svc.GetSdnVnetsFirewallRules(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.GetSdnVnetsFirewallRules(ctx, "sample-vnet", "sample-pos")
+		if err != nil {
+			t.Fatalf("GetSdnVnetsFirewallRules: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetSdnVnetsFirewallRules: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/sdn/vnets/sample-vnet/firewall/rules/sample-pos")
+
+		var nilCtx context.Context
+		if _, err := svc.GetSdnVnetsFirewallRules(nilCtx, "sample-vnet", "sample-pos"); err == nil {
+			t.Errorf("GetSdnVnetsFirewallRules: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateSdnVnetsFirewallRules", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateSdnVnetsFirewallRules(ctx, "sample-vnet", "sample-pos", &cluster.UpdateSdnVnetsFirewallRulesParams{})
+		if err != nil {
+			t.Fatalf("UpdateSdnVnetsFirewallRules: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/cluster/sdn/vnets/sample-vnet/firewall/rules/sample-pos")
+
+		var nilCtx context.Context
+		if err := svc.UpdateSdnVnetsFirewallRules(nilCtx, "sample-vnet", "sample-pos", &cluster.UpdateSdnVnetsFirewallRulesParams{}); err == nil {
+			t.Errorf("UpdateSdnVnetsFirewallRules: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteSdnVnetsIps", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteSdnVnetsIps(ctx, "sample-vnet", &cluster.DeleteSdnVnetsIpsParams{Ip: "sample-ip", Zone: "sample-zone"})
+		if err != nil {
+			t.Fatalf("DeleteSdnVnetsIps: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/cluster/sdn/vnets/sample-vnet/ips")
+		assertParamValue(t, got.query, "ip", "sample-ip")
+		assertParamValue(t, got.query, "zone", "sample-zone")
+
+		var nilCtx context.Context
+		if err := svc.DeleteSdnVnetsIps(nilCtx, "sample-vnet", &cluster.DeleteSdnVnetsIpsParams{Ip: "sample-ip", Zone: "sample-zone"}); err == nil {
+			t.Errorf("DeleteSdnVnetsIps: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateSdnVnetsIps", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateSdnVnetsIps(ctx, "sample-vnet", &cluster.CreateSdnVnetsIpsParams{Ip: "sample-ip", Zone: "sample-zone"})
+		if err != nil {
+			t.Fatalf("CreateSdnVnetsIps: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/cluster/sdn/vnets/sample-vnet/ips")
+		assertParamValue(t, got.form, "ip", "sample-ip")
+		assertParamValue(t, got.form, "zone", "sample-zone")
+
+		var nilCtx context.Context
+		if err := svc.CreateSdnVnetsIps(nilCtx, "sample-vnet", &cluster.CreateSdnVnetsIpsParams{Ip: "sample-ip", Zone: "sample-zone"}); err == nil {
+			t.Errorf("CreateSdnVnetsIps: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateSdnVnetsIps", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateSdnVnetsIps(ctx, "sample-vnet", &cluster.UpdateSdnVnetsIpsParams{Ip: "sample-ip", Zone: "sample-zone"})
+		if err != nil {
+			t.Fatalf("UpdateSdnVnetsIps: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/cluster/sdn/vnets/sample-vnet/ips")
+		assertParamValue(t, got.form, "ip", "sample-ip")
+		assertParamValue(t, got.form, "zone", "sample-zone")
+
+		var nilCtx context.Context
+		if err := svc.UpdateSdnVnetsIps(nilCtx, "sample-vnet", &cluster.UpdateSdnVnetsIpsParams{Ip: "sample-ip", Zone: "sample-zone"}); err == nil {
+			t.Errorf("UpdateSdnVnetsIps: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListSdnVnetsSubnets", func(t *testing.T) {
-		_, err := svc.ListSdnVnetsSubnets(ctx, "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListSdnVnetsSubnets(ctx, "sample-vnet", &cluster.ListSdnVnetsSubnetsParams{})
+		if err != nil {
+			t.Fatalf("ListSdnVnetsSubnets: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListSdnVnetsSubnets: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/sdn/vnets/sample-vnet/subnets")
+
+		var nilCtx context.Context
+		if _, err := svc.ListSdnVnetsSubnets(nilCtx, "sample-vnet", &cluster.ListSdnVnetsSubnetsParams{}); err == nil {
+			t.Errorf("ListSdnVnetsSubnets: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateSdnVnetsSubnets", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateSdnVnetsSubnets(ctx, "sample-vnet", &cluster.CreateSdnVnetsSubnetsParams{Subnet: "sample-subnet", Type: "sample-type"})
+		if err != nil {
+			t.Fatalf("CreateSdnVnetsSubnets: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/cluster/sdn/vnets/sample-vnet/subnets")
+		assertParamValue(t, got.form, "subnet", "sample-subnet")
+		assertParamValue(t, got.form, "type", "sample-type")
+
+		var nilCtx context.Context
+		if err := svc.CreateSdnVnetsSubnets(nilCtx, "sample-vnet", &cluster.CreateSdnVnetsSubnetsParams{Subnet: "sample-subnet", Type: "sample-type"}); err == nil {
+			t.Errorf("CreateSdnVnetsSubnets: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteSdnVnetsSubnets", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteSdnVnetsSubnets(ctx, "sample-vnet", "sample-subnet", &cluster.DeleteSdnVnetsSubnetsParams{})
+		if err != nil {
+			t.Fatalf("DeleteSdnVnetsSubnets: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/cluster/sdn/vnets/sample-vnet/subnets/sample-subnet")
+
+		var nilCtx context.Context
+		if err := svc.DeleteSdnVnetsSubnets(nilCtx, "sample-vnet", "sample-subnet", &cluster.DeleteSdnVnetsSubnetsParams{}); err == nil {
+			t.Errorf("DeleteSdnVnetsSubnets: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetSdnVnetsSubnets", func(t *testing.T) {
-		_, err := svc.GetSdnVnetsSubnets(ctx, "stub", "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.GetSdnVnetsSubnets(ctx, "sample-vnet", "sample-subnet", &cluster.GetSdnVnetsSubnetsParams{})
+		if err != nil {
+			t.Fatalf("GetSdnVnetsSubnets: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetSdnVnetsSubnets: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/sdn/vnets/sample-vnet/subnets/sample-subnet")
+
+		var nilCtx context.Context
+		if _, err := svc.GetSdnVnetsSubnets(nilCtx, "sample-vnet", "sample-subnet", &cluster.GetSdnVnetsSubnetsParams{}); err == nil {
+			t.Errorf("GetSdnVnetsSubnets: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateSdnVnetsSubnets", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateSdnVnetsSubnets(ctx, "sample-vnet", "sample-subnet", &cluster.UpdateSdnVnetsSubnetsParams{})
+		if err != nil {
+			t.Fatalf("UpdateSdnVnetsSubnets: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/cluster/sdn/vnets/sample-vnet/subnets/sample-subnet")
+
+		var nilCtx context.Context
+		if err := svc.UpdateSdnVnetsSubnets(nilCtx, "sample-vnet", "sample-subnet", &cluster.UpdateSdnVnetsSubnetsParams{}); err == nil {
+			t.Errorf("UpdateSdnVnetsSubnets: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListSdnZones", func(t *testing.T) {
-		_, err := svc.ListSdnZones(ctx, nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListSdnZones(ctx, &cluster.ListSdnZonesParams{})
+		if err != nil {
+			t.Fatalf("ListSdnZones: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListSdnZones: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/sdn/zones")
+
+		var nilCtx context.Context
+		if _, err := svc.ListSdnZones(nilCtx, &cluster.ListSdnZonesParams{}); err == nil {
+			t.Errorf("ListSdnZones: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateSdnZones", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateSdnZones(ctx, &cluster.CreateSdnZonesParams{Type: "sample-type", Zone: "sample-zone"})
+		if err != nil {
+			t.Fatalf("CreateSdnZones: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/cluster/sdn/zones")
+		assertParamValue(t, got.form, "type", "sample-type")
+		assertParamValue(t, got.form, "zone", "sample-zone")
+
+		var nilCtx context.Context
+		if err := svc.CreateSdnZones(nilCtx, &cluster.CreateSdnZonesParams{Type: "sample-type", Zone: "sample-zone"}); err == nil {
+			t.Errorf("CreateSdnZones: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteSdnZones", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteSdnZones(ctx, "sample-zone", &cluster.DeleteSdnZonesParams{})
+		if err != nil {
+			t.Fatalf("DeleteSdnZones: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/cluster/sdn/zones/sample-zone")
+
+		var nilCtx context.Context
+		if err := svc.DeleteSdnZones(nilCtx, "sample-zone", &cluster.DeleteSdnZonesParams{}); err == nil {
+			t.Errorf("DeleteSdnZones: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetSdnZones", func(t *testing.T) {
-		_, err := svc.GetSdnZones(ctx, "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.GetSdnZones(ctx, "sample-zone", &cluster.GetSdnZonesParams{})
+		if err != nil {
+			t.Fatalf("GetSdnZones: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetSdnZones: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/sdn/zones/sample-zone")
+
+		var nilCtx context.Context
+		if _, err := svc.GetSdnZones(nilCtx, "sample-zone", &cluster.GetSdnZonesParams{}); err == nil {
+			t.Errorf("GetSdnZones: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateSdnZones", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateSdnZones(ctx, "sample-zone", &cluster.UpdateSdnZonesParams{})
+		if err != nil {
+			t.Fatalf("UpdateSdnZones: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/cluster/sdn/zones/sample-zone")
+
+		var nilCtx context.Context
+		if err := svc.UpdateSdnZones(nilCtx, "sample-zone", &cluster.UpdateSdnZonesParams{}); err == nil {
+			t.Errorf("UpdateSdnZones: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListStatus", func(t *testing.T) {
-		_, err := svc.ListStatus(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListStatus(ctx)
+		if err != nil {
+			t.Fatalf("ListStatus: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListStatus: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/status")
+
+		var nilCtx context.Context
+		if _, err := svc.ListStatus(nilCtx); err == nil {
+			t.Errorf("ListStatus: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListTasks", func(t *testing.T) {
-		_, err := svc.ListTasks(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListTasks(ctx)
+		if err != nil {
+			t.Fatalf("ListTasks: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListTasks: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/tasks")
+
+		var nilCtx context.Context
+		if _, err := svc.ListTasks(nilCtx); err == nil {
+			t.Errorf("ListTasks: expected error for nil context, got nil")
+		}
+	})
+	t.Run("ErrorPath_GET", func(t *testing.T) {
+		harness.set(http.StatusInternalServerError, `{"data":null,"success":0,"message":"boom"}`)
+
+		_, err := svc.ListCluster(ctx)
+		if err == nil {
+			t.Fatalf("ListCluster: expected error on 500 response, got nil")
+		}
+	})
+	t.Run("ErrorPath_POST", func(t *testing.T) {
+		harness.set(http.StatusInternalServerError, `{"data":null,"success":0,"message":"boom"}`)
+
+		_, err := svc.CreateAcmeAccount(ctx, &cluster.CreateAcmeAccountParams{Contact: "sample-contact"})
+		if err == nil {
+			t.Fatalf("CreateAcmeAccount: expected error on 500 response, got nil")
+		}
+	})
+	t.Run("ErrorPath_DELETE", func(t *testing.T) {
+		harness.set(http.StatusInternalServerError, `{"data":null,"success":0,"message":"boom"}`)
+
+		_, err := svc.DeleteAcmeAccount(ctx, "sample-name")
+		if err == nil {
+			t.Fatalf("DeleteAcmeAccount: expected error on 500 response, got nil")
+		}
+	})
+	t.Run("ErrorPath_PUT", func(t *testing.T) {
+		harness.set(http.StatusInternalServerError, `{"data":null,"success":0,"message":"boom"}`)
+
+		_, err := svc.UpdateAcmeAccount(ctx, "sample-name", &cluster.UpdateAcmeAccountParams{})
+		if err == nil {
+			t.Fatalf("UpdateAcmeAccount: expected error on 500 response, got nil")
+		}
 	})
 }

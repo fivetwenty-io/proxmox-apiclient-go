@@ -9,11 +9,14 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strconv"
+	"sync"
 	"testing"
 
 	"github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/api/clusterstorage"
 	pveclient "github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/client"
 )
+
+var _ = json.RawMessage(nil)
 
 func smokeOptsFromServerURL(u string) pveclient.Options {
 	parsed, err := url.Parse(u)
@@ -36,18 +39,107 @@ func smokeOptsFromServerURL(u string) pveclient.Options {
 	}
 }
 
-func TestSmoke_Clusterstorage_GeneratedMethods(t *testing.T) {
-	t.Parallel()
+// recordedRequest captures what the mock server observed for the most
+// recently dispatched request.
+type recordedRequest struct {
+	method string
+	path   string
+	query  url.Values
+	form   url.Values
+}
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"data":    map[string]any{},
-			"success": 1,
-		})
-	})
+// testHarness runs a single httptest.Server shared by every subtest in this
+// file. Subtests are never run in parallel (each sets the desired response
+// immediately before invoking the method under test, then reads back the
+// recorded request), so the mutex below only guards against the harness
+// goroutine and the test goroutine overlapping on a single in-flight
+// request, never against concurrent subtests.
+type testHarness struct {
+	mu       sync.Mutex
+	last     recordedRequest
+	nextCode int
+	nextBody string
+}
 
-	srv := httptest.NewServer(mux)
+// newTestHarness starts the mock server and returns it alongside the harness
+// used to configure responses and inspect recorded requests.
+func newTestHarness() (*httptest.Server, *testHarness) {
+	h := &testHarness{nextCode: http.StatusOK}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+
+		_ = r.ParseForm()
+		h.last = recordedRequest{
+			method: r.Method,
+			path:   r.URL.Path,
+			query:  r.URL.Query(),
+			form:   r.PostForm,
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(h.nextCode)
+		_, _ = w.Write([]byte(h.nextBody))
+	}))
+
+	return srv, h
+}
+
+// set configures the status code and body the next request will receive.
+func (h *testHarness) set(code int, body string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	h.nextCode = code
+	h.nextBody = body
+}
+
+// snapshot returns a copy of the most recently recorded request.
+func (h *testHarness) snapshot() recordedRequest {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	return h.last
+}
+
+// assertRequestLine fails the test when the recorded method or resolved
+// path does not exactly match what the endpoint's spec entry declares.
+func assertRequestLine(t *testing.T, got recordedRequest, wantMethod, wantPath string) {
+	t.Helper()
+
+	if got.method != wantMethod {
+		t.Errorf("method = %q, want %q", got.method, wantMethod)
+	}
+
+	if got.path != wantPath {
+		t.Errorf("path = %q, want %q", got.path, wantPath)
+	}
+}
+
+// assertParamValue fails the test when the wire-encoded value of key does
+// not exactly equal want.
+func assertParamValue(t *testing.T, values url.Values, key, want string) {
+	t.Helper()
+
+	if got := values.Get(key); got != want {
+		t.Errorf("param %q = %q, want %q", key, got, want)
+	}
+}
+
+// assertParamPresent fails the test when key is absent from values. Used for
+// required parameters whose wire encoding is not a simple comparable string
+// (e.g. json.RawMessage-typed fields).
+func assertParamPresent(t *testing.T, values url.Values, key string) {
+	t.Helper()
+
+	if _, ok := values[key]; !ok {
+		t.Errorf("param %q missing from request", key)
+	}
+}
+
+func TestGenerated_Clusterstorage_Methods(t *testing.T) {
+	srv, harness := newTestHarness()
 	defer srv.Close()
 
 	c, err := pveclient.NewClient(smokeOptsFromServerURL(srv.URL))
@@ -59,11 +151,129 @@ func TestSmoke_Clusterstorage_GeneratedMethods(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("ListStorage", func(t *testing.T) {
-		_, err := svc.ListStorage(ctx, nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListStorage(ctx, &clusterstorage.ListStorageParams{})
+		if err != nil {
+			t.Fatalf("ListStorage: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListStorage: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/storage")
+
+		var nilCtx context.Context
+		if _, err := svc.ListStorage(nilCtx, &clusterstorage.ListStorageParams{}); err == nil {
+			t.Errorf("ListStorage: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateStorage", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateStorage(ctx, &clusterstorage.CreateStorageParams{Storage: "sample-storage", Type: "sample-type"})
+		if err != nil {
+			t.Fatalf("CreateStorage: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateStorage: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/storage")
+		assertParamValue(t, got.form, "storage", "sample-storage")
+		assertParamValue(t, got.form, "type", "sample-type")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateStorage(nilCtx, &clusterstorage.CreateStorageParams{Storage: "sample-storage", Type: "sample-type"}); err == nil {
+			t.Errorf("CreateStorage: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteStorage", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteStorage(ctx, "sample-storage")
+		if err != nil {
+			t.Fatalf("DeleteStorage: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/storage/sample-storage")
+
+		var nilCtx context.Context
+		if err := svc.DeleteStorage(nilCtx, "sample-storage"); err == nil {
+			t.Errorf("DeleteStorage: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetStorage", func(t *testing.T) {
-		_, err := svc.GetStorage(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.GetStorage(ctx, "sample-storage")
+		if err != nil {
+			t.Fatalf("GetStorage: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetStorage: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/storage/sample-storage")
+
+		var nilCtx context.Context
+		if _, err := svc.GetStorage(nilCtx, "sample-storage"); err == nil {
+			t.Errorf("GetStorage: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateStorage", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.UpdateStorage(ctx, "sample-storage", &clusterstorage.UpdateStorageParams{})
+		if err != nil {
+			t.Fatalf("UpdateStorage: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("UpdateStorage: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/storage/sample-storage")
+
+		var nilCtx context.Context
+		if _, err := svc.UpdateStorage(nilCtx, "sample-storage", &clusterstorage.UpdateStorageParams{}); err == nil {
+			t.Errorf("UpdateStorage: expected error for nil context, got nil")
+		}
+	})
+	t.Run("ErrorPath_GET", func(t *testing.T) {
+		harness.set(http.StatusInternalServerError, `{"data":null,"success":0,"message":"boom"}`)
+
+		_, err := svc.ListStorage(ctx, &clusterstorage.ListStorageParams{})
+		if err == nil {
+			t.Fatalf("ListStorage: expected error on 500 response, got nil")
+		}
+	})
+	t.Run("ErrorPath_POST", func(t *testing.T) {
+		harness.set(http.StatusInternalServerError, `{"data":null,"success":0,"message":"boom"}`)
+
+		_, err := svc.CreateStorage(ctx, &clusterstorage.CreateStorageParams{Storage: "sample-storage", Type: "sample-type"})
+		if err == nil {
+			t.Fatalf("CreateStorage: expected error on 500 response, got nil")
+		}
+	})
+	t.Run("ErrorPath_DELETE", func(t *testing.T) {
+		harness.set(http.StatusInternalServerError, `{"data":null,"success":0,"message":"boom"}`)
+
+		err := svc.DeleteStorage(ctx, "sample-storage")
+		if err == nil {
+			t.Fatalf("DeleteStorage: expected error on 500 response, got nil")
+		}
+	})
+	t.Run("ErrorPath_PUT", func(t *testing.T) {
+		harness.set(http.StatusInternalServerError, `{"data":null,"success":0,"message":"boom"}`)
+
+		_, err := svc.UpdateStorage(ctx, "sample-storage", &clusterstorage.UpdateStorageParams{})
+		if err == nil {
+			t.Fatalf("UpdateStorage: expected error on 500 response, got nil")
+		}
 	})
 }

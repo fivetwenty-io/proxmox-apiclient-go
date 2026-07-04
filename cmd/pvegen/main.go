@@ -9,9 +9,14 @@
 //	top-level namespace. Each file declares a Service interface, a
 //	concrete service struct that wraps pkg/client.Client, and a
 //	typed Go method per (path, HTTP-verb) tuple under that
-//	namespace. Sibling file <namespace>_smoke_test.go exercises the
-//	zero-parameter GET methods over an httptest server so the
-//	generated code at minimum compiles and round-trips.
+//	namespace. Sibling file <namespace>_smoke_test.go (see
+//	testgen.go) exercises every generated method — GET, POST, PUT,
+//	and DELETE alike — over a single shared httptest server per
+//	package: each endpoint gets a subtest that calls it with sample
+//	path/param values and asserts the recorded request's method,
+//	path, and required-parameter wire encoding, plus a handful of
+//	per-verb subtests asserting that a 500 response surfaces as an
+//	error.
 //
 // Invocation:
 //
@@ -49,11 +54,35 @@ const (
 
 // Schema type and identifier constants used throughout the generator.
 const (
-	schemaTypeObject = "object"
-	schemaTypeArray  = "array"
-	goTypeRawMessage = "json.RawMessage"
-	verbHTTPGet      = "GET"
-	identifierRoot   = "Root"
+	schemaTypeObject  = "object"
+	schemaTypeArray   = "array"
+	schemaTypeString  = "string"
+	schemaTypeInteger = "integer"
+	schemaTypeNumber  = "number"
+	schemaTypeBoolean = "boolean"
+	schemaTypeNull    = "null"
+	goTypeRawMessage  = "json.RawMessage"
+	verbHTTPGet       = "GET"
+	verbHTTPPost      = "POST"
+	verbHTTPPut       = "PUT"
+	verbHTTPDelete    = "DELETE"
+	identifierRoot    = "Root"
+	// methodPrefixGet is both the emitted Go method prefix for GET requests
+	// on a dynamic-tail path (see goMethodBaseName) and the methodNameOverrides
+	// value for GET /version.
+	methodPrefixGet = "Get"
+	// namespaceVersion is the one top-level spec namespace whose smoke test
+	// emission emitNamespace deliberately skips (see the doc comment there).
+	namespaceVersion = "version"
+)
+
+// Go type name constants returned by goTypeFor and consumed when
+// constructing sample values for generated tests (see testgen.go).
+const (
+	goTypeString  = "string"
+	goTypeInt64   = "int64"
+	goTypeFloat64 = "float64"
+	goTypeBool    = "bool"
 )
 
 // Sentinel errors for well-defined failure modes within the generator.
@@ -76,7 +105,7 @@ var indexedParamRe = regexp.MustCompile(`^([a-z][a-z0-9]*)(?:\[n\]|\[%d\])$`)
 //
 //nolint:gochecknoglobals // intentional package-level lookup table; must be visible to assignMethodNames
 var methodNameOverrides = map[string]string{
-	"GET /version": "Get",
+	"GET /version": methodPrefixGet,
 }
 
 // namespaceOutputDir overrides the on-disk directory for a top-level
@@ -379,15 +408,15 @@ func goMethodBaseName(endpt endpoint) string {
 	switch strings.ToUpper(endpt.Verb) {
 	case verbHTTPGet:
 		if endsInPathParam(endpt.Path) {
-			prefix = "Get"
+			prefix = methodPrefixGet
 		} else {
 			prefix = "List"
 		}
-	case "POST":
+	case verbHTTPPost:
 		prefix = "Create"
-	case "PUT":
+	case verbHTTPPut:
 		prefix = "Update"
-	case "DELETE":
+	case verbHTTPDelete:
 		prefix = "Delete"
 	default:
 		prefix = pascalize(strings.ToLower(endpt.Verb))
@@ -610,7 +639,7 @@ func emitNamespace(outRoot, nsName string, eps []endpoint) error {
 	// Smoke test is only emitted for non-version namespaces. The
 	// version package has hand-written tests already and we must not
 	// stomp on them.
-	if nsName != "version" {
+	if nsName != namespaceVersion {
 		err = emitNamespaceSmokeTest(dir, dirName, pkgName, nsName, eps)
 		if err != nil {
 			return err
@@ -811,7 +840,7 @@ func responseGoType(endpt endpoint) string {
 		return ""
 	}
 
-	if ret.Type == "null" {
+	if ret.Type == schemaTypeNull {
 		return ""
 	}
 
@@ -1292,11 +1321,11 @@ func renderMethodBodyDispatch(builder *strings.Builder, pkgName string, endpt en
 	switch strings.ToUpper(endpt.Verb) {
 	case verbHTTPGet:
 		verbCall = "GetRawCtx"
-	case "POST":
+	case verbHTTPPost:
 		verbCall = "PostRawCtx"
-	case "PUT":
+	case verbHTTPPut:
 		verbCall = "PutRawCtx"
-	case "DELETE":
+	case verbHTTPDelete:
 		verbCall = "DeleteRawCtx"
 	default:
 		return fmt.Errorf("unsupported HTTP verb %q on %s: %w", endpt.Verb, endpt.Path, errNilSchema)
@@ -1441,22 +1470,22 @@ func goTypeFor(objSchema *schema) (string, error) {
 	}
 
 	switch objSchema.Type {
-	case "string":
-		return "string", nil
-	case "integer":
-		return "int64", nil
-	case "number":
-		return "float64", nil
-	case "boolean":
-		return "bool", nil
-	case "array":
+	case schemaTypeString:
+		return goTypeString, nil
+	case schemaTypeInteger:
+		return goTypeInt64, nil
+	case schemaTypeNumber:
+		return goTypeFloat64, nil
+	case schemaTypeBoolean:
+		return goTypeBool, nil
+	case schemaTypeArray:
 		if objSchema.Items == nil {
-			return "[]json.RawMessage", nil
+			return "[]" + goTypeRawMessage, nil
 		}
 
 		inner, err := goTypeFor(objSchema.Items)
 		if err != nil {
-			return "[]json.RawMessage", nil //nolint:nilerr // intentional fallback
+			return "[]" + goTypeRawMessage, nil //nolint:nilerr // intentional fallback
 		}
 
 		return "[]" + inner, nil
@@ -1465,7 +1494,7 @@ func goTypeFor(objSchema *schema) (string, error) {
 		// structs recursively would explode the surface area beyond the
 		// SW3 scope. Callers can decode further via json.Unmarshal.
 		return goTypeRawMessage, nil
-	case "null":
+	case schemaTypeNull:
 		return goTypeRawMessage, nil
 	case "":
 		return goTypeRawMessage, nil
@@ -1481,9 +1510,9 @@ func goTypeFor(objSchema *schema) (string, error) {
 // unaffected.
 func responseBoolType(goType string) string {
 	switch goType {
-	case "bool":
+	case goTypeBool:
 		return "client.PVEBool"
-	case "[]bool":
+	case "[]" + goTypeBool:
 		return "[]client.PVEBool"
 	default:
 		return goType
@@ -1499,9 +1528,9 @@ func responseBoolType(goType string) string {
 // payloads.
 func responseFloatType(goType string) string {
 	switch goType {
-	case "float64":
+	case goTypeFloat64:
 		return "client.PVEFloat"
-	case "[]float64":
+	case "[]" + goTypeFloat64:
 		return "[]client.PVEFloat"
 	default:
 		return goType
@@ -1558,143 +1587,4 @@ func writeIfChanged(path string, data []byte) error {
 	}
 
 	return nil
-}
-
-// renderSmokeTestHeader writes the package declaration, imports, and
-// smokeOptsFromServerURL helper into builder.
-func renderSmokeTestHeader(builder *strings.Builder, pkgName string) {
-	fmt.Fprintf(builder, "// Code generated by cmd/pvegen. DO NOT EDIT.\n\n")
-	fmt.Fprintf(builder, "package %s_test\n\n", pkgName)
-
-	builder.WriteString("import (\n")
-	builder.WriteString("\t\"context\"\n")
-	builder.WriteString("\t\"encoding/json\"\n")
-	builder.WriteString("\t\"net/http\"\n")
-	builder.WriteString("\t\"net/http/httptest\"\n")
-	builder.WriteString("\t\"net/url\"\n")
-	builder.WriteString("\t\"strconv\"\n")
-	builder.WriteString("\t\"testing\"\n\n")
-	fmt.Fprintf(builder, "\t\"github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/api/%s\"\n", pkgName)
-	builder.WriteString("\tpveclient \"github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/client\"\n")
-	builder.WriteString(")\n\n")
-
-	builder.WriteString(`func smokeOptsFromServerURL(u string) pveclient.Options {
-	parsed, err := url.Parse(u)
-	if err != nil {
-		panic("test setup: invalid server URL: " + err.Error())
-	}
-
-	host := parsed.Hostname()
-
-	port := 0
-	if p := parsed.Port(); p != "" {
-		port, _ = strconv.Atoi(p)
-	}
-
-	return pveclient.Options{
-		Host:     host,
-		Port:     port,
-		Protocol: "http",
-		APIToken: "user@pam!tok=sec",
-	}
-}
-
-`)
-}
-
-// smokeCase holds the data needed to emit one smoke-test subtest.
-type smokeCase struct {
-	Method     string
-	PathParams []string
-	HasParams  bool
-	RespType   string
-}
-
-// collectSmokeCases returns all smoke-eligible (GET) endpoints as smoke cases.
-func collectSmokeCases(eps []endpoint) []smokeCase {
-	var cases []smokeCase
-
-	for _, endpt := range eps {
-		if strings.ToUpper(endpt.Verb) != verbHTTPGet {
-			continue
-		}
-
-		cases = append(cases, smokeCase{
-			Method:     endpt.GoMethod,
-			PathParams: endpt.PathParams,
-			HasParams:  hasNonPathParams(endpt),
-			RespType:   responseGoType(endpt),
-		})
-	}
-
-	return cases
-}
-
-// renderSmokeTestBody writes the test function body into builder.
-func renderSmokeTestBody(builder *strings.Builder, pkgName string, cases []smokeCase) {
-	fmt.Fprintf(builder, "func TestSmoke_%s_GeneratedMethods(t *testing.T) {\n", pascalize(pkgName))
-	builder.WriteString("\tt.Parallel()\n\n")
-	builder.WriteString("\tmux := http.NewServeMux()\n")
-	builder.WriteString("\tmux.HandleFunc(\"/\", func(w http.ResponseWriter, r *http.Request) {\n")
-	builder.WriteString("\t\t_ = json.NewEncoder(w).Encode(map[string]any{\n")
-	builder.WriteString("\t\t\t\"data\":    map[string]any{},\n")
-	builder.WriteString("\t\t\t\"success\": 1,\n")
-	builder.WriteString("\t\t})\n")
-	builder.WriteString("\t})\n\n")
-	builder.WriteString("\tsrv := httptest.NewServer(mux)\n")
-	builder.WriteString("\tdefer srv.Close()\n\n")
-	builder.WriteString("\tc, err := pveclient.NewClient(smokeOptsFromServerURL(srv.URL))\n")
-	builder.WriteString("\tif err != nil {\n")
-	builder.WriteString("\t\tt.Fatalf(\"NewClient: %v\", err)\n")
-	builder.WriteString("\t}\n\n")
-	fmt.Fprintf(builder, "\tsvc := %s.New(c)\n", pkgName)
-	builder.WriteString("\tctx := context.Background()\n\n")
-
-	for _, smokeTestCase := range cases {
-		fmt.Fprintf(builder, "\tt.Run(%q, func(t *testing.T) {\n", smokeTestCase.Method)
-
-		args := []string{"ctx"}
-
-		for range smokeTestCase.PathParams {
-			args = append(args, "\"stub\"")
-		}
-
-		if smokeTestCase.HasParams {
-			args = append(args, "nil")
-		}
-
-		callExpr := fmt.Sprintf("svc.%s(%s)", smokeTestCase.Method, strings.Join(args, ", "))
-
-		if smokeTestCase.RespType == "" {
-			fmt.Fprintf(builder, "\t\terr := %s\n", callExpr)
-			builder.WriteString("\t\t_ = err // smoke: any outcome is acceptable; the stub server is permissive\n")
-		} else {
-			fmt.Fprintf(builder, "\t\t_, err := %s\n", callExpr)
-			builder.WriteString("\t\t_ = err // smoke: any outcome is acceptable; the stub server is permissive\n")
-		}
-
-		builder.WriteString("\t})\n")
-	}
-
-	builder.WriteString("}\n")
-}
-
-// renderNamespaceSmokeTest builds a single table-driven smoke test
-// that verifies the generated GET methods compile and round-trip JSON
-// over an httptest server. Methods with non-path required parameters
-// or non-GET verbs are skipped — they exercise state-changing endpoints
-// and need real fixtures, which is out of scope for SW3.
-func renderNamespaceSmokeTest(pkgName, nsName string, eps []endpoint) []byte {
-	var builder strings.Builder
-
-	renderSmokeTestHeader(&builder, pkgName)
-
-	cases := collectSmokeCases(eps)
-
-	renderSmokeTestBody(&builder, pkgName, cases)
-
-	// Silence unused-import warnings if no cases were emitted.
-	_ = nsName
-
-	return []byte(builder.String())
 }

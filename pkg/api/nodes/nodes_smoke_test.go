@@ -9,11 +9,14 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strconv"
+	"sync"
 	"testing"
 
 	"github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/api/nodes"
 	pveclient "github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/client"
 )
+
+var _ = json.RawMessage(nil)
 
 func smokeOptsFromServerURL(u string) pveclient.Options {
 	parsed, err := url.Parse(u)
@@ -36,18 +39,107 @@ func smokeOptsFromServerURL(u string) pveclient.Options {
 	}
 }
 
-func TestSmoke_Nodes_GeneratedMethods(t *testing.T) {
-	t.Parallel()
+// recordedRequest captures what the mock server observed for the most
+// recently dispatched request.
+type recordedRequest struct {
+	method string
+	path   string
+	query  url.Values
+	form   url.Values
+}
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"data":    map[string]any{},
-			"success": 1,
-		})
-	})
+// testHarness runs a single httptest.Server shared by every subtest in this
+// file. Subtests are never run in parallel (each sets the desired response
+// immediately before invoking the method under test, then reads back the
+// recorded request), so the mutex below only guards against the harness
+// goroutine and the test goroutine overlapping on a single in-flight
+// request, never against concurrent subtests.
+type testHarness struct {
+	mu       sync.Mutex
+	last     recordedRequest
+	nextCode int
+	nextBody string
+}
 
-	srv := httptest.NewServer(mux)
+// newTestHarness starts the mock server and returns it alongside the harness
+// used to configure responses and inspect recorded requests.
+func newTestHarness() (*httptest.Server, *testHarness) {
+	h := &testHarness{nextCode: http.StatusOK}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+
+		_ = r.ParseForm()
+		h.last = recordedRequest{
+			method: r.Method,
+			path:   r.URL.Path,
+			query:  r.URL.Query(),
+			form:   r.PostForm,
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(h.nextCode)
+		_, _ = w.Write([]byte(h.nextBody))
+	}))
+
+	return srv, h
+}
+
+// set configures the status code and body the next request will receive.
+func (h *testHarness) set(code int, body string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	h.nextCode = code
+	h.nextBody = body
+}
+
+// snapshot returns a copy of the most recently recorded request.
+func (h *testHarness) snapshot() recordedRequest {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	return h.last
+}
+
+// assertRequestLine fails the test when the recorded method or resolved
+// path does not exactly match what the endpoint's spec entry declares.
+func assertRequestLine(t *testing.T, got recordedRequest, wantMethod, wantPath string) {
+	t.Helper()
+
+	if got.method != wantMethod {
+		t.Errorf("method = %q, want %q", got.method, wantMethod)
+	}
+
+	if got.path != wantPath {
+		t.Errorf("path = %q, want %q", got.path, wantPath)
+	}
+}
+
+// assertParamValue fails the test when the wire-encoded value of key does
+// not exactly equal want.
+func assertParamValue(t *testing.T, values url.Values, key, want string) {
+	t.Helper()
+
+	if got := values.Get(key); got != want {
+		t.Errorf("param %q = %q, want %q", key, got, want)
+	}
+}
+
+// assertParamPresent fails the test when key is absent from values. Used for
+// required parameters whose wire encoding is not a simple comparable string
+// (e.g. json.RawMessage-typed fields).
+func assertParamPresent(t *testing.T, values url.Values, key string) {
+	t.Helper()
+
+	if _, ok := values[key]; !ok {
+		t.Errorf("param %q missing from request", key)
+	}
+}
+
+func TestGenerated_Nodes_Methods(t *testing.T) {
+	srv, harness := newTestHarness()
 	defer srv.Close()
 
 	c, err := pveclient.NewClient(smokeOptsFromServerURL(srv.URL))
@@ -59,755 +151,6795 @@ func TestSmoke_Nodes_GeneratedMethods(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("ListNodes", func(t *testing.T) {
-		_, err := svc.ListNodes(ctx)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListNodes(ctx)
+		if err != nil {
+			t.Fatalf("ListNodes: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListNodes: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes")
+
+		var nilCtx context.Context
+		if _, err := svc.ListNodes(nilCtx); err == nil {
+			t.Errorf("ListNodes: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetNodes", func(t *testing.T) {
-		_, err := svc.GetNodes(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.GetNodes(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("GetNodes: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetNodes: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node")
+
+		var nilCtx context.Context
+		if _, err := svc.GetNodes(nilCtx, "sample-node"); err == nil {
+			t.Errorf("GetNodes: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListAplinfo", func(t *testing.T) {
-		_, err := svc.ListAplinfo(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListAplinfo(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListAplinfo: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListAplinfo: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/aplinfo")
+
+		var nilCtx context.Context
+		if _, err := svc.ListAplinfo(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListAplinfo: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateAplinfo", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateAplinfo(ctx, "sample-node", &nodes.CreateAplinfoParams{Storage: "sample-storage", Template: "sample-template"})
+		if err != nil {
+			t.Fatalf("CreateAplinfo: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateAplinfo: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/aplinfo")
+		assertParamValue(t, got.form, "storage", "sample-storage")
+		assertParamValue(t, got.form, "template", "sample-template")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateAplinfo(nilCtx, "sample-node", &nodes.CreateAplinfoParams{Storage: "sample-storage", Template: "sample-template"}); err == nil {
+			t.Errorf("CreateAplinfo: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListApt", func(t *testing.T) {
-		_, err := svc.ListApt(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListApt(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListApt: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListApt: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/apt")
+
+		var nilCtx context.Context
+		if _, err := svc.ListApt(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListApt: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListAptChangelog", func(t *testing.T) {
-		_, err := svc.ListAptChangelog(ctx, "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListAptChangelog(ctx, "sample-node", &nodes.ListAptChangelogParams{Name: "sample-name"})
+		if err != nil {
+			t.Fatalf("ListAptChangelog: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListAptChangelog: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/apt/changelog")
+		assertParamValue(t, got.query, "name", "sample-name")
+
+		var nilCtx context.Context
+		if _, err := svc.ListAptChangelog(nilCtx, "sample-node", &nodes.ListAptChangelogParams{Name: "sample-name"}); err == nil {
+			t.Errorf("ListAptChangelog: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListAptRepositories", func(t *testing.T) {
-		_, err := svc.ListAptRepositories(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListAptRepositories(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListAptRepositories: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListAptRepositories: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/apt/repositories")
+
+		var nilCtx context.Context
+		if _, err := svc.ListAptRepositories(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListAptRepositories: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateAptRepositories", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateAptRepositories(ctx, "sample-node", &nodes.CreateAptRepositoriesParams{Index: 42, Path: "sample-path"})
+		if err != nil {
+			t.Fatalf("CreateAptRepositories: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/apt/repositories")
+		assertParamValue(t, got.form, "index", "42")
+		assertParamValue(t, got.form, "path", "sample-path")
+
+		var nilCtx context.Context
+		if err := svc.CreateAptRepositories(nilCtx, "sample-node", &nodes.CreateAptRepositoriesParams{Index: 42, Path: "sample-path"}); err == nil {
+			t.Errorf("CreateAptRepositories: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateAptRepositories", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateAptRepositories(ctx, "sample-node", &nodes.UpdateAptRepositoriesParams{Handle: "sample-handle"})
+		if err != nil {
+			t.Fatalf("UpdateAptRepositories: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/nodes/sample-node/apt/repositories")
+		assertParamValue(t, got.form, "handle", "sample-handle")
+
+		var nilCtx context.Context
+		if err := svc.UpdateAptRepositories(nilCtx, "sample-node", &nodes.UpdateAptRepositoriesParams{Handle: "sample-handle"}); err == nil {
+			t.Errorf("UpdateAptRepositories: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListAptUpdate", func(t *testing.T) {
-		_, err := svc.ListAptUpdate(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListAptUpdate(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListAptUpdate: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListAptUpdate: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/apt/update")
+
+		var nilCtx context.Context
+		if _, err := svc.ListAptUpdate(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListAptUpdate: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateAptUpdate", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateAptUpdate(ctx, "sample-node", &nodes.CreateAptUpdateParams{})
+		if err != nil {
+			t.Fatalf("CreateAptUpdate: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateAptUpdate: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/apt/update")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateAptUpdate(nilCtx, "sample-node", &nodes.CreateAptUpdateParams{}); err == nil {
+			t.Errorf("CreateAptUpdate: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListAptVersions", func(t *testing.T) {
-		_, err := svc.ListAptVersions(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListAptVersions(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListAptVersions: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListAptVersions: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/apt/versions")
+
+		var nilCtx context.Context
+		if _, err := svc.ListAptVersions(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListAptVersions: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListCapabilities", func(t *testing.T) {
-		_, err := svc.ListCapabilities(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListCapabilities(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListCapabilities: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListCapabilities: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/capabilities")
+
+		var nilCtx context.Context
+		if _, err := svc.ListCapabilities(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListCapabilities: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListCapabilitiesQemu", func(t *testing.T) {
-		_, err := svc.ListCapabilitiesQemu(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListCapabilitiesQemu(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListCapabilitiesQemu: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListCapabilitiesQemu: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/capabilities/qemu")
+
+		var nilCtx context.Context
+		if _, err := svc.ListCapabilitiesQemu(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListCapabilitiesQemu: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListCapabilitiesQemuCpu", func(t *testing.T) {
-		_, err := svc.ListCapabilitiesQemuCpu(ctx, "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListCapabilitiesQemuCpu(ctx, "sample-node", &nodes.ListCapabilitiesQemuCpuParams{})
+		if err != nil {
+			t.Fatalf("ListCapabilitiesQemuCpu: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListCapabilitiesQemuCpu: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/capabilities/qemu/cpu")
+
+		var nilCtx context.Context
+		if _, err := svc.ListCapabilitiesQemuCpu(nilCtx, "sample-node", &nodes.ListCapabilitiesQemuCpuParams{}); err == nil {
+			t.Errorf("ListCapabilitiesQemuCpu: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListCapabilitiesQemuCpuFlags", func(t *testing.T) {
-		_, err := svc.ListCapabilitiesQemuCpuFlags(ctx, "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListCapabilitiesQemuCpuFlags(ctx, "sample-node", &nodes.ListCapabilitiesQemuCpuFlagsParams{})
+		if err != nil {
+			t.Fatalf("ListCapabilitiesQemuCpuFlags: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListCapabilitiesQemuCpuFlags: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/capabilities/qemu/cpu-flags")
+
+		var nilCtx context.Context
+		if _, err := svc.ListCapabilitiesQemuCpuFlags(nilCtx, "sample-node", &nodes.ListCapabilitiesQemuCpuFlagsParams{}); err == nil {
+			t.Errorf("ListCapabilitiesQemuCpuFlags: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListCapabilitiesQemuMachines", func(t *testing.T) {
-		_, err := svc.ListCapabilitiesQemuMachines(ctx, "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListCapabilitiesQemuMachines(ctx, "sample-node", &nodes.ListCapabilitiesQemuMachinesParams{})
+		if err != nil {
+			t.Fatalf("ListCapabilitiesQemuMachines: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListCapabilitiesQemuMachines: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/capabilities/qemu/machines")
+
+		var nilCtx context.Context
+		if _, err := svc.ListCapabilitiesQemuMachines(nilCtx, "sample-node", &nodes.ListCapabilitiesQemuMachinesParams{}); err == nil {
+			t.Errorf("ListCapabilitiesQemuMachines: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListCapabilitiesQemuMigration", func(t *testing.T) {
-		_, err := svc.ListCapabilitiesQemuMigration(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListCapabilitiesQemuMigration(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListCapabilitiesQemuMigration: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListCapabilitiesQemuMigration: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/capabilities/qemu/migration")
+
+		var nilCtx context.Context
+		if _, err := svc.ListCapabilitiesQemuMigration(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListCapabilitiesQemuMigration: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListCeph", func(t *testing.T) {
-		_, err := svc.ListCeph(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListCeph(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListCeph: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListCeph: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/ceph")
+
+		var nilCtx context.Context
+		if _, err := svc.ListCeph(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListCeph: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListCephCfg", func(t *testing.T) {
-		_, err := svc.ListCephCfg(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListCephCfg(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListCephCfg: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListCephCfg: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/ceph/cfg")
+
+		var nilCtx context.Context
+		if _, err := svc.ListCephCfg(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListCephCfg: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListCephCfgDb", func(t *testing.T) {
-		_, err := svc.ListCephCfgDb(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListCephCfgDb(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListCephCfgDb: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListCephCfgDb: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/ceph/cfg/db")
+
+		var nilCtx context.Context
+		if _, err := svc.ListCephCfgDb(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListCephCfgDb: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListCephCfgRaw", func(t *testing.T) {
-		_, err := svc.ListCephCfgRaw(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListCephCfgRaw(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListCephCfgRaw: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListCephCfgRaw: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/ceph/cfg/raw")
+
+		var nilCtx context.Context
+		if _, err := svc.ListCephCfgRaw(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListCephCfgRaw: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListCephCfgValue", func(t *testing.T) {
-		_, err := svc.ListCephCfgValue(ctx, "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListCephCfgValue(ctx, "sample-node", &nodes.ListCephCfgValueParams{ConfigKeys: "sample-config-keys"})
+		if err != nil {
+			t.Fatalf("ListCephCfgValue: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListCephCfgValue: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/ceph/cfg/value")
+		assertParamValue(t, got.query, "config-keys", "sample-config-keys")
+
+		var nilCtx context.Context
+		if _, err := svc.ListCephCfgValue(nilCtx, "sample-node", &nodes.ListCephCfgValueParams{ConfigKeys: "sample-config-keys"}); err == nil {
+			t.Errorf("ListCephCfgValue: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListCephCmdSafety", func(t *testing.T) {
-		_, err := svc.ListCephCmdSafety(ctx, "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListCephCmdSafety(ctx, "sample-node", &nodes.ListCephCmdSafetyParams{Action: "sample-action", Id: "sample-id", Service: "sample-service"})
+		if err != nil {
+			t.Fatalf("ListCephCmdSafety: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListCephCmdSafety: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/ceph/cmd-safety")
+		assertParamValue(t, got.query, "action", "sample-action")
+		assertParamValue(t, got.query, "id", "sample-id")
+		assertParamValue(t, got.query, "service", "sample-service")
+
+		var nilCtx context.Context
+		if _, err := svc.ListCephCmdSafety(nilCtx, "sample-node", &nodes.ListCephCmdSafetyParams{Action: "sample-action", Id: "sample-id", Service: "sample-service"}); err == nil {
+			t.Errorf("ListCephCmdSafety: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListCephCrush", func(t *testing.T) {
-		_, err := svc.ListCephCrush(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListCephCrush(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListCephCrush: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListCephCrush: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/ceph/crush")
+
+		var nilCtx context.Context
+		if _, err := svc.ListCephCrush(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListCephCrush: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListCephFs", func(t *testing.T) {
-		_, err := svc.ListCephFs(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListCephFs(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListCephFs: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListCephFs: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/ceph/fs")
+
+		var nilCtx context.Context
+		if _, err := svc.ListCephFs(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListCephFs: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteCephFs", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.DeleteCephFs(ctx, "sample-node", "sample-name", &nodes.DeleteCephFsParams{})
+		if err != nil {
+			t.Fatalf("DeleteCephFs: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("DeleteCephFs: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/nodes/sample-node/ceph/fs/sample-name")
+
+		var nilCtx context.Context
+		if _, err := svc.DeleteCephFs(nilCtx, "sample-node", "sample-name", &nodes.DeleteCephFsParams{}); err == nil {
+			t.Errorf("DeleteCephFs: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateCephFs", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateCephFs(ctx, "sample-node", "sample-name", &nodes.CreateCephFsParams{})
+		if err != nil {
+			t.Fatalf("CreateCephFs: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateCephFs: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/ceph/fs/sample-name")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateCephFs(nilCtx, "sample-node", "sample-name", &nodes.CreateCephFsParams{}); err == nil {
+			t.Errorf("CreateCephFs: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateCephInit", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateCephInit(ctx, "sample-node", &nodes.CreateCephInitParams{})
+		if err != nil {
+			t.Fatalf("CreateCephInit: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/ceph/init")
+
+		var nilCtx context.Context
+		if err := svc.CreateCephInit(nilCtx, "sample-node", &nodes.CreateCephInitParams{}); err == nil {
+			t.Errorf("CreateCephInit: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListCephLog", func(t *testing.T) {
-		_, err := svc.ListCephLog(ctx, "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListCephLog(ctx, "sample-node", &nodes.ListCephLogParams{})
+		if err != nil {
+			t.Fatalf("ListCephLog: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListCephLog: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/ceph/log")
+
+		var nilCtx context.Context
+		if _, err := svc.ListCephLog(nilCtx, "sample-node", &nodes.ListCephLogParams{}); err == nil {
+			t.Errorf("ListCephLog: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListCephMds", func(t *testing.T) {
-		_, err := svc.ListCephMds(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListCephMds(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListCephMds: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListCephMds: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/ceph/mds")
+
+		var nilCtx context.Context
+		if _, err := svc.ListCephMds(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListCephMds: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteCephMds", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.DeleteCephMds(ctx, "sample-node", "sample-name")
+		if err != nil {
+			t.Fatalf("DeleteCephMds: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("DeleteCephMds: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/nodes/sample-node/ceph/mds/sample-name")
+
+		var nilCtx context.Context
+		if _, err := svc.DeleteCephMds(nilCtx, "sample-node", "sample-name"); err == nil {
+			t.Errorf("DeleteCephMds: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateCephMds", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateCephMds(ctx, "sample-node", "sample-name", &nodes.CreateCephMdsParams{})
+		if err != nil {
+			t.Fatalf("CreateCephMds: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateCephMds: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/ceph/mds/sample-name")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateCephMds(nilCtx, "sample-node", "sample-name", &nodes.CreateCephMdsParams{}); err == nil {
+			t.Errorf("CreateCephMds: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListCephMgr", func(t *testing.T) {
-		_, err := svc.ListCephMgr(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListCephMgr(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListCephMgr: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListCephMgr: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/ceph/mgr")
+
+		var nilCtx context.Context
+		if _, err := svc.ListCephMgr(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListCephMgr: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteCephMgr", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.DeleteCephMgr(ctx, "sample-node", "sample-id")
+		if err != nil {
+			t.Fatalf("DeleteCephMgr: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("DeleteCephMgr: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/nodes/sample-node/ceph/mgr/sample-id")
+
+		var nilCtx context.Context
+		if _, err := svc.DeleteCephMgr(nilCtx, "sample-node", "sample-id"); err == nil {
+			t.Errorf("DeleteCephMgr: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateCephMgr", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateCephMgr(ctx, "sample-node", "sample-id")
+		if err != nil {
+			t.Fatalf("CreateCephMgr: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateCephMgr: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/ceph/mgr/sample-id")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateCephMgr(nilCtx, "sample-node", "sample-id"); err == nil {
+			t.Errorf("CreateCephMgr: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListCephMon", func(t *testing.T) {
-		_, err := svc.ListCephMon(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListCephMon(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListCephMon: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListCephMon: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/ceph/mon")
+
+		var nilCtx context.Context
+		if _, err := svc.ListCephMon(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListCephMon: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteCephMon", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.DeleteCephMon(ctx, "sample-node", "sample-monid")
+		if err != nil {
+			t.Fatalf("DeleteCephMon: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("DeleteCephMon: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/nodes/sample-node/ceph/mon/sample-monid")
+
+		var nilCtx context.Context
+		if _, err := svc.DeleteCephMon(nilCtx, "sample-node", "sample-monid"); err == nil {
+			t.Errorf("DeleteCephMon: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateCephMon", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateCephMon(ctx, "sample-node", "sample-monid", &nodes.CreateCephMonParams{})
+		if err != nil {
+			t.Fatalf("CreateCephMon: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateCephMon: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/ceph/mon/sample-monid")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateCephMon(nilCtx, "sample-node", "sample-monid", &nodes.CreateCephMonParams{}); err == nil {
+			t.Errorf("CreateCephMon: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListCephOsd", func(t *testing.T) {
-		_, err := svc.ListCephOsd(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListCephOsd(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListCephOsd: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListCephOsd: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/ceph/osd")
+
+		var nilCtx context.Context
+		if _, err := svc.ListCephOsd(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListCephOsd: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateCephOsd", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateCephOsd(ctx, "sample-node", &nodes.CreateCephOsdParams{Dev: "sample-dev"})
+		if err != nil {
+			t.Fatalf("CreateCephOsd: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateCephOsd: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/ceph/osd")
+		assertParamValue(t, got.form, "dev", "sample-dev")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateCephOsd(nilCtx, "sample-node", &nodes.CreateCephOsdParams{Dev: "sample-dev"}); err == nil {
+			t.Errorf("CreateCephOsd: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteCephOsd", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.DeleteCephOsd(ctx, "sample-node", "sample-osdid", &nodes.DeleteCephOsdParams{})
+		if err != nil {
+			t.Fatalf("DeleteCephOsd: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("DeleteCephOsd: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/nodes/sample-node/ceph/osd/sample-osdid")
+
+		var nilCtx context.Context
+		if _, err := svc.DeleteCephOsd(nilCtx, "sample-node", "sample-osdid", &nodes.DeleteCephOsdParams{}); err == nil {
+			t.Errorf("DeleteCephOsd: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetCephOsd", func(t *testing.T) {
-		_, err := svc.GetCephOsd(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.GetCephOsd(ctx, "sample-node", "sample-osdid")
+		if err != nil {
+			t.Fatalf("GetCephOsd: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetCephOsd: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/ceph/osd/sample-osdid")
+
+		var nilCtx context.Context
+		if _, err := svc.GetCephOsd(nilCtx, "sample-node", "sample-osdid"); err == nil {
+			t.Errorf("GetCephOsd: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateCephOsdIn", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateCephOsdIn(ctx, "sample-node", "sample-osdid")
+		if err != nil {
+			t.Fatalf("CreateCephOsdIn: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/ceph/osd/sample-osdid/in")
+
+		var nilCtx context.Context
+		if err := svc.CreateCephOsdIn(nilCtx, "sample-node", "sample-osdid"); err == nil {
+			t.Errorf("CreateCephOsdIn: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListCephOsdLvInfo", func(t *testing.T) {
-		_, err := svc.ListCephOsdLvInfo(ctx, "stub", "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListCephOsdLvInfo(ctx, "sample-node", "sample-osdid", &nodes.ListCephOsdLvInfoParams{})
+		if err != nil {
+			t.Fatalf("ListCephOsdLvInfo: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListCephOsdLvInfo: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/ceph/osd/sample-osdid/lv-info")
+
+		var nilCtx context.Context
+		if _, err := svc.ListCephOsdLvInfo(nilCtx, "sample-node", "sample-osdid", &nodes.ListCephOsdLvInfoParams{}); err == nil {
+			t.Errorf("ListCephOsdLvInfo: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListCephOsdMetadata", func(t *testing.T) {
-		_, err := svc.ListCephOsdMetadata(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListCephOsdMetadata(ctx, "sample-node", "sample-osdid")
+		if err != nil {
+			t.Fatalf("ListCephOsdMetadata: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListCephOsdMetadata: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/ceph/osd/sample-osdid/metadata")
+
+		var nilCtx context.Context
+		if _, err := svc.ListCephOsdMetadata(nilCtx, "sample-node", "sample-osdid"); err == nil {
+			t.Errorf("ListCephOsdMetadata: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateCephOsdOut", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateCephOsdOut(ctx, "sample-node", "sample-osdid")
+		if err != nil {
+			t.Fatalf("CreateCephOsdOut: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/ceph/osd/sample-osdid/out")
+
+		var nilCtx context.Context
+		if err := svc.CreateCephOsdOut(nilCtx, "sample-node", "sample-osdid"); err == nil {
+			t.Errorf("CreateCephOsdOut: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateCephOsdScrub", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateCephOsdScrub(ctx, "sample-node", "sample-osdid", &nodes.CreateCephOsdScrubParams{})
+		if err != nil {
+			t.Fatalf("CreateCephOsdScrub: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/ceph/osd/sample-osdid/scrub")
+
+		var nilCtx context.Context
+		if err := svc.CreateCephOsdScrub(nilCtx, "sample-node", "sample-osdid", &nodes.CreateCephOsdScrubParams{}); err == nil {
+			t.Errorf("CreateCephOsdScrub: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListCephPool", func(t *testing.T) {
-		_, err := svc.ListCephPool(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListCephPool(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListCephPool: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListCephPool: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/ceph/pool")
+
+		var nilCtx context.Context
+		if _, err := svc.ListCephPool(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListCephPool: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateCephPool", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateCephPool(ctx, "sample-node", &nodes.CreateCephPoolParams{Name: "sample-name"})
+		if err != nil {
+			t.Fatalf("CreateCephPool: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateCephPool: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/ceph/pool")
+		assertParamValue(t, got.form, "name", "sample-name")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateCephPool(nilCtx, "sample-node", &nodes.CreateCephPoolParams{Name: "sample-name"}); err == nil {
+			t.Errorf("CreateCephPool: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteCephPool", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.DeleteCephPool(ctx, "sample-node", "sample-name", &nodes.DeleteCephPoolParams{})
+		if err != nil {
+			t.Fatalf("DeleteCephPool: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("DeleteCephPool: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/nodes/sample-node/ceph/pool/sample-name")
+
+		var nilCtx context.Context
+		if _, err := svc.DeleteCephPool(nilCtx, "sample-node", "sample-name", &nodes.DeleteCephPoolParams{}); err == nil {
+			t.Errorf("DeleteCephPool: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetCephPool", func(t *testing.T) {
-		_, err := svc.GetCephPool(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.GetCephPool(ctx, "sample-node", "sample-name")
+		if err != nil {
+			t.Fatalf("GetCephPool: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetCephPool: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/ceph/pool/sample-name")
+
+		var nilCtx context.Context
+		if _, err := svc.GetCephPool(nilCtx, "sample-node", "sample-name"); err == nil {
+			t.Errorf("GetCephPool: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateCephPool", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.UpdateCephPool(ctx, "sample-node", "sample-name", &nodes.UpdateCephPoolParams{})
+		if err != nil {
+			t.Fatalf("UpdateCephPool: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("UpdateCephPool: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/nodes/sample-node/ceph/pool/sample-name")
+
+		var nilCtx context.Context
+		if _, err := svc.UpdateCephPool(nilCtx, "sample-node", "sample-name", &nodes.UpdateCephPoolParams{}); err == nil {
+			t.Errorf("UpdateCephPool: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListCephPoolStatus", func(t *testing.T) {
-		_, err := svc.ListCephPoolStatus(ctx, "stub", "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListCephPoolStatus(ctx, "sample-node", "sample-name", &nodes.ListCephPoolStatusParams{})
+		if err != nil {
+			t.Fatalf("ListCephPoolStatus: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListCephPoolStatus: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/ceph/pool/sample-name/status")
+
+		var nilCtx context.Context
+		if _, err := svc.ListCephPoolStatus(nilCtx, "sample-node", "sample-name", &nodes.ListCephPoolStatusParams{}); err == nil {
+			t.Errorf("ListCephPoolStatus: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateCephRestart", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateCephRestart(ctx, "sample-node", &nodes.CreateCephRestartParams{})
+		if err != nil {
+			t.Fatalf("CreateCephRestart: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateCephRestart: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/ceph/restart")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateCephRestart(nilCtx, "sample-node", &nodes.CreateCephRestartParams{}); err == nil {
+			t.Errorf("CreateCephRestart: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListCephRules", func(t *testing.T) {
-		_, err := svc.ListCephRules(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListCephRules(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListCephRules: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListCephRules: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/ceph/rules")
+
+		var nilCtx context.Context
+		if _, err := svc.ListCephRules(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListCephRules: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateCephStart", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateCephStart(ctx, "sample-node", &nodes.CreateCephStartParams{})
+		if err != nil {
+			t.Fatalf("CreateCephStart: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateCephStart: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/ceph/start")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateCephStart(nilCtx, "sample-node", &nodes.CreateCephStartParams{}); err == nil {
+			t.Errorf("CreateCephStart: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListCephStatus", func(t *testing.T) {
-		_, err := svc.ListCephStatus(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListCephStatus(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListCephStatus: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListCephStatus: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/ceph/status")
+
+		var nilCtx context.Context
+		if _, err := svc.ListCephStatus(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListCephStatus: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateCephStop", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateCephStop(ctx, "sample-node", &nodes.CreateCephStopParams{})
+		if err != nil {
+			t.Fatalf("CreateCephStop: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateCephStop: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/ceph/stop")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateCephStop(nilCtx, "sample-node", &nodes.CreateCephStopParams{}); err == nil {
+			t.Errorf("CreateCephStop: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListCertificates", func(t *testing.T) {
-		_, err := svc.ListCertificates(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListCertificates(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListCertificates: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListCertificates: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/certificates")
+
+		var nilCtx context.Context
+		if _, err := svc.ListCertificates(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListCertificates: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListCertificatesAcme", func(t *testing.T) {
-		_, err := svc.ListCertificatesAcme(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListCertificatesAcme(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListCertificatesAcme: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListCertificatesAcme: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/certificates/acme")
+
+		var nilCtx context.Context
+		if _, err := svc.ListCertificatesAcme(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListCertificatesAcme: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteCertificatesAcmeCertificate", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.DeleteCertificatesAcmeCertificate(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("DeleteCertificatesAcmeCertificate: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("DeleteCertificatesAcmeCertificate: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/nodes/sample-node/certificates/acme/certificate")
+
+		var nilCtx context.Context
+		if _, err := svc.DeleteCertificatesAcmeCertificate(nilCtx, "sample-node"); err == nil {
+			t.Errorf("DeleteCertificatesAcmeCertificate: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateCertificatesAcmeCertificate", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateCertificatesAcmeCertificate(ctx, "sample-node", &nodes.CreateCertificatesAcmeCertificateParams{})
+		if err != nil {
+			t.Fatalf("CreateCertificatesAcmeCertificate: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateCertificatesAcmeCertificate: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/certificates/acme/certificate")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateCertificatesAcmeCertificate(nilCtx, "sample-node", &nodes.CreateCertificatesAcmeCertificateParams{}); err == nil {
+			t.Errorf("CreateCertificatesAcmeCertificate: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateCertificatesAcmeCertificate", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.UpdateCertificatesAcmeCertificate(ctx, "sample-node", &nodes.UpdateCertificatesAcmeCertificateParams{})
+		if err != nil {
+			t.Fatalf("UpdateCertificatesAcmeCertificate: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("UpdateCertificatesAcmeCertificate: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/nodes/sample-node/certificates/acme/certificate")
+
+		var nilCtx context.Context
+		if _, err := svc.UpdateCertificatesAcmeCertificate(nilCtx, "sample-node", &nodes.UpdateCertificatesAcmeCertificateParams{}); err == nil {
+			t.Errorf("UpdateCertificatesAcmeCertificate: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteCertificatesCustom", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteCertificatesCustom(ctx, "sample-node", &nodes.DeleteCertificatesCustomParams{})
+		if err != nil {
+			t.Fatalf("DeleteCertificatesCustom: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/nodes/sample-node/certificates/custom")
+
+		var nilCtx context.Context
+		if err := svc.DeleteCertificatesCustom(nilCtx, "sample-node", &nodes.DeleteCertificatesCustomParams{}); err == nil {
+			t.Errorf("DeleteCertificatesCustom: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateCertificatesCustom", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateCertificatesCustom(ctx, "sample-node", &nodes.CreateCertificatesCustomParams{Certificates: "sample-certificates"})
+		if err != nil {
+			t.Fatalf("CreateCertificatesCustom: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateCertificatesCustom: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/certificates/custom")
+		assertParamValue(t, got.form, "certificates", "sample-certificates")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateCertificatesCustom(nilCtx, "sample-node", &nodes.CreateCertificatesCustomParams{Certificates: "sample-certificates"}); err == nil {
+			t.Errorf("CreateCertificatesCustom: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListCertificatesInfo", func(t *testing.T) {
-		_, err := svc.ListCertificatesInfo(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListCertificatesInfo(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListCertificatesInfo: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListCertificatesInfo: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/certificates/info")
+
+		var nilCtx context.Context
+		if _, err := svc.ListCertificatesInfo(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListCertificatesInfo: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListConfig", func(t *testing.T) {
-		_, err := svc.ListConfig(ctx, "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListConfig(ctx, "sample-node", &nodes.ListConfigParams{})
+		if err != nil {
+			t.Fatalf("ListConfig: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListConfig: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/config")
+
+		var nilCtx context.Context
+		if _, err := svc.ListConfig(nilCtx, "sample-node", &nodes.ListConfigParams{}); err == nil {
+			t.Errorf("ListConfig: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateConfig", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateConfig(ctx, "sample-node", &nodes.UpdateConfigParams{})
+		if err != nil {
+			t.Fatalf("UpdateConfig: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/nodes/sample-node/config")
+
+		var nilCtx context.Context
+		if err := svc.UpdateConfig(nilCtx, "sample-node", &nodes.UpdateConfigParams{}); err == nil {
+			t.Errorf("UpdateConfig: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListDisks", func(t *testing.T) {
-		_, err := svc.ListDisks(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListDisks(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListDisks: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListDisks: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/disks")
+
+		var nilCtx context.Context
+		if _, err := svc.ListDisks(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListDisks: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListDisksDirectory", func(t *testing.T) {
-		_, err := svc.ListDisksDirectory(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListDisksDirectory(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListDisksDirectory: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListDisksDirectory: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/disks/directory")
+
+		var nilCtx context.Context
+		if _, err := svc.ListDisksDirectory(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListDisksDirectory: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateDisksDirectory", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateDisksDirectory(ctx, "sample-node", &nodes.CreateDisksDirectoryParams{Device: "sample-device", Name: "sample-name"})
+		if err != nil {
+			t.Fatalf("CreateDisksDirectory: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateDisksDirectory: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/disks/directory")
+		assertParamValue(t, got.form, "device", "sample-device")
+		assertParamValue(t, got.form, "name", "sample-name")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateDisksDirectory(nilCtx, "sample-node", &nodes.CreateDisksDirectoryParams{Device: "sample-device", Name: "sample-name"}); err == nil {
+			t.Errorf("CreateDisksDirectory: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteDisksDirectory", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.DeleteDisksDirectory(ctx, "sample-node", "sample-name", &nodes.DeleteDisksDirectoryParams{})
+		if err != nil {
+			t.Fatalf("DeleteDisksDirectory: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("DeleteDisksDirectory: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/nodes/sample-node/disks/directory/sample-name")
+
+		var nilCtx context.Context
+		if _, err := svc.DeleteDisksDirectory(nilCtx, "sample-node", "sample-name", &nodes.DeleteDisksDirectoryParams{}); err == nil {
+			t.Errorf("DeleteDisksDirectory: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateDisksInitgpt", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateDisksInitgpt(ctx, "sample-node", &nodes.CreateDisksInitgptParams{Disk: "sample-disk"})
+		if err != nil {
+			t.Fatalf("CreateDisksInitgpt: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateDisksInitgpt: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/disks/initgpt")
+		assertParamValue(t, got.form, "disk", "sample-disk")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateDisksInitgpt(nilCtx, "sample-node", &nodes.CreateDisksInitgptParams{Disk: "sample-disk"}); err == nil {
+			t.Errorf("CreateDisksInitgpt: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListDisksList", func(t *testing.T) {
-		_, err := svc.ListDisksList(ctx, "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListDisksList(ctx, "sample-node", &nodes.ListDisksListParams{})
+		if err != nil {
+			t.Fatalf("ListDisksList: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListDisksList: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/disks/list")
+
+		var nilCtx context.Context
+		if _, err := svc.ListDisksList(nilCtx, "sample-node", &nodes.ListDisksListParams{}); err == nil {
+			t.Errorf("ListDisksList: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListDisksLvm", func(t *testing.T) {
-		_, err := svc.ListDisksLvm(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListDisksLvm(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListDisksLvm: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListDisksLvm: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/disks/lvm")
+
+		var nilCtx context.Context
+		if _, err := svc.ListDisksLvm(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListDisksLvm: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateDisksLvm", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateDisksLvm(ctx, "sample-node", &nodes.CreateDisksLvmParams{Device: "sample-device", Name: "sample-name"})
+		if err != nil {
+			t.Fatalf("CreateDisksLvm: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateDisksLvm: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/disks/lvm")
+		assertParamValue(t, got.form, "device", "sample-device")
+		assertParamValue(t, got.form, "name", "sample-name")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateDisksLvm(nilCtx, "sample-node", &nodes.CreateDisksLvmParams{Device: "sample-device", Name: "sample-name"}); err == nil {
+			t.Errorf("CreateDisksLvm: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteDisksLvm", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.DeleteDisksLvm(ctx, "sample-node", "sample-name", &nodes.DeleteDisksLvmParams{})
+		if err != nil {
+			t.Fatalf("DeleteDisksLvm: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("DeleteDisksLvm: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/nodes/sample-node/disks/lvm/sample-name")
+
+		var nilCtx context.Context
+		if _, err := svc.DeleteDisksLvm(nilCtx, "sample-node", "sample-name", &nodes.DeleteDisksLvmParams{}); err == nil {
+			t.Errorf("DeleteDisksLvm: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListDisksLvmthin", func(t *testing.T) {
-		_, err := svc.ListDisksLvmthin(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListDisksLvmthin(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListDisksLvmthin: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListDisksLvmthin: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/disks/lvmthin")
+
+		var nilCtx context.Context
+		if _, err := svc.ListDisksLvmthin(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListDisksLvmthin: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateDisksLvmthin", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateDisksLvmthin(ctx, "sample-node", &nodes.CreateDisksLvmthinParams{Device: "sample-device", Name: "sample-name"})
+		if err != nil {
+			t.Fatalf("CreateDisksLvmthin: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateDisksLvmthin: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/disks/lvmthin")
+		assertParamValue(t, got.form, "device", "sample-device")
+		assertParamValue(t, got.form, "name", "sample-name")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateDisksLvmthin(nilCtx, "sample-node", &nodes.CreateDisksLvmthinParams{Device: "sample-device", Name: "sample-name"}); err == nil {
+			t.Errorf("CreateDisksLvmthin: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteDisksLvmthin", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.DeleteDisksLvmthin(ctx, "sample-node", "sample-name", &nodes.DeleteDisksLvmthinParams{VolumeGroup: "sample-volume-group"})
+		if err != nil {
+			t.Fatalf("DeleteDisksLvmthin: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("DeleteDisksLvmthin: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/nodes/sample-node/disks/lvmthin/sample-name")
+		assertParamValue(t, got.query, "volume-group", "sample-volume-group")
+
+		var nilCtx context.Context
+		if _, err := svc.DeleteDisksLvmthin(nilCtx, "sample-node", "sample-name", &nodes.DeleteDisksLvmthinParams{VolumeGroup: "sample-volume-group"}); err == nil {
+			t.Errorf("DeleteDisksLvmthin: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListDisksSmart", func(t *testing.T) {
-		_, err := svc.ListDisksSmart(ctx, "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListDisksSmart(ctx, "sample-node", &nodes.ListDisksSmartParams{Disk: "sample-disk"})
+		if err != nil {
+			t.Fatalf("ListDisksSmart: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListDisksSmart: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/disks/smart")
+		assertParamValue(t, got.query, "disk", "sample-disk")
+
+		var nilCtx context.Context
+		if _, err := svc.ListDisksSmart(nilCtx, "sample-node", &nodes.ListDisksSmartParams{Disk: "sample-disk"}); err == nil {
+			t.Errorf("ListDisksSmart: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateDisksWipedisk", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.UpdateDisksWipedisk(ctx, "sample-node", &nodes.UpdateDisksWipediskParams{Disk: "sample-disk"})
+		if err != nil {
+			t.Fatalf("UpdateDisksWipedisk: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("UpdateDisksWipedisk: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/nodes/sample-node/disks/wipedisk")
+		assertParamValue(t, got.form, "disk", "sample-disk")
+
+		var nilCtx context.Context
+		if _, err := svc.UpdateDisksWipedisk(nilCtx, "sample-node", &nodes.UpdateDisksWipediskParams{Disk: "sample-disk"}); err == nil {
+			t.Errorf("UpdateDisksWipedisk: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListDisksZfs", func(t *testing.T) {
-		_, err := svc.ListDisksZfs(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListDisksZfs(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListDisksZfs: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListDisksZfs: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/disks/zfs")
+
+		var nilCtx context.Context
+		if _, err := svc.ListDisksZfs(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListDisksZfs: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateDisksZfs", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateDisksZfs(ctx, "sample-node", &nodes.CreateDisksZfsParams{Devices: "sample-devices", Name: "sample-name", Raidlevel: "sample-raidlevel"})
+		if err != nil {
+			t.Fatalf("CreateDisksZfs: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateDisksZfs: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/disks/zfs")
+		assertParamValue(t, got.form, "devices", "sample-devices")
+		assertParamValue(t, got.form, "name", "sample-name")
+		assertParamValue(t, got.form, "raidlevel", "sample-raidlevel")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateDisksZfs(nilCtx, "sample-node", &nodes.CreateDisksZfsParams{Devices: "sample-devices", Name: "sample-name", Raidlevel: "sample-raidlevel"}); err == nil {
+			t.Errorf("CreateDisksZfs: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteDisksZfs", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.DeleteDisksZfs(ctx, "sample-node", "sample-name", &nodes.DeleteDisksZfsParams{})
+		if err != nil {
+			t.Fatalf("DeleteDisksZfs: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("DeleteDisksZfs: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/nodes/sample-node/disks/zfs/sample-name")
+
+		var nilCtx context.Context
+		if _, err := svc.DeleteDisksZfs(nilCtx, "sample-node", "sample-name", &nodes.DeleteDisksZfsParams{}); err == nil {
+			t.Errorf("DeleteDisksZfs: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetDisksZfs", func(t *testing.T) {
-		_, err := svc.GetDisksZfs(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.GetDisksZfs(ctx, "sample-node", "sample-name")
+		if err != nil {
+			t.Fatalf("GetDisksZfs: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetDisksZfs: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/disks/zfs/sample-name")
+
+		var nilCtx context.Context
+		if _, err := svc.GetDisksZfs(nilCtx, "sample-node", "sample-name"); err == nil {
+			t.Errorf("GetDisksZfs: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListDns", func(t *testing.T) {
-		_, err := svc.ListDns(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListDns(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListDns: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListDns: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/dns")
+
+		var nilCtx context.Context
+		if _, err := svc.ListDns(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListDns: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateDns", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateDns(ctx, "sample-node", &nodes.UpdateDnsParams{Search: "sample-search"})
+		if err != nil {
+			t.Fatalf("UpdateDns: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/nodes/sample-node/dns")
+		assertParamValue(t, got.form, "search", "sample-search")
+
+		var nilCtx context.Context
+		if err := svc.UpdateDns(nilCtx, "sample-node", &nodes.UpdateDnsParams{Search: "sample-search"}); err == nil {
+			t.Errorf("UpdateDns: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateExecute", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.CreateExecute(ctx, "sample-node", &nodes.CreateExecuteParams{Commands: "sample-commands"})
+		if err != nil {
+			t.Fatalf("CreateExecute: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateExecute: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/execute")
+		assertParamValue(t, got.form, "commands", "sample-commands")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateExecute(nilCtx, "sample-node", &nodes.CreateExecuteParams{Commands: "sample-commands"}); err == nil {
+			t.Errorf("CreateExecute: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListFirewall", func(t *testing.T) {
-		_, err := svc.ListFirewall(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListFirewall(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListFirewall: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListFirewall: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/firewall")
+
+		var nilCtx context.Context
+		if _, err := svc.ListFirewall(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListFirewall: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListFirewallLog", func(t *testing.T) {
-		_, err := svc.ListFirewallLog(ctx, "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListFirewallLog(ctx, "sample-node", &nodes.ListFirewallLogParams{})
+		if err != nil {
+			t.Fatalf("ListFirewallLog: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListFirewallLog: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/firewall/log")
+
+		var nilCtx context.Context
+		if _, err := svc.ListFirewallLog(nilCtx, "sample-node", &nodes.ListFirewallLogParams{}); err == nil {
+			t.Errorf("ListFirewallLog: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListFirewallOptions", func(t *testing.T) {
-		_, err := svc.ListFirewallOptions(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListFirewallOptions(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListFirewallOptions: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListFirewallOptions: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/firewall/options")
+
+		var nilCtx context.Context
+		if _, err := svc.ListFirewallOptions(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListFirewallOptions: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateFirewallOptions", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateFirewallOptions(ctx, "sample-node", &nodes.UpdateFirewallOptionsParams{})
+		if err != nil {
+			t.Fatalf("UpdateFirewallOptions: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/nodes/sample-node/firewall/options")
+
+		var nilCtx context.Context
+		if err := svc.UpdateFirewallOptions(nilCtx, "sample-node", &nodes.UpdateFirewallOptionsParams{}); err == nil {
+			t.Errorf("UpdateFirewallOptions: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListFirewallRules", func(t *testing.T) {
-		_, err := svc.ListFirewallRules(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListFirewallRules(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListFirewallRules: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListFirewallRules: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/firewall/rules")
+
+		var nilCtx context.Context
+		if _, err := svc.ListFirewallRules(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListFirewallRules: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateFirewallRules", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateFirewallRules(ctx, "sample-node", &nodes.CreateFirewallRulesParams{Action: "sample-action", Type: "sample-type"})
+		if err != nil {
+			t.Fatalf("CreateFirewallRules: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/firewall/rules")
+		assertParamValue(t, got.form, "action", "sample-action")
+		assertParamValue(t, got.form, "type", "sample-type")
+
+		var nilCtx context.Context
+		if err := svc.CreateFirewallRules(nilCtx, "sample-node", &nodes.CreateFirewallRulesParams{Action: "sample-action", Type: "sample-type"}); err == nil {
+			t.Errorf("CreateFirewallRules: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteFirewallRules", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteFirewallRules(ctx, "sample-node", "sample-pos", &nodes.DeleteFirewallRulesParams{})
+		if err != nil {
+			t.Fatalf("DeleteFirewallRules: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/nodes/sample-node/firewall/rules/sample-pos")
+
+		var nilCtx context.Context
+		if err := svc.DeleteFirewallRules(nilCtx, "sample-node", "sample-pos", &nodes.DeleteFirewallRulesParams{}); err == nil {
+			t.Errorf("DeleteFirewallRules: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetFirewallRules", func(t *testing.T) {
-		_, err := svc.GetFirewallRules(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.GetFirewallRules(ctx, "sample-node", "sample-pos")
+		if err != nil {
+			t.Fatalf("GetFirewallRules: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetFirewallRules: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/firewall/rules/sample-pos")
+
+		var nilCtx context.Context
+		if _, err := svc.GetFirewallRules(nilCtx, "sample-node", "sample-pos"); err == nil {
+			t.Errorf("GetFirewallRules: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateFirewallRules", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateFirewallRules(ctx, "sample-node", "sample-pos", &nodes.UpdateFirewallRulesParams{})
+		if err != nil {
+			t.Fatalf("UpdateFirewallRules: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/nodes/sample-node/firewall/rules/sample-pos")
+
+		var nilCtx context.Context
+		if err := svc.UpdateFirewallRules(nilCtx, "sample-node", "sample-pos", &nodes.UpdateFirewallRulesParams{}); err == nil {
+			t.Errorf("UpdateFirewallRules: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListHardware", func(t *testing.T) {
-		_, err := svc.ListHardware(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListHardware(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListHardware: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListHardware: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/hardware")
+
+		var nilCtx context.Context
+		if _, err := svc.ListHardware(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListHardware: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListHardwarePci", func(t *testing.T) {
-		_, err := svc.ListHardwarePci(ctx, "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListHardwarePci(ctx, "sample-node", &nodes.ListHardwarePciParams{})
+		if err != nil {
+			t.Fatalf("ListHardwarePci: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListHardwarePci: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/hardware/pci")
+
+		var nilCtx context.Context
+		if _, err := svc.ListHardwarePci(nilCtx, "sample-node", &nodes.ListHardwarePciParams{}); err == nil {
+			t.Errorf("ListHardwarePci: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetHardwarePci", func(t *testing.T) {
-		_, err := svc.GetHardwarePci(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.GetHardwarePci(ctx, "sample-node", "sample-pci-id-or-mapping")
+		if err != nil {
+			t.Fatalf("GetHardwarePci: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetHardwarePci: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/hardware/pci/sample-pci-id-or-mapping")
+
+		var nilCtx context.Context
+		if _, err := svc.GetHardwarePci(nilCtx, "sample-node", "sample-pci-id-or-mapping"); err == nil {
+			t.Errorf("GetHardwarePci: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListHardwarePciMdev", func(t *testing.T) {
-		_, err := svc.ListHardwarePciMdev(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListHardwarePciMdev(ctx, "sample-node", "sample-pci-id-or-mapping")
+		if err != nil {
+			t.Fatalf("ListHardwarePciMdev: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListHardwarePciMdev: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/hardware/pci/sample-pci-id-or-mapping/mdev")
+
+		var nilCtx context.Context
+		if _, err := svc.ListHardwarePciMdev(nilCtx, "sample-node", "sample-pci-id-or-mapping"); err == nil {
+			t.Errorf("ListHardwarePciMdev: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListHardwareUsb", func(t *testing.T) {
-		_, err := svc.ListHardwareUsb(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListHardwareUsb(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListHardwareUsb: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListHardwareUsb: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/hardware/usb")
+
+		var nilCtx context.Context
+		if _, err := svc.ListHardwareUsb(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListHardwareUsb: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListHosts", func(t *testing.T) {
-		_, err := svc.ListHosts(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListHosts(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListHosts: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListHosts: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/hosts")
+
+		var nilCtx context.Context
+		if _, err := svc.ListHosts(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListHosts: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateHosts", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateHosts(ctx, "sample-node", &nodes.CreateHostsParams{Data: "sample-data"})
+		if err != nil {
+			t.Fatalf("CreateHosts: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/hosts")
+		assertParamValue(t, got.form, "data", "sample-data")
+
+		var nilCtx context.Context
+		if err := svc.CreateHosts(nilCtx, "sample-node", &nodes.CreateHostsParams{Data: "sample-data"}); err == nil {
+			t.Errorf("CreateHosts: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListJournal", func(t *testing.T) {
-		_, err := svc.ListJournal(ctx, "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListJournal(ctx, "sample-node", &nodes.ListJournalParams{})
+		if err != nil {
+			t.Fatalf("ListJournal: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListJournal: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/journal")
+
+		var nilCtx context.Context
+		if _, err := svc.ListJournal(nilCtx, "sample-node", &nodes.ListJournalParams{}); err == nil {
+			t.Errorf("ListJournal: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListLxc", func(t *testing.T) {
-		_, err := svc.ListLxc(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListLxc(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListLxc: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListLxc: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/lxc")
+
+		var nilCtx context.Context
+		if _, err := svc.ListLxc(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListLxc: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateLxc", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateLxc(ctx, "sample-node", &nodes.CreateLxcParams{Ostemplate: "sample-ostemplate", Vmid: 42})
+		if err != nil {
+			t.Fatalf("CreateLxc: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateLxc: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/lxc")
+		assertParamValue(t, got.form, "ostemplate", "sample-ostemplate")
+		assertParamValue(t, got.form, "vmid", "42")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateLxc(nilCtx, "sample-node", &nodes.CreateLxcParams{Ostemplate: "sample-ostemplate", Vmid: 42}); err == nil {
+			t.Errorf("CreateLxc: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteLxc", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.DeleteLxc(ctx, "sample-node", "sample-vmid", &nodes.DeleteLxcParams{})
+		if err != nil {
+			t.Fatalf("DeleteLxc: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("DeleteLxc: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/nodes/sample-node/lxc/sample-vmid")
+
+		var nilCtx context.Context
+		if _, err := svc.DeleteLxc(nilCtx, "sample-node", "sample-vmid", &nodes.DeleteLxcParams{}); err == nil {
+			t.Errorf("DeleteLxc: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetLxc", func(t *testing.T) {
-		_, err := svc.GetLxc(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.GetLxc(ctx, "sample-node", "sample-vmid")
+		if err != nil {
+			t.Fatalf("GetLxc: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetLxc: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/lxc/sample-vmid")
+
+		var nilCtx context.Context
+		if _, err := svc.GetLxc(nilCtx, "sample-node", "sample-vmid"); err == nil {
+			t.Errorf("GetLxc: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateLxcClone", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateLxcClone(ctx, "sample-node", "sample-vmid", &nodes.CreateLxcCloneParams{Newid: 42})
+		if err != nil {
+			t.Fatalf("CreateLxcClone: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateLxcClone: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/lxc/sample-vmid/clone")
+		assertParamValue(t, got.form, "newid", "42")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateLxcClone(nilCtx, "sample-node", "sample-vmid", &nodes.CreateLxcCloneParams{Newid: 42}); err == nil {
+			t.Errorf("CreateLxcClone: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListLxcConfig", func(t *testing.T) {
-		_, err := svc.ListLxcConfig(ctx, "stub", "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListLxcConfig(ctx, "sample-node", "sample-vmid", &nodes.ListLxcConfigParams{})
+		if err != nil {
+			t.Fatalf("ListLxcConfig: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListLxcConfig: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/lxc/sample-vmid/config")
+
+		var nilCtx context.Context
+		if _, err := svc.ListLxcConfig(nilCtx, "sample-node", "sample-vmid", &nodes.ListLxcConfigParams{}); err == nil {
+			t.Errorf("ListLxcConfig: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateLxcConfig", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateLxcConfig(ctx, "sample-node", "sample-vmid", &nodes.UpdateLxcConfigParams{})
+		if err != nil {
+			t.Fatalf("UpdateLxcConfig: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/nodes/sample-node/lxc/sample-vmid/config")
+
+		var nilCtx context.Context
+		if err := svc.UpdateLxcConfig(nilCtx, "sample-node", "sample-vmid", &nodes.UpdateLxcConfigParams{}); err == nil {
+			t.Errorf("UpdateLxcConfig: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListLxcFeature", func(t *testing.T) {
-		_, err := svc.ListLxcFeature(ctx, "stub", "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListLxcFeature(ctx, "sample-node", "sample-vmid", &nodes.ListLxcFeatureParams{Feature: "sample-feature"})
+		if err != nil {
+			t.Fatalf("ListLxcFeature: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListLxcFeature: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/lxc/sample-vmid/feature")
+		assertParamValue(t, got.query, "feature", "sample-feature")
+
+		var nilCtx context.Context
+		if _, err := svc.ListLxcFeature(nilCtx, "sample-node", "sample-vmid", &nodes.ListLxcFeatureParams{Feature: "sample-feature"}); err == nil {
+			t.Errorf("ListLxcFeature: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListLxcFirewall", func(t *testing.T) {
-		_, err := svc.ListLxcFirewall(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListLxcFirewall(ctx, "sample-node", "sample-vmid")
+		if err != nil {
+			t.Fatalf("ListLxcFirewall: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListLxcFirewall: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/lxc/sample-vmid/firewall")
+
+		var nilCtx context.Context
+		if _, err := svc.ListLxcFirewall(nilCtx, "sample-node", "sample-vmid"); err == nil {
+			t.Errorf("ListLxcFirewall: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListLxcFirewallAliases", func(t *testing.T) {
-		_, err := svc.ListLxcFirewallAliases(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListLxcFirewallAliases(ctx, "sample-node", "sample-vmid")
+		if err != nil {
+			t.Fatalf("ListLxcFirewallAliases: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListLxcFirewallAliases: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/lxc/sample-vmid/firewall/aliases")
+
+		var nilCtx context.Context
+		if _, err := svc.ListLxcFirewallAliases(nilCtx, "sample-node", "sample-vmid"); err == nil {
+			t.Errorf("ListLxcFirewallAliases: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateLxcFirewallAliases", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateLxcFirewallAliases(ctx, "sample-node", "sample-vmid", &nodes.CreateLxcFirewallAliasesParams{Cidr: "sample-cidr", Name: "sample-name"})
+		if err != nil {
+			t.Fatalf("CreateLxcFirewallAliases: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/lxc/sample-vmid/firewall/aliases")
+		assertParamValue(t, got.form, "cidr", "sample-cidr")
+		assertParamValue(t, got.form, "name", "sample-name")
+
+		var nilCtx context.Context
+		if err := svc.CreateLxcFirewallAliases(nilCtx, "sample-node", "sample-vmid", &nodes.CreateLxcFirewallAliasesParams{Cidr: "sample-cidr", Name: "sample-name"}); err == nil {
+			t.Errorf("CreateLxcFirewallAliases: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteLxcFirewallAliases", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteLxcFirewallAliases(ctx, "sample-node", "sample-vmid", "sample-name", &nodes.DeleteLxcFirewallAliasesParams{})
+		if err != nil {
+			t.Fatalf("DeleteLxcFirewallAliases: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/nodes/sample-node/lxc/sample-vmid/firewall/aliases/sample-name")
+
+		var nilCtx context.Context
+		if err := svc.DeleteLxcFirewallAliases(nilCtx, "sample-node", "sample-vmid", "sample-name", &nodes.DeleteLxcFirewallAliasesParams{}); err == nil {
+			t.Errorf("DeleteLxcFirewallAliases: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetLxcFirewallAliases", func(t *testing.T) {
-		_, err := svc.GetLxcFirewallAliases(ctx, "stub", "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.GetLxcFirewallAliases(ctx, "sample-node", "sample-vmid", "sample-name")
+		if err != nil {
+			t.Fatalf("GetLxcFirewallAliases: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetLxcFirewallAliases: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/lxc/sample-vmid/firewall/aliases/sample-name")
+
+		var nilCtx context.Context
+		if _, err := svc.GetLxcFirewallAliases(nilCtx, "sample-node", "sample-vmid", "sample-name"); err == nil {
+			t.Errorf("GetLxcFirewallAliases: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateLxcFirewallAliases", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateLxcFirewallAliases(ctx, "sample-node", "sample-vmid", "sample-name", &nodes.UpdateLxcFirewallAliasesParams{Cidr: "sample-cidr"})
+		if err != nil {
+			t.Fatalf("UpdateLxcFirewallAliases: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/nodes/sample-node/lxc/sample-vmid/firewall/aliases/sample-name")
+		assertParamValue(t, got.form, "cidr", "sample-cidr")
+
+		var nilCtx context.Context
+		if err := svc.UpdateLxcFirewallAliases(nilCtx, "sample-node", "sample-vmid", "sample-name", &nodes.UpdateLxcFirewallAliasesParams{Cidr: "sample-cidr"}); err == nil {
+			t.Errorf("UpdateLxcFirewallAliases: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListLxcFirewallIpset", func(t *testing.T) {
-		_, err := svc.ListLxcFirewallIpset(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListLxcFirewallIpset(ctx, "sample-node", "sample-vmid")
+		if err != nil {
+			t.Fatalf("ListLxcFirewallIpset: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListLxcFirewallIpset: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/lxc/sample-vmid/firewall/ipset")
+
+		var nilCtx context.Context
+		if _, err := svc.ListLxcFirewallIpset(nilCtx, "sample-node", "sample-vmid"); err == nil {
+			t.Errorf("ListLxcFirewallIpset: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateLxcFirewallIpset", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateLxcFirewallIpset(ctx, "sample-node", "sample-vmid", &nodes.CreateLxcFirewallIpsetParams{Name: "sample-name"})
+		if err != nil {
+			t.Fatalf("CreateLxcFirewallIpset: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/lxc/sample-vmid/firewall/ipset")
+		assertParamValue(t, got.form, "name", "sample-name")
+
+		var nilCtx context.Context
+		if err := svc.CreateLxcFirewallIpset(nilCtx, "sample-node", "sample-vmid", &nodes.CreateLxcFirewallIpsetParams{Name: "sample-name"}); err == nil {
+			t.Errorf("CreateLxcFirewallIpset: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteLxcFirewallIpset", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteLxcFirewallIpset(ctx, "sample-node", "sample-vmid", "sample-name", &nodes.DeleteLxcFirewallIpsetParams{})
+		if err != nil {
+			t.Fatalf("DeleteLxcFirewallIpset: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/nodes/sample-node/lxc/sample-vmid/firewall/ipset/sample-name")
+
+		var nilCtx context.Context
+		if err := svc.DeleteLxcFirewallIpset(nilCtx, "sample-node", "sample-vmid", "sample-name", &nodes.DeleteLxcFirewallIpsetParams{}); err == nil {
+			t.Errorf("DeleteLxcFirewallIpset: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetLxcFirewallIpset", func(t *testing.T) {
-		_, err := svc.GetLxcFirewallIpset(ctx, "stub", "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.GetLxcFirewallIpset(ctx, "sample-node", "sample-vmid", "sample-name")
+		if err != nil {
+			t.Fatalf("GetLxcFirewallIpset: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetLxcFirewallIpset: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/lxc/sample-vmid/firewall/ipset/sample-name")
+
+		var nilCtx context.Context
+		if _, err := svc.GetLxcFirewallIpset(nilCtx, "sample-node", "sample-vmid", "sample-name"); err == nil {
+			t.Errorf("GetLxcFirewallIpset: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateLxcFirewallIpset2", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateLxcFirewallIpset2(ctx, "sample-node", "sample-vmid", "sample-name", &nodes.CreateLxcFirewallIpset2Params{Cidr: "sample-cidr"})
+		if err != nil {
+			t.Fatalf("CreateLxcFirewallIpset2: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/lxc/sample-vmid/firewall/ipset/sample-name")
+		assertParamValue(t, got.form, "cidr", "sample-cidr")
+
+		var nilCtx context.Context
+		if err := svc.CreateLxcFirewallIpset2(nilCtx, "sample-node", "sample-vmid", "sample-name", &nodes.CreateLxcFirewallIpset2Params{Cidr: "sample-cidr"}); err == nil {
+			t.Errorf("CreateLxcFirewallIpset2: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteLxcFirewallIpset2", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteLxcFirewallIpset2(ctx, "sample-node", "sample-vmid", "sample-name", "sample-cidr", &nodes.DeleteLxcFirewallIpset2Params{})
+		if err != nil {
+			t.Fatalf("DeleteLxcFirewallIpset2: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/nodes/sample-node/lxc/sample-vmid/firewall/ipset/sample-name/sample-cidr")
+
+		var nilCtx context.Context
+		if err := svc.DeleteLxcFirewallIpset2(nilCtx, "sample-node", "sample-vmid", "sample-name", "sample-cidr", &nodes.DeleteLxcFirewallIpset2Params{}); err == nil {
+			t.Errorf("DeleteLxcFirewallIpset2: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetLxcFirewallIpset2", func(t *testing.T) {
-		_, err := svc.GetLxcFirewallIpset2(ctx, "stub", "stub", "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.GetLxcFirewallIpset2(ctx, "sample-node", "sample-vmid", "sample-name", "sample-cidr")
+		if err != nil {
+			t.Fatalf("GetLxcFirewallIpset2: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetLxcFirewallIpset2: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/lxc/sample-vmid/firewall/ipset/sample-name/sample-cidr")
+
+		var nilCtx context.Context
+		if _, err := svc.GetLxcFirewallIpset2(nilCtx, "sample-node", "sample-vmid", "sample-name", "sample-cidr"); err == nil {
+			t.Errorf("GetLxcFirewallIpset2: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateLxcFirewallIpset", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateLxcFirewallIpset(ctx, "sample-node", "sample-vmid", "sample-name", "sample-cidr", &nodes.UpdateLxcFirewallIpsetParams{})
+		if err != nil {
+			t.Fatalf("UpdateLxcFirewallIpset: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/nodes/sample-node/lxc/sample-vmid/firewall/ipset/sample-name/sample-cidr")
+
+		var nilCtx context.Context
+		if err := svc.UpdateLxcFirewallIpset(nilCtx, "sample-node", "sample-vmid", "sample-name", "sample-cidr", &nodes.UpdateLxcFirewallIpsetParams{}); err == nil {
+			t.Errorf("UpdateLxcFirewallIpset: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListLxcFirewallLog", func(t *testing.T) {
-		_, err := svc.ListLxcFirewallLog(ctx, "stub", "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListLxcFirewallLog(ctx, "sample-node", "sample-vmid", &nodes.ListLxcFirewallLogParams{})
+		if err != nil {
+			t.Fatalf("ListLxcFirewallLog: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListLxcFirewallLog: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/lxc/sample-vmid/firewall/log")
+
+		var nilCtx context.Context
+		if _, err := svc.ListLxcFirewallLog(nilCtx, "sample-node", "sample-vmid", &nodes.ListLxcFirewallLogParams{}); err == nil {
+			t.Errorf("ListLxcFirewallLog: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListLxcFirewallOptions", func(t *testing.T) {
-		_, err := svc.ListLxcFirewallOptions(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListLxcFirewallOptions(ctx, "sample-node", "sample-vmid")
+		if err != nil {
+			t.Fatalf("ListLxcFirewallOptions: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListLxcFirewallOptions: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/lxc/sample-vmid/firewall/options")
+
+		var nilCtx context.Context
+		if _, err := svc.ListLxcFirewallOptions(nilCtx, "sample-node", "sample-vmid"); err == nil {
+			t.Errorf("ListLxcFirewallOptions: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateLxcFirewallOptions", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateLxcFirewallOptions(ctx, "sample-node", "sample-vmid", &nodes.UpdateLxcFirewallOptionsParams{})
+		if err != nil {
+			t.Fatalf("UpdateLxcFirewallOptions: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/nodes/sample-node/lxc/sample-vmid/firewall/options")
+
+		var nilCtx context.Context
+		if err := svc.UpdateLxcFirewallOptions(nilCtx, "sample-node", "sample-vmid", &nodes.UpdateLxcFirewallOptionsParams{}); err == nil {
+			t.Errorf("UpdateLxcFirewallOptions: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListLxcFirewallRefs", func(t *testing.T) {
-		_, err := svc.ListLxcFirewallRefs(ctx, "stub", "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListLxcFirewallRefs(ctx, "sample-node", "sample-vmid", &nodes.ListLxcFirewallRefsParams{})
+		if err != nil {
+			t.Fatalf("ListLxcFirewallRefs: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListLxcFirewallRefs: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/lxc/sample-vmid/firewall/refs")
+
+		var nilCtx context.Context
+		if _, err := svc.ListLxcFirewallRefs(nilCtx, "sample-node", "sample-vmid", &nodes.ListLxcFirewallRefsParams{}); err == nil {
+			t.Errorf("ListLxcFirewallRefs: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListLxcFirewallRules", func(t *testing.T) {
-		_, err := svc.ListLxcFirewallRules(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListLxcFirewallRules(ctx, "sample-node", "sample-vmid")
+		if err != nil {
+			t.Fatalf("ListLxcFirewallRules: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListLxcFirewallRules: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/lxc/sample-vmid/firewall/rules")
+
+		var nilCtx context.Context
+		if _, err := svc.ListLxcFirewallRules(nilCtx, "sample-node", "sample-vmid"); err == nil {
+			t.Errorf("ListLxcFirewallRules: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateLxcFirewallRules", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateLxcFirewallRules(ctx, "sample-node", "sample-vmid", &nodes.CreateLxcFirewallRulesParams{Action: "sample-action", Type: "sample-type"})
+		if err != nil {
+			t.Fatalf("CreateLxcFirewallRules: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/lxc/sample-vmid/firewall/rules")
+		assertParamValue(t, got.form, "action", "sample-action")
+		assertParamValue(t, got.form, "type", "sample-type")
+
+		var nilCtx context.Context
+		if err := svc.CreateLxcFirewallRules(nilCtx, "sample-node", "sample-vmid", &nodes.CreateLxcFirewallRulesParams{Action: "sample-action", Type: "sample-type"}); err == nil {
+			t.Errorf("CreateLxcFirewallRules: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteLxcFirewallRules", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteLxcFirewallRules(ctx, "sample-node", "sample-vmid", "sample-pos", &nodes.DeleteLxcFirewallRulesParams{})
+		if err != nil {
+			t.Fatalf("DeleteLxcFirewallRules: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/nodes/sample-node/lxc/sample-vmid/firewall/rules/sample-pos")
+
+		var nilCtx context.Context
+		if err := svc.DeleteLxcFirewallRules(nilCtx, "sample-node", "sample-vmid", "sample-pos", &nodes.DeleteLxcFirewallRulesParams{}); err == nil {
+			t.Errorf("DeleteLxcFirewallRules: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetLxcFirewallRules", func(t *testing.T) {
-		_, err := svc.GetLxcFirewallRules(ctx, "stub", "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.GetLxcFirewallRules(ctx, "sample-node", "sample-vmid", "sample-pos")
+		if err != nil {
+			t.Fatalf("GetLxcFirewallRules: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetLxcFirewallRules: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/lxc/sample-vmid/firewall/rules/sample-pos")
+
+		var nilCtx context.Context
+		if _, err := svc.GetLxcFirewallRules(nilCtx, "sample-node", "sample-vmid", "sample-pos"); err == nil {
+			t.Errorf("GetLxcFirewallRules: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateLxcFirewallRules", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateLxcFirewallRules(ctx, "sample-node", "sample-vmid", "sample-pos", &nodes.UpdateLxcFirewallRulesParams{})
+		if err != nil {
+			t.Fatalf("UpdateLxcFirewallRules: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/nodes/sample-node/lxc/sample-vmid/firewall/rules/sample-pos")
+
+		var nilCtx context.Context
+		if err := svc.UpdateLxcFirewallRules(nilCtx, "sample-node", "sample-vmid", "sample-pos", &nodes.UpdateLxcFirewallRulesParams{}); err == nil {
+			t.Errorf("UpdateLxcFirewallRules: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListLxcInterfaces", func(t *testing.T) {
-		_, err := svc.ListLxcInterfaces(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListLxcInterfaces(ctx, "sample-node", "sample-vmid")
+		if err != nil {
+			t.Fatalf("ListLxcInterfaces: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListLxcInterfaces: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/lxc/sample-vmid/interfaces")
+
+		var nilCtx context.Context
+		if _, err := svc.ListLxcInterfaces(nilCtx, "sample-node", "sample-vmid"); err == nil {
+			t.Errorf("ListLxcInterfaces: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListLxcMigrate", func(t *testing.T) {
-		_, err := svc.ListLxcMigrate(ctx, "stub", "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListLxcMigrate(ctx, "sample-node", "sample-vmid", &nodes.ListLxcMigrateParams{})
+		if err != nil {
+			t.Fatalf("ListLxcMigrate: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListLxcMigrate: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/lxc/sample-vmid/migrate")
+
+		var nilCtx context.Context
+		if _, err := svc.ListLxcMigrate(nilCtx, "sample-node", "sample-vmid", &nodes.ListLxcMigrateParams{}); err == nil {
+			t.Errorf("ListLxcMigrate: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateLxcMigrate", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateLxcMigrate(ctx, "sample-node", "sample-vmid", &nodes.CreateLxcMigrateParams{Target: "sample-target"})
+		if err != nil {
+			t.Fatalf("CreateLxcMigrate: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateLxcMigrate: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/lxc/sample-vmid/migrate")
+		assertParamValue(t, got.form, "target", "sample-target")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateLxcMigrate(nilCtx, "sample-node", "sample-vmid", &nodes.CreateLxcMigrateParams{Target: "sample-target"}); err == nil {
+			t.Errorf("CreateLxcMigrate: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateLxcMoveVolume", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateLxcMoveVolume(ctx, "sample-node", "sample-vmid", &nodes.CreateLxcMoveVolumeParams{Volume: "sample-volume"})
+		if err != nil {
+			t.Fatalf("CreateLxcMoveVolume: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateLxcMoveVolume: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/lxc/sample-vmid/move_volume")
+		assertParamValue(t, got.form, "volume", "sample-volume")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateLxcMoveVolume(nilCtx, "sample-node", "sample-vmid", &nodes.CreateLxcMoveVolumeParams{Volume: "sample-volume"}); err == nil {
+			t.Errorf("CreateLxcMoveVolume: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateLxcMtunnel", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateLxcMtunnel(ctx, "sample-node", "sample-vmid", &nodes.CreateLxcMtunnelParams{})
+		if err != nil {
+			t.Fatalf("CreateLxcMtunnel: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateLxcMtunnel: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/lxc/sample-vmid/mtunnel")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateLxcMtunnel(nilCtx, "sample-node", "sample-vmid", &nodes.CreateLxcMtunnelParams{}); err == nil {
+			t.Errorf("CreateLxcMtunnel: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListLxcMtunnelwebsocket", func(t *testing.T) {
-		_, err := svc.ListLxcMtunnelwebsocket(ctx, "stub", "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListLxcMtunnelwebsocket(ctx, "sample-node", "sample-vmid", &nodes.ListLxcMtunnelwebsocketParams{Socket: "sample-socket", Ticket: "sample-ticket"})
+		if err != nil {
+			t.Fatalf("ListLxcMtunnelwebsocket: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListLxcMtunnelwebsocket: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/lxc/sample-vmid/mtunnelwebsocket")
+		assertParamValue(t, got.query, "socket", "sample-socket")
+		assertParamValue(t, got.query, "ticket", "sample-ticket")
+
+		var nilCtx context.Context
+		if _, err := svc.ListLxcMtunnelwebsocket(nilCtx, "sample-node", "sample-vmid", &nodes.ListLxcMtunnelwebsocketParams{Socket: "sample-socket", Ticket: "sample-ticket"}); err == nil {
+			t.Errorf("ListLxcMtunnelwebsocket: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListLxcPending", func(t *testing.T) {
-		_, err := svc.ListLxcPending(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListLxcPending(ctx, "sample-node", "sample-vmid")
+		if err != nil {
+			t.Fatalf("ListLxcPending: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListLxcPending: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/lxc/sample-vmid/pending")
+
+		var nilCtx context.Context
+		if _, err := svc.ListLxcPending(nilCtx, "sample-node", "sample-vmid"); err == nil {
+			t.Errorf("ListLxcPending: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateLxcRemoteMigrate", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateLxcRemoteMigrate(ctx, "sample-node", "sample-vmid", &nodes.CreateLxcRemoteMigrateParams{TargetBridge: "sample-target-bridge", TargetEndpoint: "sample-target-endpoint", TargetStorage: "sample-target-storage"})
+		if err != nil {
+			t.Fatalf("CreateLxcRemoteMigrate: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateLxcRemoteMigrate: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/lxc/sample-vmid/remote_migrate")
+		assertParamValue(t, got.form, "target-bridge", "sample-target-bridge")
+		assertParamValue(t, got.form, "target-endpoint", "sample-target-endpoint")
+		assertParamValue(t, got.form, "target-storage", "sample-target-storage")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateLxcRemoteMigrate(nilCtx, "sample-node", "sample-vmid", &nodes.CreateLxcRemoteMigrateParams{TargetBridge: "sample-target-bridge", TargetEndpoint: "sample-target-endpoint", TargetStorage: "sample-target-storage"}); err == nil {
+			t.Errorf("CreateLxcRemoteMigrate: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateLxcResize", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.UpdateLxcResize(ctx, "sample-node", "sample-vmid", &nodes.UpdateLxcResizeParams{Disk: "sample-disk", Size: "sample-size"})
+		if err != nil {
+			t.Fatalf("UpdateLxcResize: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("UpdateLxcResize: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/nodes/sample-node/lxc/sample-vmid/resize")
+		assertParamValue(t, got.form, "disk", "sample-disk")
+		assertParamValue(t, got.form, "size", "sample-size")
+
+		var nilCtx context.Context
+		if _, err := svc.UpdateLxcResize(nilCtx, "sample-node", "sample-vmid", &nodes.UpdateLxcResizeParams{Disk: "sample-disk", Size: "sample-size"}); err == nil {
+			t.Errorf("UpdateLxcResize: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListLxcRrd", func(t *testing.T) {
-		_, err := svc.ListLxcRrd(ctx, "stub", "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListLxcRrd(ctx, "sample-node", "sample-vmid", &nodes.ListLxcRrdParams{Ds: "sample-ds", Timeframe: "sample-timeframe"})
+		if err != nil {
+			t.Fatalf("ListLxcRrd: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListLxcRrd: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/lxc/sample-vmid/rrd")
+		assertParamValue(t, got.query, "ds", "sample-ds")
+		assertParamValue(t, got.query, "timeframe", "sample-timeframe")
+
+		var nilCtx context.Context
+		if _, err := svc.ListLxcRrd(nilCtx, "sample-node", "sample-vmid", &nodes.ListLxcRrdParams{Ds: "sample-ds", Timeframe: "sample-timeframe"}); err == nil {
+			t.Errorf("ListLxcRrd: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListLxcRrddata", func(t *testing.T) {
-		_, err := svc.ListLxcRrddata(ctx, "stub", "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListLxcRrddata(ctx, "sample-node", "sample-vmid", &nodes.ListLxcRrddataParams{Timeframe: "sample-timeframe"})
+		if err != nil {
+			t.Fatalf("ListLxcRrddata: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListLxcRrddata: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/lxc/sample-vmid/rrddata")
+		assertParamValue(t, got.query, "timeframe", "sample-timeframe")
+
+		var nilCtx context.Context
+		if _, err := svc.ListLxcRrddata(nilCtx, "sample-node", "sample-vmid", &nodes.ListLxcRrddataParams{Timeframe: "sample-timeframe"}); err == nil {
+			t.Errorf("ListLxcRrddata: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListLxcSnapshot", func(t *testing.T) {
-		_, err := svc.ListLxcSnapshot(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListLxcSnapshot(ctx, "sample-node", "sample-vmid")
+		if err != nil {
+			t.Fatalf("ListLxcSnapshot: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListLxcSnapshot: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/lxc/sample-vmid/snapshot")
+
+		var nilCtx context.Context
+		if _, err := svc.ListLxcSnapshot(nilCtx, "sample-node", "sample-vmid"); err == nil {
+			t.Errorf("ListLxcSnapshot: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateLxcSnapshot", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateLxcSnapshot(ctx, "sample-node", "sample-vmid", &nodes.CreateLxcSnapshotParams{Snapname: "sample-snapname"})
+		if err != nil {
+			t.Fatalf("CreateLxcSnapshot: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateLxcSnapshot: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/lxc/sample-vmid/snapshot")
+		assertParamValue(t, got.form, "snapname", "sample-snapname")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateLxcSnapshot(nilCtx, "sample-node", "sample-vmid", &nodes.CreateLxcSnapshotParams{Snapname: "sample-snapname"}); err == nil {
+			t.Errorf("CreateLxcSnapshot: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteLxcSnapshot", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.DeleteLxcSnapshot(ctx, "sample-node", "sample-vmid", "sample-snapname", &nodes.DeleteLxcSnapshotParams{})
+		if err != nil {
+			t.Fatalf("DeleteLxcSnapshot: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("DeleteLxcSnapshot: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/nodes/sample-node/lxc/sample-vmid/snapshot/sample-snapname")
+
+		var nilCtx context.Context
+		if _, err := svc.DeleteLxcSnapshot(nilCtx, "sample-node", "sample-vmid", "sample-snapname", &nodes.DeleteLxcSnapshotParams{}); err == nil {
+			t.Errorf("DeleteLxcSnapshot: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetLxcSnapshot", func(t *testing.T) {
-		_, err := svc.GetLxcSnapshot(ctx, "stub", "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.GetLxcSnapshot(ctx, "sample-node", "sample-vmid", "sample-snapname")
+		if err != nil {
+			t.Fatalf("GetLxcSnapshot: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetLxcSnapshot: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/lxc/sample-vmid/snapshot/sample-snapname")
+
+		var nilCtx context.Context
+		if _, err := svc.GetLxcSnapshot(nilCtx, "sample-node", "sample-vmid", "sample-snapname"); err == nil {
+			t.Errorf("GetLxcSnapshot: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListLxcSnapshotConfig", func(t *testing.T) {
-		_, err := svc.ListLxcSnapshotConfig(ctx, "stub", "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListLxcSnapshotConfig(ctx, "sample-node", "sample-vmid", "sample-snapname")
+		if err != nil {
+			t.Fatalf("ListLxcSnapshotConfig: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListLxcSnapshotConfig: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/lxc/sample-vmid/snapshot/sample-snapname/config")
+
+		var nilCtx context.Context
+		if _, err := svc.ListLxcSnapshotConfig(nilCtx, "sample-node", "sample-vmid", "sample-snapname"); err == nil {
+			t.Errorf("ListLxcSnapshotConfig: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateLxcSnapshotConfig", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateLxcSnapshotConfig(ctx, "sample-node", "sample-vmid", "sample-snapname", &nodes.UpdateLxcSnapshotConfigParams{})
+		if err != nil {
+			t.Fatalf("UpdateLxcSnapshotConfig: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/nodes/sample-node/lxc/sample-vmid/snapshot/sample-snapname/config")
+
+		var nilCtx context.Context
+		if err := svc.UpdateLxcSnapshotConfig(nilCtx, "sample-node", "sample-vmid", "sample-snapname", &nodes.UpdateLxcSnapshotConfigParams{}); err == nil {
+			t.Errorf("UpdateLxcSnapshotConfig: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateLxcSnapshotRollback", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateLxcSnapshotRollback(ctx, "sample-node", "sample-vmid", "sample-snapname", &nodes.CreateLxcSnapshotRollbackParams{})
+		if err != nil {
+			t.Fatalf("CreateLxcSnapshotRollback: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateLxcSnapshotRollback: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/lxc/sample-vmid/snapshot/sample-snapname/rollback")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateLxcSnapshotRollback(nilCtx, "sample-node", "sample-vmid", "sample-snapname", &nodes.CreateLxcSnapshotRollbackParams{}); err == nil {
+			t.Errorf("CreateLxcSnapshotRollback: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateLxcSpiceproxy", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateLxcSpiceproxy(ctx, "sample-node", "sample-vmid", &nodes.CreateLxcSpiceproxyParams{})
+		if err != nil {
+			t.Fatalf("CreateLxcSpiceproxy: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateLxcSpiceproxy: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/lxc/sample-vmid/spiceproxy")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateLxcSpiceproxy(nilCtx, "sample-node", "sample-vmid", &nodes.CreateLxcSpiceproxyParams{}); err == nil {
+			t.Errorf("CreateLxcSpiceproxy: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListLxcStatus", func(t *testing.T) {
-		_, err := svc.ListLxcStatus(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListLxcStatus(ctx, "sample-node", "sample-vmid")
+		if err != nil {
+			t.Fatalf("ListLxcStatus: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListLxcStatus: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/lxc/sample-vmid/status")
+
+		var nilCtx context.Context
+		if _, err := svc.ListLxcStatus(nilCtx, "sample-node", "sample-vmid"); err == nil {
+			t.Errorf("ListLxcStatus: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListLxcStatusCurrent", func(t *testing.T) {
-		_, err := svc.ListLxcStatusCurrent(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListLxcStatusCurrent(ctx, "sample-node", "sample-vmid")
+		if err != nil {
+			t.Fatalf("ListLxcStatusCurrent: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListLxcStatusCurrent: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/lxc/sample-vmid/status/current")
+
+		var nilCtx context.Context
+		if _, err := svc.ListLxcStatusCurrent(nilCtx, "sample-node", "sample-vmid"); err == nil {
+			t.Errorf("ListLxcStatusCurrent: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateLxcStatusReboot", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateLxcStatusReboot(ctx, "sample-node", "sample-vmid", &nodes.CreateLxcStatusRebootParams{})
+		if err != nil {
+			t.Fatalf("CreateLxcStatusReboot: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateLxcStatusReboot: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/lxc/sample-vmid/status/reboot")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateLxcStatusReboot(nilCtx, "sample-node", "sample-vmid", &nodes.CreateLxcStatusRebootParams{}); err == nil {
+			t.Errorf("CreateLxcStatusReboot: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateLxcStatusResume", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateLxcStatusResume(ctx, "sample-node", "sample-vmid")
+		if err != nil {
+			t.Fatalf("CreateLxcStatusResume: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateLxcStatusResume: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/lxc/sample-vmid/status/resume")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateLxcStatusResume(nilCtx, "sample-node", "sample-vmid"); err == nil {
+			t.Errorf("CreateLxcStatusResume: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateLxcStatusShutdown", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateLxcStatusShutdown(ctx, "sample-node", "sample-vmid", &nodes.CreateLxcStatusShutdownParams{})
+		if err != nil {
+			t.Fatalf("CreateLxcStatusShutdown: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateLxcStatusShutdown: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/lxc/sample-vmid/status/shutdown")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateLxcStatusShutdown(nilCtx, "sample-node", "sample-vmid", &nodes.CreateLxcStatusShutdownParams{}); err == nil {
+			t.Errorf("CreateLxcStatusShutdown: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateLxcStatusStart", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateLxcStatusStart(ctx, "sample-node", "sample-vmid", &nodes.CreateLxcStatusStartParams{})
+		if err != nil {
+			t.Fatalf("CreateLxcStatusStart: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateLxcStatusStart: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/lxc/sample-vmid/status/start")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateLxcStatusStart(nilCtx, "sample-node", "sample-vmid", &nodes.CreateLxcStatusStartParams{}); err == nil {
+			t.Errorf("CreateLxcStatusStart: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateLxcStatusStop", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateLxcStatusStop(ctx, "sample-node", "sample-vmid", &nodes.CreateLxcStatusStopParams{})
+		if err != nil {
+			t.Fatalf("CreateLxcStatusStop: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateLxcStatusStop: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/lxc/sample-vmid/status/stop")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateLxcStatusStop(nilCtx, "sample-node", "sample-vmid", &nodes.CreateLxcStatusStopParams{}); err == nil {
+			t.Errorf("CreateLxcStatusStop: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateLxcStatusSuspend", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateLxcStatusSuspend(ctx, "sample-node", "sample-vmid")
+		if err != nil {
+			t.Fatalf("CreateLxcStatusSuspend: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateLxcStatusSuspend: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/lxc/sample-vmid/status/suspend")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateLxcStatusSuspend(nilCtx, "sample-node", "sample-vmid"); err == nil {
+			t.Errorf("CreateLxcStatusSuspend: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateLxcTemplate", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateLxcTemplate(ctx, "sample-node", "sample-vmid")
+		if err != nil {
+			t.Fatalf("CreateLxcTemplate: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/lxc/sample-vmid/template")
+
+		var nilCtx context.Context
+		if err := svc.CreateLxcTemplate(nilCtx, "sample-node", "sample-vmid"); err == nil {
+			t.Errorf("CreateLxcTemplate: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateLxcTermproxy", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateLxcTermproxy(ctx, "sample-node", "sample-vmid")
+		if err != nil {
+			t.Fatalf("CreateLxcTermproxy: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateLxcTermproxy: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/lxc/sample-vmid/termproxy")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateLxcTermproxy(nilCtx, "sample-node", "sample-vmid"); err == nil {
+			t.Errorf("CreateLxcTermproxy: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateLxcVncproxy", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateLxcVncproxy(ctx, "sample-node", "sample-vmid", &nodes.CreateLxcVncproxyParams{})
+		if err != nil {
+			t.Fatalf("CreateLxcVncproxy: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateLxcVncproxy: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/lxc/sample-vmid/vncproxy")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateLxcVncproxy(nilCtx, "sample-node", "sample-vmid", &nodes.CreateLxcVncproxyParams{}); err == nil {
+			t.Errorf("CreateLxcVncproxy: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListLxcVncwebsocket", func(t *testing.T) {
-		_, err := svc.ListLxcVncwebsocket(ctx, "stub", "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListLxcVncwebsocket(ctx, "sample-node", "sample-vmid", &nodes.ListLxcVncwebsocketParams{Port: 42, Vncticket: "sample-vncticket"})
+		if err != nil {
+			t.Fatalf("ListLxcVncwebsocket: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListLxcVncwebsocket: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/lxc/sample-vmid/vncwebsocket")
+		assertParamValue(t, got.query, "port", "42")
+		assertParamValue(t, got.query, "vncticket", "sample-vncticket")
+
+		var nilCtx context.Context
+		if _, err := svc.ListLxcVncwebsocket(nilCtx, "sample-node", "sample-vmid", &nodes.ListLxcVncwebsocketParams{Port: 42, Vncticket: "sample-vncticket"}); err == nil {
+			t.Errorf("ListLxcVncwebsocket: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateMigrateall", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateMigrateall(ctx, "sample-node", &nodes.CreateMigrateallParams{Target: "sample-target"})
+		if err != nil {
+			t.Fatalf("CreateMigrateall: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateMigrateall: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/migrateall")
+		assertParamValue(t, got.form, "target", "sample-target")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateMigrateall(nilCtx, "sample-node", &nodes.CreateMigrateallParams{Target: "sample-target"}); err == nil {
+			t.Errorf("CreateMigrateall: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListNetstat", func(t *testing.T) {
-		_, err := svc.ListNetstat(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListNetstat(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListNetstat: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListNetstat: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/netstat")
+
+		var nilCtx context.Context
+		if _, err := svc.ListNetstat(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListNetstat: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteNetwork", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteNetwork(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("DeleteNetwork: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/nodes/sample-node/network")
+
+		var nilCtx context.Context
+		if err := svc.DeleteNetwork(nilCtx, "sample-node"); err == nil {
+			t.Errorf("DeleteNetwork: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListNetwork", func(t *testing.T) {
-		_, err := svc.ListNetwork(ctx, "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListNetwork(ctx, "sample-node", &nodes.ListNetworkParams{})
+		if err != nil {
+			t.Fatalf("ListNetwork: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListNetwork: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/network")
+
+		var nilCtx context.Context
+		if _, err := svc.ListNetwork(nilCtx, "sample-node", &nodes.ListNetworkParams{}); err == nil {
+			t.Errorf("ListNetwork: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateNetwork", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateNetwork(ctx, "sample-node", &nodes.CreateNetworkParams{Iface: "sample-iface", Type: "sample-type"})
+		if err != nil {
+			t.Fatalf("CreateNetwork: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/network")
+		assertParamValue(t, got.form, "iface", "sample-iface")
+		assertParamValue(t, got.form, "type", "sample-type")
+
+		var nilCtx context.Context
+		if err := svc.CreateNetwork(nilCtx, "sample-node", &nodes.CreateNetworkParams{Iface: "sample-iface", Type: "sample-type"}); err == nil {
+			t.Errorf("CreateNetwork: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateNetwork", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.UpdateNetwork(ctx, "sample-node", &nodes.UpdateNetworkParams{})
+		if err != nil {
+			t.Fatalf("UpdateNetwork: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("UpdateNetwork: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/nodes/sample-node/network")
+
+		var nilCtx context.Context
+		if _, err := svc.UpdateNetwork(nilCtx, "sample-node", &nodes.UpdateNetworkParams{}); err == nil {
+			t.Errorf("UpdateNetwork: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteNetwork2", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteNetwork2(ctx, "sample-node", "sample-iface")
+		if err != nil {
+			t.Fatalf("DeleteNetwork2: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/nodes/sample-node/network/sample-iface")
+
+		var nilCtx context.Context
+		if err := svc.DeleteNetwork2(nilCtx, "sample-node", "sample-iface"); err == nil {
+			t.Errorf("DeleteNetwork2: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetNetwork", func(t *testing.T) {
-		_, err := svc.GetNetwork(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.GetNetwork(ctx, "sample-node", "sample-iface")
+		if err != nil {
+			t.Fatalf("GetNetwork: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetNetwork: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/network/sample-iface")
+
+		var nilCtx context.Context
+		if _, err := svc.GetNetwork(nilCtx, "sample-node", "sample-iface"); err == nil {
+			t.Errorf("GetNetwork: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateNetwork2", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateNetwork2(ctx, "sample-node", "sample-iface", &nodes.UpdateNetwork2Params{Type: "sample-type"})
+		if err != nil {
+			t.Fatalf("UpdateNetwork2: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/nodes/sample-node/network/sample-iface")
+		assertParamValue(t, got.form, "type", "sample-type")
+
+		var nilCtx context.Context
+		if err := svc.UpdateNetwork2(nilCtx, "sample-node", "sample-iface", &nodes.UpdateNetwork2Params{Type: "sample-type"}); err == nil {
+			t.Errorf("UpdateNetwork2: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListQemu", func(t *testing.T) {
-		_, err := svc.ListQemu(ctx, "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListQemu(ctx, "sample-node", &nodes.ListQemuParams{})
+		if err != nil {
+			t.Fatalf("ListQemu: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListQemu: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/qemu")
+
+		var nilCtx context.Context
+		if _, err := svc.ListQemu(nilCtx, "sample-node", &nodes.ListQemuParams{}); err == nil {
+			t.Errorf("ListQemu: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateQemu", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateQemu(ctx, "sample-node", &nodes.CreateQemuParams{Vmid: 42})
+		if err != nil {
+			t.Fatalf("CreateQemu: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateQemu: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/qemu")
+		assertParamValue(t, got.form, "vmid", "42")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateQemu(nilCtx, "sample-node", &nodes.CreateQemuParams{Vmid: 42}); err == nil {
+			t.Errorf("CreateQemu: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteQemu", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.DeleteQemu(ctx, "sample-node", "sample-vmid", &nodes.DeleteQemuParams{})
+		if err != nil {
+			t.Fatalf("DeleteQemu: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("DeleteQemu: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/nodes/sample-node/qemu/sample-vmid")
+
+		var nilCtx context.Context
+		if _, err := svc.DeleteQemu(nilCtx, "sample-node", "sample-vmid", &nodes.DeleteQemuParams{}); err == nil {
+			t.Errorf("DeleteQemu: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetQemu", func(t *testing.T) {
-		_, err := svc.GetQemu(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.GetQemu(ctx, "sample-node", "sample-vmid")
+		if err != nil {
+			t.Fatalf("GetQemu: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetQemu: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/qemu/sample-vmid")
+
+		var nilCtx context.Context
+		if _, err := svc.GetQemu(nilCtx, "sample-node", "sample-vmid"); err == nil {
+			t.Errorf("GetQemu: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListQemuAgent", func(t *testing.T) {
-		_, err := svc.ListQemuAgent(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListQemuAgent(ctx, "sample-node", "sample-vmid")
+		if err != nil {
+			t.Fatalf("ListQemuAgent: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListQemuAgent: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/qemu/sample-vmid/agent")
+
+		var nilCtx context.Context
+		if _, err := svc.ListQemuAgent(nilCtx, "sample-node", "sample-vmid"); err == nil {
+			t.Errorf("ListQemuAgent: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateQemuAgent", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateQemuAgent(ctx, "sample-node", "sample-vmid", &nodes.CreateQemuAgentParams{Command: "sample-command"})
+		if err != nil {
+			t.Fatalf("CreateQemuAgent: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateQemuAgent: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/qemu/sample-vmid/agent")
+		assertParamValue(t, got.form, "command", "sample-command")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateQemuAgent(nilCtx, "sample-node", "sample-vmid", &nodes.CreateQemuAgentParams{Command: "sample-command"}); err == nil {
+			t.Errorf("CreateQemuAgent: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateQemuAgentExec", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateQemuAgentExec(ctx, "sample-node", "sample-vmid", &nodes.CreateQemuAgentExecParams{Command: []string{"sample-command"}})
+		if err != nil {
+			t.Fatalf("CreateQemuAgentExec: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateQemuAgentExec: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/qemu/sample-vmid/agent/exec")
+		assertParamValue(t, got.form, "command", "sample-command")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateQemuAgentExec(nilCtx, "sample-node", "sample-vmid", &nodes.CreateQemuAgentExecParams{Command: []string{"sample-command"}}); err == nil {
+			t.Errorf("CreateQemuAgentExec: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListQemuAgentExecStatus", func(t *testing.T) {
-		_, err := svc.ListQemuAgentExecStatus(ctx, "stub", "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListQemuAgentExecStatus(ctx, "sample-node", "sample-vmid", &nodes.ListQemuAgentExecStatusParams{Pid: 42})
+		if err != nil {
+			t.Fatalf("ListQemuAgentExecStatus: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListQemuAgentExecStatus: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/qemu/sample-vmid/agent/exec-status")
+		assertParamValue(t, got.query, "pid", "42")
+
+		var nilCtx context.Context
+		if _, err := svc.ListQemuAgentExecStatus(nilCtx, "sample-node", "sample-vmid", &nodes.ListQemuAgentExecStatusParams{Pid: 42}); err == nil {
+			t.Errorf("ListQemuAgentExecStatus: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListQemuAgentFileRead", func(t *testing.T) {
-		_, err := svc.ListQemuAgentFileRead(ctx, "stub", "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListQemuAgentFileRead(ctx, "sample-node", "sample-vmid", &nodes.ListQemuAgentFileReadParams{File: "sample-file"})
+		if err != nil {
+			t.Fatalf("ListQemuAgentFileRead: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListQemuAgentFileRead: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/qemu/sample-vmid/agent/file-read")
+		assertParamValue(t, got.query, "file", "sample-file")
+
+		var nilCtx context.Context
+		if _, err := svc.ListQemuAgentFileRead(nilCtx, "sample-node", "sample-vmid", &nodes.ListQemuAgentFileReadParams{File: "sample-file"}); err == nil {
+			t.Errorf("ListQemuAgentFileRead: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateQemuAgentFileWrite", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateQemuAgentFileWrite(ctx, "sample-node", "sample-vmid", &nodes.CreateQemuAgentFileWriteParams{Content: "sample-content", File: "sample-file"})
+		if err != nil {
+			t.Fatalf("CreateQemuAgentFileWrite: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/qemu/sample-vmid/agent/file-write")
+		assertParamValue(t, got.form, "content", "sample-content")
+		assertParamValue(t, got.form, "file", "sample-file")
+
+		var nilCtx context.Context
+		if err := svc.CreateQemuAgentFileWrite(nilCtx, "sample-node", "sample-vmid", &nodes.CreateQemuAgentFileWriteParams{Content: "sample-content", File: "sample-file"}); err == nil {
+			t.Errorf("CreateQemuAgentFileWrite: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateQemuAgentFsfreezeFreeze", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateQemuAgentFsfreezeFreeze(ctx, "sample-node", "sample-vmid")
+		if err != nil {
+			t.Fatalf("CreateQemuAgentFsfreezeFreeze: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateQemuAgentFsfreezeFreeze: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/qemu/sample-vmid/agent/fsfreeze-freeze")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateQemuAgentFsfreezeFreeze(nilCtx, "sample-node", "sample-vmid"); err == nil {
+			t.Errorf("CreateQemuAgentFsfreezeFreeze: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateQemuAgentFsfreezeStatus", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateQemuAgentFsfreezeStatus(ctx, "sample-node", "sample-vmid")
+		if err != nil {
+			t.Fatalf("CreateQemuAgentFsfreezeStatus: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateQemuAgentFsfreezeStatus: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/qemu/sample-vmid/agent/fsfreeze-status")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateQemuAgentFsfreezeStatus(nilCtx, "sample-node", "sample-vmid"); err == nil {
+			t.Errorf("CreateQemuAgentFsfreezeStatus: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateQemuAgentFsfreezeThaw", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateQemuAgentFsfreezeThaw(ctx, "sample-node", "sample-vmid")
+		if err != nil {
+			t.Fatalf("CreateQemuAgentFsfreezeThaw: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateQemuAgentFsfreezeThaw: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/qemu/sample-vmid/agent/fsfreeze-thaw")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateQemuAgentFsfreezeThaw(nilCtx, "sample-node", "sample-vmid"); err == nil {
+			t.Errorf("CreateQemuAgentFsfreezeThaw: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateQemuAgentFstrim", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateQemuAgentFstrim(ctx, "sample-node", "sample-vmid")
+		if err != nil {
+			t.Fatalf("CreateQemuAgentFstrim: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateQemuAgentFstrim: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/qemu/sample-vmid/agent/fstrim")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateQemuAgentFstrim(nilCtx, "sample-node", "sample-vmid"); err == nil {
+			t.Errorf("CreateQemuAgentFstrim: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListQemuAgentGetFsinfo", func(t *testing.T) {
-		_, err := svc.ListQemuAgentGetFsinfo(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListQemuAgentGetFsinfo(ctx, "sample-node", "sample-vmid")
+		if err != nil {
+			t.Fatalf("ListQemuAgentGetFsinfo: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListQemuAgentGetFsinfo: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/qemu/sample-vmid/agent/get-fsinfo")
+
+		var nilCtx context.Context
+		if _, err := svc.ListQemuAgentGetFsinfo(nilCtx, "sample-node", "sample-vmid"); err == nil {
+			t.Errorf("ListQemuAgentGetFsinfo: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListQemuAgentGetHostName", func(t *testing.T) {
-		_, err := svc.ListQemuAgentGetHostName(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListQemuAgentGetHostName(ctx, "sample-node", "sample-vmid")
+		if err != nil {
+			t.Fatalf("ListQemuAgentGetHostName: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListQemuAgentGetHostName: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/qemu/sample-vmid/agent/get-host-name")
+
+		var nilCtx context.Context
+		if _, err := svc.ListQemuAgentGetHostName(nilCtx, "sample-node", "sample-vmid"); err == nil {
+			t.Errorf("ListQemuAgentGetHostName: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListQemuAgentGetMemoryBlockInfo", func(t *testing.T) {
-		_, err := svc.ListQemuAgentGetMemoryBlockInfo(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListQemuAgentGetMemoryBlockInfo(ctx, "sample-node", "sample-vmid")
+		if err != nil {
+			t.Fatalf("ListQemuAgentGetMemoryBlockInfo: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListQemuAgentGetMemoryBlockInfo: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/qemu/sample-vmid/agent/get-memory-block-info")
+
+		var nilCtx context.Context
+		if _, err := svc.ListQemuAgentGetMemoryBlockInfo(nilCtx, "sample-node", "sample-vmid"); err == nil {
+			t.Errorf("ListQemuAgentGetMemoryBlockInfo: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListQemuAgentGetMemoryBlocks", func(t *testing.T) {
-		_, err := svc.ListQemuAgentGetMemoryBlocks(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListQemuAgentGetMemoryBlocks(ctx, "sample-node", "sample-vmid")
+		if err != nil {
+			t.Fatalf("ListQemuAgentGetMemoryBlocks: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListQemuAgentGetMemoryBlocks: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/qemu/sample-vmid/agent/get-memory-blocks")
+
+		var nilCtx context.Context
+		if _, err := svc.ListQemuAgentGetMemoryBlocks(nilCtx, "sample-node", "sample-vmid"); err == nil {
+			t.Errorf("ListQemuAgentGetMemoryBlocks: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListQemuAgentGetOsinfo", func(t *testing.T) {
-		_, err := svc.ListQemuAgentGetOsinfo(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListQemuAgentGetOsinfo(ctx, "sample-node", "sample-vmid")
+		if err != nil {
+			t.Fatalf("ListQemuAgentGetOsinfo: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListQemuAgentGetOsinfo: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/qemu/sample-vmid/agent/get-osinfo")
+
+		var nilCtx context.Context
+		if _, err := svc.ListQemuAgentGetOsinfo(nilCtx, "sample-node", "sample-vmid"); err == nil {
+			t.Errorf("ListQemuAgentGetOsinfo: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListQemuAgentGetTime", func(t *testing.T) {
-		_, err := svc.ListQemuAgentGetTime(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListQemuAgentGetTime(ctx, "sample-node", "sample-vmid")
+		if err != nil {
+			t.Fatalf("ListQemuAgentGetTime: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListQemuAgentGetTime: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/qemu/sample-vmid/agent/get-time")
+
+		var nilCtx context.Context
+		if _, err := svc.ListQemuAgentGetTime(nilCtx, "sample-node", "sample-vmid"); err == nil {
+			t.Errorf("ListQemuAgentGetTime: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListQemuAgentGetTimezone", func(t *testing.T) {
-		_, err := svc.ListQemuAgentGetTimezone(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListQemuAgentGetTimezone(ctx, "sample-node", "sample-vmid")
+		if err != nil {
+			t.Fatalf("ListQemuAgentGetTimezone: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListQemuAgentGetTimezone: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/qemu/sample-vmid/agent/get-timezone")
+
+		var nilCtx context.Context
+		if _, err := svc.ListQemuAgentGetTimezone(nilCtx, "sample-node", "sample-vmid"); err == nil {
+			t.Errorf("ListQemuAgentGetTimezone: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListQemuAgentGetUsers", func(t *testing.T) {
-		_, err := svc.ListQemuAgentGetUsers(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListQemuAgentGetUsers(ctx, "sample-node", "sample-vmid")
+		if err != nil {
+			t.Fatalf("ListQemuAgentGetUsers: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListQemuAgentGetUsers: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/qemu/sample-vmid/agent/get-users")
+
+		var nilCtx context.Context
+		if _, err := svc.ListQemuAgentGetUsers(nilCtx, "sample-node", "sample-vmid"); err == nil {
+			t.Errorf("ListQemuAgentGetUsers: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListQemuAgentGetVcpus", func(t *testing.T) {
-		_, err := svc.ListQemuAgentGetVcpus(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListQemuAgentGetVcpus(ctx, "sample-node", "sample-vmid")
+		if err != nil {
+			t.Fatalf("ListQemuAgentGetVcpus: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListQemuAgentGetVcpus: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/qemu/sample-vmid/agent/get-vcpus")
+
+		var nilCtx context.Context
+		if _, err := svc.ListQemuAgentGetVcpus(nilCtx, "sample-node", "sample-vmid"); err == nil {
+			t.Errorf("ListQemuAgentGetVcpus: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListQemuAgentInfo", func(t *testing.T) {
-		_, err := svc.ListQemuAgentInfo(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListQemuAgentInfo(ctx, "sample-node", "sample-vmid")
+		if err != nil {
+			t.Fatalf("ListQemuAgentInfo: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListQemuAgentInfo: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/qemu/sample-vmid/agent/info")
+
+		var nilCtx context.Context
+		if _, err := svc.ListQemuAgentInfo(nilCtx, "sample-node", "sample-vmid"); err == nil {
+			t.Errorf("ListQemuAgentInfo: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListQemuAgentNetworkGetInterfaces", func(t *testing.T) {
-		_, err := svc.ListQemuAgentNetworkGetInterfaces(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListQemuAgentNetworkGetInterfaces(ctx, "sample-node", "sample-vmid")
+		if err != nil {
+			t.Fatalf("ListQemuAgentNetworkGetInterfaces: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListQemuAgentNetworkGetInterfaces: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/qemu/sample-vmid/agent/network-get-interfaces")
+
+		var nilCtx context.Context
+		if _, err := svc.ListQemuAgentNetworkGetInterfaces(nilCtx, "sample-node", "sample-vmid"); err == nil {
+			t.Errorf("ListQemuAgentNetworkGetInterfaces: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateQemuAgentPing", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateQemuAgentPing(ctx, "sample-node", "sample-vmid")
+		if err != nil {
+			t.Fatalf("CreateQemuAgentPing: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateQemuAgentPing: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/qemu/sample-vmid/agent/ping")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateQemuAgentPing(nilCtx, "sample-node", "sample-vmid"); err == nil {
+			t.Errorf("CreateQemuAgentPing: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateQemuAgentSetUserPassword", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateQemuAgentSetUserPassword(ctx, "sample-node", "sample-vmid", &nodes.CreateQemuAgentSetUserPasswordParams{Password: "sample-password", Username: "sample-username"})
+		if err != nil {
+			t.Fatalf("CreateQemuAgentSetUserPassword: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateQemuAgentSetUserPassword: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/qemu/sample-vmid/agent/set-user-password")
+		assertParamValue(t, got.form, "password", "sample-password")
+		assertParamValue(t, got.form, "username", "sample-username")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateQemuAgentSetUserPassword(nilCtx, "sample-node", "sample-vmid", &nodes.CreateQemuAgentSetUserPasswordParams{Password: "sample-password", Username: "sample-username"}); err == nil {
+			t.Errorf("CreateQemuAgentSetUserPassword: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateQemuAgentShutdown", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateQemuAgentShutdown(ctx, "sample-node", "sample-vmid")
+		if err != nil {
+			t.Fatalf("CreateQemuAgentShutdown: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateQemuAgentShutdown: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/qemu/sample-vmid/agent/shutdown")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateQemuAgentShutdown(nilCtx, "sample-node", "sample-vmid"); err == nil {
+			t.Errorf("CreateQemuAgentShutdown: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateQemuAgentSuspendDisk", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateQemuAgentSuspendDisk(ctx, "sample-node", "sample-vmid")
+		if err != nil {
+			t.Fatalf("CreateQemuAgentSuspendDisk: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateQemuAgentSuspendDisk: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/qemu/sample-vmid/agent/suspend-disk")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateQemuAgentSuspendDisk(nilCtx, "sample-node", "sample-vmid"); err == nil {
+			t.Errorf("CreateQemuAgentSuspendDisk: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateQemuAgentSuspendHybrid", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateQemuAgentSuspendHybrid(ctx, "sample-node", "sample-vmid")
+		if err != nil {
+			t.Fatalf("CreateQemuAgentSuspendHybrid: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateQemuAgentSuspendHybrid: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/qemu/sample-vmid/agent/suspend-hybrid")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateQemuAgentSuspendHybrid(nilCtx, "sample-node", "sample-vmid"); err == nil {
+			t.Errorf("CreateQemuAgentSuspendHybrid: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateQemuAgentSuspendRam", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateQemuAgentSuspendRam(ctx, "sample-node", "sample-vmid")
+		if err != nil {
+			t.Fatalf("CreateQemuAgentSuspendRam: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateQemuAgentSuspendRam: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/qemu/sample-vmid/agent/suspend-ram")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateQemuAgentSuspendRam(nilCtx, "sample-node", "sample-vmid"); err == nil {
+			t.Errorf("CreateQemuAgentSuspendRam: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateQemuClone", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateQemuClone(ctx, "sample-node", "sample-vmid", &nodes.CreateQemuCloneParams{Newid: 42})
+		if err != nil {
+			t.Fatalf("CreateQemuClone: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateQemuClone: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/qemu/sample-vmid/clone")
+		assertParamValue(t, got.form, "newid", "42")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateQemuClone(nilCtx, "sample-node", "sample-vmid", &nodes.CreateQemuCloneParams{Newid: 42}); err == nil {
+			t.Errorf("CreateQemuClone: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListQemuCloudinit", func(t *testing.T) {
-		_, err := svc.ListQemuCloudinit(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListQemuCloudinit(ctx, "sample-node", "sample-vmid")
+		if err != nil {
+			t.Fatalf("ListQemuCloudinit: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListQemuCloudinit: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/qemu/sample-vmid/cloudinit")
+
+		var nilCtx context.Context
+		if _, err := svc.ListQemuCloudinit(nilCtx, "sample-node", "sample-vmid"); err == nil {
+			t.Errorf("ListQemuCloudinit: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateQemuCloudinit", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateQemuCloudinit(ctx, "sample-node", "sample-vmid")
+		if err != nil {
+			t.Fatalf("UpdateQemuCloudinit: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/nodes/sample-node/qemu/sample-vmid/cloudinit")
+
+		var nilCtx context.Context
+		if err := svc.UpdateQemuCloudinit(nilCtx, "sample-node", "sample-vmid"); err == nil {
+			t.Errorf("UpdateQemuCloudinit: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListQemuCloudinitDump", func(t *testing.T) {
-		_, err := svc.ListQemuCloudinitDump(ctx, "stub", "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListQemuCloudinitDump(ctx, "sample-node", "sample-vmid", &nodes.ListQemuCloudinitDumpParams{Type: "sample-type"})
+		if err != nil {
+			t.Fatalf("ListQemuCloudinitDump: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListQemuCloudinitDump: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/qemu/sample-vmid/cloudinit/dump")
+		assertParamValue(t, got.query, "type", "sample-type")
+
+		var nilCtx context.Context
+		if _, err := svc.ListQemuCloudinitDump(nilCtx, "sample-node", "sample-vmid", &nodes.ListQemuCloudinitDumpParams{Type: "sample-type"}); err == nil {
+			t.Errorf("ListQemuCloudinitDump: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListQemuConfig", func(t *testing.T) {
-		_, err := svc.ListQemuConfig(ctx, "stub", "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListQemuConfig(ctx, "sample-node", "sample-vmid", &nodes.ListQemuConfigParams{})
+		if err != nil {
+			t.Fatalf("ListQemuConfig: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListQemuConfig: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/qemu/sample-vmid/config")
+
+		var nilCtx context.Context
+		if _, err := svc.ListQemuConfig(nilCtx, "sample-node", "sample-vmid", &nodes.ListQemuConfigParams{}); err == nil {
+			t.Errorf("ListQemuConfig: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateQemuConfig", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateQemuConfig(ctx, "sample-node", "sample-vmid", &nodes.CreateQemuConfigParams{})
+		if err != nil {
+			t.Fatalf("CreateQemuConfig: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateQemuConfig: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/qemu/sample-vmid/config")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateQemuConfig(nilCtx, "sample-node", "sample-vmid", &nodes.CreateQemuConfigParams{}); err == nil {
+			t.Errorf("CreateQemuConfig: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateQemuConfig", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateQemuConfig(ctx, "sample-node", "sample-vmid", &nodes.UpdateQemuConfigParams{})
+		if err != nil {
+			t.Fatalf("UpdateQemuConfig: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/nodes/sample-node/qemu/sample-vmid/config")
+
+		var nilCtx context.Context
+		if err := svc.UpdateQemuConfig(nilCtx, "sample-node", "sample-vmid", &nodes.UpdateQemuConfigParams{}); err == nil {
+			t.Errorf("UpdateQemuConfig: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateQemuDbusVmstate", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateQemuDbusVmstate(ctx, "sample-node", "sample-vmid", &nodes.CreateQemuDbusVmstateParams{Action: "sample-action"})
+		if err != nil {
+			t.Fatalf("CreateQemuDbusVmstate: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/qemu/sample-vmid/dbus-vmstate")
+		assertParamValue(t, got.form, "action", "sample-action")
+
+		var nilCtx context.Context
+		if err := svc.CreateQemuDbusVmstate(nilCtx, "sample-node", "sample-vmid", &nodes.CreateQemuDbusVmstateParams{Action: "sample-action"}); err == nil {
+			t.Errorf("CreateQemuDbusVmstate: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListQemuFeature", func(t *testing.T) {
-		_, err := svc.ListQemuFeature(ctx, "stub", "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListQemuFeature(ctx, "sample-node", "sample-vmid", &nodes.ListQemuFeatureParams{Feature: "sample-feature"})
+		if err != nil {
+			t.Fatalf("ListQemuFeature: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListQemuFeature: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/qemu/sample-vmid/feature")
+		assertParamValue(t, got.query, "feature", "sample-feature")
+
+		var nilCtx context.Context
+		if _, err := svc.ListQemuFeature(nilCtx, "sample-node", "sample-vmid", &nodes.ListQemuFeatureParams{Feature: "sample-feature"}); err == nil {
+			t.Errorf("ListQemuFeature: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListQemuFirewall", func(t *testing.T) {
-		_, err := svc.ListQemuFirewall(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListQemuFirewall(ctx, "sample-node", "sample-vmid")
+		if err != nil {
+			t.Fatalf("ListQemuFirewall: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListQemuFirewall: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/qemu/sample-vmid/firewall")
+
+		var nilCtx context.Context
+		if _, err := svc.ListQemuFirewall(nilCtx, "sample-node", "sample-vmid"); err == nil {
+			t.Errorf("ListQemuFirewall: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListQemuFirewallAliases", func(t *testing.T) {
-		_, err := svc.ListQemuFirewallAliases(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListQemuFirewallAliases(ctx, "sample-node", "sample-vmid")
+		if err != nil {
+			t.Fatalf("ListQemuFirewallAliases: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListQemuFirewallAliases: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/qemu/sample-vmid/firewall/aliases")
+
+		var nilCtx context.Context
+		if _, err := svc.ListQemuFirewallAliases(nilCtx, "sample-node", "sample-vmid"); err == nil {
+			t.Errorf("ListQemuFirewallAliases: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateQemuFirewallAliases", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateQemuFirewallAliases(ctx, "sample-node", "sample-vmid", &nodes.CreateQemuFirewallAliasesParams{Cidr: "sample-cidr", Name: "sample-name"})
+		if err != nil {
+			t.Fatalf("CreateQemuFirewallAliases: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/qemu/sample-vmid/firewall/aliases")
+		assertParamValue(t, got.form, "cidr", "sample-cidr")
+		assertParamValue(t, got.form, "name", "sample-name")
+
+		var nilCtx context.Context
+		if err := svc.CreateQemuFirewallAliases(nilCtx, "sample-node", "sample-vmid", &nodes.CreateQemuFirewallAliasesParams{Cidr: "sample-cidr", Name: "sample-name"}); err == nil {
+			t.Errorf("CreateQemuFirewallAliases: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteQemuFirewallAliases", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteQemuFirewallAliases(ctx, "sample-node", "sample-vmid", "sample-name", &nodes.DeleteQemuFirewallAliasesParams{})
+		if err != nil {
+			t.Fatalf("DeleteQemuFirewallAliases: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/nodes/sample-node/qemu/sample-vmid/firewall/aliases/sample-name")
+
+		var nilCtx context.Context
+		if err := svc.DeleteQemuFirewallAliases(nilCtx, "sample-node", "sample-vmid", "sample-name", &nodes.DeleteQemuFirewallAliasesParams{}); err == nil {
+			t.Errorf("DeleteQemuFirewallAliases: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetQemuFirewallAliases", func(t *testing.T) {
-		_, err := svc.GetQemuFirewallAliases(ctx, "stub", "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.GetQemuFirewallAliases(ctx, "sample-node", "sample-vmid", "sample-name")
+		if err != nil {
+			t.Fatalf("GetQemuFirewallAliases: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetQemuFirewallAliases: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/qemu/sample-vmid/firewall/aliases/sample-name")
+
+		var nilCtx context.Context
+		if _, err := svc.GetQemuFirewallAliases(nilCtx, "sample-node", "sample-vmid", "sample-name"); err == nil {
+			t.Errorf("GetQemuFirewallAliases: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateQemuFirewallAliases", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateQemuFirewallAliases(ctx, "sample-node", "sample-vmid", "sample-name", &nodes.UpdateQemuFirewallAliasesParams{Cidr: "sample-cidr"})
+		if err != nil {
+			t.Fatalf("UpdateQemuFirewallAliases: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/nodes/sample-node/qemu/sample-vmid/firewall/aliases/sample-name")
+		assertParamValue(t, got.form, "cidr", "sample-cidr")
+
+		var nilCtx context.Context
+		if err := svc.UpdateQemuFirewallAliases(nilCtx, "sample-node", "sample-vmid", "sample-name", &nodes.UpdateQemuFirewallAliasesParams{Cidr: "sample-cidr"}); err == nil {
+			t.Errorf("UpdateQemuFirewallAliases: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListQemuFirewallIpset", func(t *testing.T) {
-		_, err := svc.ListQemuFirewallIpset(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListQemuFirewallIpset(ctx, "sample-node", "sample-vmid")
+		if err != nil {
+			t.Fatalf("ListQemuFirewallIpset: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListQemuFirewallIpset: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/qemu/sample-vmid/firewall/ipset")
+
+		var nilCtx context.Context
+		if _, err := svc.ListQemuFirewallIpset(nilCtx, "sample-node", "sample-vmid"); err == nil {
+			t.Errorf("ListQemuFirewallIpset: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateQemuFirewallIpset", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateQemuFirewallIpset(ctx, "sample-node", "sample-vmid", &nodes.CreateQemuFirewallIpsetParams{Name: "sample-name"})
+		if err != nil {
+			t.Fatalf("CreateQemuFirewallIpset: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/qemu/sample-vmid/firewall/ipset")
+		assertParamValue(t, got.form, "name", "sample-name")
+
+		var nilCtx context.Context
+		if err := svc.CreateQemuFirewallIpset(nilCtx, "sample-node", "sample-vmid", &nodes.CreateQemuFirewallIpsetParams{Name: "sample-name"}); err == nil {
+			t.Errorf("CreateQemuFirewallIpset: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteQemuFirewallIpset", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteQemuFirewallIpset(ctx, "sample-node", "sample-vmid", "sample-name", &nodes.DeleteQemuFirewallIpsetParams{})
+		if err != nil {
+			t.Fatalf("DeleteQemuFirewallIpset: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/nodes/sample-node/qemu/sample-vmid/firewall/ipset/sample-name")
+
+		var nilCtx context.Context
+		if err := svc.DeleteQemuFirewallIpset(nilCtx, "sample-node", "sample-vmid", "sample-name", &nodes.DeleteQemuFirewallIpsetParams{}); err == nil {
+			t.Errorf("DeleteQemuFirewallIpset: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetQemuFirewallIpset", func(t *testing.T) {
-		_, err := svc.GetQemuFirewallIpset(ctx, "stub", "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.GetQemuFirewallIpset(ctx, "sample-node", "sample-vmid", "sample-name")
+		if err != nil {
+			t.Fatalf("GetQemuFirewallIpset: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetQemuFirewallIpset: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/qemu/sample-vmid/firewall/ipset/sample-name")
+
+		var nilCtx context.Context
+		if _, err := svc.GetQemuFirewallIpset(nilCtx, "sample-node", "sample-vmid", "sample-name"); err == nil {
+			t.Errorf("GetQemuFirewallIpset: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateQemuFirewallIpset2", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateQemuFirewallIpset2(ctx, "sample-node", "sample-vmid", "sample-name", &nodes.CreateQemuFirewallIpset2Params{Cidr: "sample-cidr"})
+		if err != nil {
+			t.Fatalf("CreateQemuFirewallIpset2: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/qemu/sample-vmid/firewall/ipset/sample-name")
+		assertParamValue(t, got.form, "cidr", "sample-cidr")
+
+		var nilCtx context.Context
+		if err := svc.CreateQemuFirewallIpset2(nilCtx, "sample-node", "sample-vmid", "sample-name", &nodes.CreateQemuFirewallIpset2Params{Cidr: "sample-cidr"}); err == nil {
+			t.Errorf("CreateQemuFirewallIpset2: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteQemuFirewallIpset2", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteQemuFirewallIpset2(ctx, "sample-node", "sample-vmid", "sample-name", "sample-cidr", &nodes.DeleteQemuFirewallIpset2Params{})
+		if err != nil {
+			t.Fatalf("DeleteQemuFirewallIpset2: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/nodes/sample-node/qemu/sample-vmid/firewall/ipset/sample-name/sample-cidr")
+
+		var nilCtx context.Context
+		if err := svc.DeleteQemuFirewallIpset2(nilCtx, "sample-node", "sample-vmid", "sample-name", "sample-cidr", &nodes.DeleteQemuFirewallIpset2Params{}); err == nil {
+			t.Errorf("DeleteQemuFirewallIpset2: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetQemuFirewallIpset2", func(t *testing.T) {
-		_, err := svc.GetQemuFirewallIpset2(ctx, "stub", "stub", "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.GetQemuFirewallIpset2(ctx, "sample-node", "sample-vmid", "sample-name", "sample-cidr")
+		if err != nil {
+			t.Fatalf("GetQemuFirewallIpset2: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetQemuFirewallIpset2: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/qemu/sample-vmid/firewall/ipset/sample-name/sample-cidr")
+
+		var nilCtx context.Context
+		if _, err := svc.GetQemuFirewallIpset2(nilCtx, "sample-node", "sample-vmid", "sample-name", "sample-cidr"); err == nil {
+			t.Errorf("GetQemuFirewallIpset2: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateQemuFirewallIpset", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateQemuFirewallIpset(ctx, "sample-node", "sample-vmid", "sample-name", "sample-cidr", &nodes.UpdateQemuFirewallIpsetParams{})
+		if err != nil {
+			t.Fatalf("UpdateQemuFirewallIpset: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/nodes/sample-node/qemu/sample-vmid/firewall/ipset/sample-name/sample-cidr")
+
+		var nilCtx context.Context
+		if err := svc.UpdateQemuFirewallIpset(nilCtx, "sample-node", "sample-vmid", "sample-name", "sample-cidr", &nodes.UpdateQemuFirewallIpsetParams{}); err == nil {
+			t.Errorf("UpdateQemuFirewallIpset: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListQemuFirewallLog", func(t *testing.T) {
-		_, err := svc.ListQemuFirewallLog(ctx, "stub", "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListQemuFirewallLog(ctx, "sample-node", "sample-vmid", &nodes.ListQemuFirewallLogParams{})
+		if err != nil {
+			t.Fatalf("ListQemuFirewallLog: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListQemuFirewallLog: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/qemu/sample-vmid/firewall/log")
+
+		var nilCtx context.Context
+		if _, err := svc.ListQemuFirewallLog(nilCtx, "sample-node", "sample-vmid", &nodes.ListQemuFirewallLogParams{}); err == nil {
+			t.Errorf("ListQemuFirewallLog: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListQemuFirewallOptions", func(t *testing.T) {
-		_, err := svc.ListQemuFirewallOptions(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListQemuFirewallOptions(ctx, "sample-node", "sample-vmid")
+		if err != nil {
+			t.Fatalf("ListQemuFirewallOptions: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListQemuFirewallOptions: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/qemu/sample-vmid/firewall/options")
+
+		var nilCtx context.Context
+		if _, err := svc.ListQemuFirewallOptions(nilCtx, "sample-node", "sample-vmid"); err == nil {
+			t.Errorf("ListQemuFirewallOptions: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateQemuFirewallOptions", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateQemuFirewallOptions(ctx, "sample-node", "sample-vmid", &nodes.UpdateQemuFirewallOptionsParams{})
+		if err != nil {
+			t.Fatalf("UpdateQemuFirewallOptions: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/nodes/sample-node/qemu/sample-vmid/firewall/options")
+
+		var nilCtx context.Context
+		if err := svc.UpdateQemuFirewallOptions(nilCtx, "sample-node", "sample-vmid", &nodes.UpdateQemuFirewallOptionsParams{}); err == nil {
+			t.Errorf("UpdateQemuFirewallOptions: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListQemuFirewallRefs", func(t *testing.T) {
-		_, err := svc.ListQemuFirewallRefs(ctx, "stub", "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListQemuFirewallRefs(ctx, "sample-node", "sample-vmid", &nodes.ListQemuFirewallRefsParams{})
+		if err != nil {
+			t.Fatalf("ListQemuFirewallRefs: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListQemuFirewallRefs: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/qemu/sample-vmid/firewall/refs")
+
+		var nilCtx context.Context
+		if _, err := svc.ListQemuFirewallRefs(nilCtx, "sample-node", "sample-vmid", &nodes.ListQemuFirewallRefsParams{}); err == nil {
+			t.Errorf("ListQemuFirewallRefs: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListQemuFirewallRules", func(t *testing.T) {
-		_, err := svc.ListQemuFirewallRules(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListQemuFirewallRules(ctx, "sample-node", "sample-vmid")
+		if err != nil {
+			t.Fatalf("ListQemuFirewallRules: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListQemuFirewallRules: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/qemu/sample-vmid/firewall/rules")
+
+		var nilCtx context.Context
+		if _, err := svc.ListQemuFirewallRules(nilCtx, "sample-node", "sample-vmid"); err == nil {
+			t.Errorf("ListQemuFirewallRules: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateQemuFirewallRules", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateQemuFirewallRules(ctx, "sample-node", "sample-vmid", &nodes.CreateQemuFirewallRulesParams{Action: "sample-action", Type: "sample-type"})
+		if err != nil {
+			t.Fatalf("CreateQemuFirewallRules: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/qemu/sample-vmid/firewall/rules")
+		assertParamValue(t, got.form, "action", "sample-action")
+		assertParamValue(t, got.form, "type", "sample-type")
+
+		var nilCtx context.Context
+		if err := svc.CreateQemuFirewallRules(nilCtx, "sample-node", "sample-vmid", &nodes.CreateQemuFirewallRulesParams{Action: "sample-action", Type: "sample-type"}); err == nil {
+			t.Errorf("CreateQemuFirewallRules: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteQemuFirewallRules", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteQemuFirewallRules(ctx, "sample-node", "sample-vmid", "sample-pos", &nodes.DeleteQemuFirewallRulesParams{})
+		if err != nil {
+			t.Fatalf("DeleteQemuFirewallRules: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/nodes/sample-node/qemu/sample-vmid/firewall/rules/sample-pos")
+
+		var nilCtx context.Context
+		if err := svc.DeleteQemuFirewallRules(nilCtx, "sample-node", "sample-vmid", "sample-pos", &nodes.DeleteQemuFirewallRulesParams{}); err == nil {
+			t.Errorf("DeleteQemuFirewallRules: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetQemuFirewallRules", func(t *testing.T) {
-		_, err := svc.GetQemuFirewallRules(ctx, "stub", "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.GetQemuFirewallRules(ctx, "sample-node", "sample-vmid", "sample-pos")
+		if err != nil {
+			t.Fatalf("GetQemuFirewallRules: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetQemuFirewallRules: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/qemu/sample-vmid/firewall/rules/sample-pos")
+
+		var nilCtx context.Context
+		if _, err := svc.GetQemuFirewallRules(nilCtx, "sample-node", "sample-vmid", "sample-pos"); err == nil {
+			t.Errorf("GetQemuFirewallRules: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateQemuFirewallRules", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateQemuFirewallRules(ctx, "sample-node", "sample-vmid", "sample-pos", &nodes.UpdateQemuFirewallRulesParams{})
+		if err != nil {
+			t.Fatalf("UpdateQemuFirewallRules: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/nodes/sample-node/qemu/sample-vmid/firewall/rules/sample-pos")
+
+		var nilCtx context.Context
+		if err := svc.UpdateQemuFirewallRules(nilCtx, "sample-node", "sample-vmid", "sample-pos", &nodes.UpdateQemuFirewallRulesParams{}); err == nil {
+			t.Errorf("UpdateQemuFirewallRules: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListQemuMigrate", func(t *testing.T) {
-		_, err := svc.ListQemuMigrate(ctx, "stub", "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListQemuMigrate(ctx, "sample-node", "sample-vmid", &nodes.ListQemuMigrateParams{})
+		if err != nil {
+			t.Fatalf("ListQemuMigrate: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListQemuMigrate: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/qemu/sample-vmid/migrate")
+
+		var nilCtx context.Context
+		if _, err := svc.ListQemuMigrate(nilCtx, "sample-node", "sample-vmid", &nodes.ListQemuMigrateParams{}); err == nil {
+			t.Errorf("ListQemuMigrate: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateQemuMigrate", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateQemuMigrate(ctx, "sample-node", "sample-vmid", &nodes.CreateQemuMigrateParams{Target: "sample-target"})
+		if err != nil {
+			t.Fatalf("CreateQemuMigrate: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateQemuMigrate: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/qemu/sample-vmid/migrate")
+		assertParamValue(t, got.form, "target", "sample-target")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateQemuMigrate(nilCtx, "sample-node", "sample-vmid", &nodes.CreateQemuMigrateParams{Target: "sample-target"}); err == nil {
+			t.Errorf("CreateQemuMigrate: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateQemuMonitor", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateQemuMonitor(ctx, "sample-node", "sample-vmid", &nodes.CreateQemuMonitorParams{Command: "sample-command"})
+		if err != nil {
+			t.Fatalf("CreateQemuMonitor: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateQemuMonitor: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/qemu/sample-vmid/monitor")
+		assertParamValue(t, got.form, "command", "sample-command")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateQemuMonitor(nilCtx, "sample-node", "sample-vmid", &nodes.CreateQemuMonitorParams{Command: "sample-command"}); err == nil {
+			t.Errorf("CreateQemuMonitor: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateQemuMoveDisk", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateQemuMoveDisk(ctx, "sample-node", "sample-vmid", &nodes.CreateQemuMoveDiskParams{Disk: "sample-disk"})
+		if err != nil {
+			t.Fatalf("CreateQemuMoveDisk: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateQemuMoveDisk: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/qemu/sample-vmid/move_disk")
+		assertParamValue(t, got.form, "disk", "sample-disk")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateQemuMoveDisk(nilCtx, "sample-node", "sample-vmid", &nodes.CreateQemuMoveDiskParams{Disk: "sample-disk"}); err == nil {
+			t.Errorf("CreateQemuMoveDisk: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateQemuMtunnel", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateQemuMtunnel(ctx, "sample-node", "sample-vmid", &nodes.CreateQemuMtunnelParams{})
+		if err != nil {
+			t.Fatalf("CreateQemuMtunnel: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateQemuMtunnel: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/qemu/sample-vmid/mtunnel")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateQemuMtunnel(nilCtx, "sample-node", "sample-vmid", &nodes.CreateQemuMtunnelParams{}); err == nil {
+			t.Errorf("CreateQemuMtunnel: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListQemuMtunnelwebsocket", func(t *testing.T) {
-		_, err := svc.ListQemuMtunnelwebsocket(ctx, "stub", "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListQemuMtunnelwebsocket(ctx, "sample-node", "sample-vmid", &nodes.ListQemuMtunnelwebsocketParams{Socket: "sample-socket", Ticket: "sample-ticket"})
+		if err != nil {
+			t.Fatalf("ListQemuMtunnelwebsocket: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListQemuMtunnelwebsocket: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/qemu/sample-vmid/mtunnelwebsocket")
+		assertParamValue(t, got.query, "socket", "sample-socket")
+		assertParamValue(t, got.query, "ticket", "sample-ticket")
+
+		var nilCtx context.Context
+		if _, err := svc.ListQemuMtunnelwebsocket(nilCtx, "sample-node", "sample-vmid", &nodes.ListQemuMtunnelwebsocketParams{Socket: "sample-socket", Ticket: "sample-ticket"}); err == nil {
+			t.Errorf("ListQemuMtunnelwebsocket: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListQemuPending", func(t *testing.T) {
-		_, err := svc.ListQemuPending(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListQemuPending(ctx, "sample-node", "sample-vmid")
+		if err != nil {
+			t.Fatalf("ListQemuPending: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListQemuPending: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/qemu/sample-vmid/pending")
+
+		var nilCtx context.Context
+		if _, err := svc.ListQemuPending(nilCtx, "sample-node", "sample-vmid"); err == nil {
+			t.Errorf("ListQemuPending: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateQemuRemoteMigrate", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateQemuRemoteMigrate(ctx, "sample-node", "sample-vmid", &nodes.CreateQemuRemoteMigrateParams{TargetBridge: "sample-target-bridge", TargetEndpoint: "sample-target-endpoint", TargetStorage: "sample-target-storage"})
+		if err != nil {
+			t.Fatalf("CreateQemuRemoteMigrate: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateQemuRemoteMigrate: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/qemu/sample-vmid/remote_migrate")
+		assertParamValue(t, got.form, "target-bridge", "sample-target-bridge")
+		assertParamValue(t, got.form, "target-endpoint", "sample-target-endpoint")
+		assertParamValue(t, got.form, "target-storage", "sample-target-storage")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateQemuRemoteMigrate(nilCtx, "sample-node", "sample-vmid", &nodes.CreateQemuRemoteMigrateParams{TargetBridge: "sample-target-bridge", TargetEndpoint: "sample-target-endpoint", TargetStorage: "sample-target-storage"}); err == nil {
+			t.Errorf("CreateQemuRemoteMigrate: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateQemuResize", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.UpdateQemuResize(ctx, "sample-node", "sample-vmid", &nodes.UpdateQemuResizeParams{Disk: "sample-disk", Size: "sample-size"})
+		if err != nil {
+			t.Fatalf("UpdateQemuResize: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("UpdateQemuResize: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/nodes/sample-node/qemu/sample-vmid/resize")
+		assertParamValue(t, got.form, "disk", "sample-disk")
+		assertParamValue(t, got.form, "size", "sample-size")
+
+		var nilCtx context.Context
+		if _, err := svc.UpdateQemuResize(nilCtx, "sample-node", "sample-vmid", &nodes.UpdateQemuResizeParams{Disk: "sample-disk", Size: "sample-size"}); err == nil {
+			t.Errorf("UpdateQemuResize: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListQemuRrd", func(t *testing.T) {
-		_, err := svc.ListQemuRrd(ctx, "stub", "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListQemuRrd(ctx, "sample-node", "sample-vmid", &nodes.ListQemuRrdParams{Ds: "sample-ds", Timeframe: "sample-timeframe"})
+		if err != nil {
+			t.Fatalf("ListQemuRrd: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListQemuRrd: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/qemu/sample-vmid/rrd")
+		assertParamValue(t, got.query, "ds", "sample-ds")
+		assertParamValue(t, got.query, "timeframe", "sample-timeframe")
+
+		var nilCtx context.Context
+		if _, err := svc.ListQemuRrd(nilCtx, "sample-node", "sample-vmid", &nodes.ListQemuRrdParams{Ds: "sample-ds", Timeframe: "sample-timeframe"}); err == nil {
+			t.Errorf("ListQemuRrd: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListQemuRrddata", func(t *testing.T) {
-		_, err := svc.ListQemuRrddata(ctx, "stub", "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListQemuRrddata(ctx, "sample-node", "sample-vmid", &nodes.ListQemuRrddataParams{Timeframe: "sample-timeframe"})
+		if err != nil {
+			t.Fatalf("ListQemuRrddata: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListQemuRrddata: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/qemu/sample-vmid/rrddata")
+		assertParamValue(t, got.query, "timeframe", "sample-timeframe")
+
+		var nilCtx context.Context
+		if _, err := svc.ListQemuRrddata(nilCtx, "sample-node", "sample-vmid", &nodes.ListQemuRrddataParams{Timeframe: "sample-timeframe"}); err == nil {
+			t.Errorf("ListQemuRrddata: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateQemuSendkey", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateQemuSendkey(ctx, "sample-node", "sample-vmid", &nodes.UpdateQemuSendkeyParams{Key: "sample-key"})
+		if err != nil {
+			t.Fatalf("UpdateQemuSendkey: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/nodes/sample-node/qemu/sample-vmid/sendkey")
+		assertParamValue(t, got.form, "key", "sample-key")
+
+		var nilCtx context.Context
+		if err := svc.UpdateQemuSendkey(nilCtx, "sample-node", "sample-vmid", &nodes.UpdateQemuSendkeyParams{Key: "sample-key"}); err == nil {
+			t.Errorf("UpdateQemuSendkey: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListQemuSnapshot", func(t *testing.T) {
-		_, err := svc.ListQemuSnapshot(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListQemuSnapshot(ctx, "sample-node", "sample-vmid")
+		if err != nil {
+			t.Fatalf("ListQemuSnapshot: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListQemuSnapshot: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/qemu/sample-vmid/snapshot")
+
+		var nilCtx context.Context
+		if _, err := svc.ListQemuSnapshot(nilCtx, "sample-node", "sample-vmid"); err == nil {
+			t.Errorf("ListQemuSnapshot: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateQemuSnapshot", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateQemuSnapshot(ctx, "sample-node", "sample-vmid", &nodes.CreateQemuSnapshotParams{Snapname: "sample-snapname"})
+		if err != nil {
+			t.Fatalf("CreateQemuSnapshot: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateQemuSnapshot: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/qemu/sample-vmid/snapshot")
+		assertParamValue(t, got.form, "snapname", "sample-snapname")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateQemuSnapshot(nilCtx, "sample-node", "sample-vmid", &nodes.CreateQemuSnapshotParams{Snapname: "sample-snapname"}); err == nil {
+			t.Errorf("CreateQemuSnapshot: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteQemuSnapshot", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.DeleteQemuSnapshot(ctx, "sample-node", "sample-vmid", "sample-snapname", &nodes.DeleteQemuSnapshotParams{})
+		if err != nil {
+			t.Fatalf("DeleteQemuSnapshot: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("DeleteQemuSnapshot: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/nodes/sample-node/qemu/sample-vmid/snapshot/sample-snapname")
+
+		var nilCtx context.Context
+		if _, err := svc.DeleteQemuSnapshot(nilCtx, "sample-node", "sample-vmid", "sample-snapname", &nodes.DeleteQemuSnapshotParams{}); err == nil {
+			t.Errorf("DeleteQemuSnapshot: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetQemuSnapshot", func(t *testing.T) {
-		_, err := svc.GetQemuSnapshot(ctx, "stub", "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.GetQemuSnapshot(ctx, "sample-node", "sample-vmid", "sample-snapname")
+		if err != nil {
+			t.Fatalf("GetQemuSnapshot: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetQemuSnapshot: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/qemu/sample-vmid/snapshot/sample-snapname")
+
+		var nilCtx context.Context
+		if _, err := svc.GetQemuSnapshot(nilCtx, "sample-node", "sample-vmid", "sample-snapname"); err == nil {
+			t.Errorf("GetQemuSnapshot: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListQemuSnapshotConfig", func(t *testing.T) {
-		_, err := svc.ListQemuSnapshotConfig(ctx, "stub", "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListQemuSnapshotConfig(ctx, "sample-node", "sample-vmid", "sample-snapname")
+		if err != nil {
+			t.Fatalf("ListQemuSnapshotConfig: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListQemuSnapshotConfig: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/qemu/sample-vmid/snapshot/sample-snapname/config")
+
+		var nilCtx context.Context
+		if _, err := svc.ListQemuSnapshotConfig(nilCtx, "sample-node", "sample-vmid", "sample-snapname"); err == nil {
+			t.Errorf("ListQemuSnapshotConfig: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateQemuSnapshotConfig", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateQemuSnapshotConfig(ctx, "sample-node", "sample-vmid", "sample-snapname", &nodes.UpdateQemuSnapshotConfigParams{})
+		if err != nil {
+			t.Fatalf("UpdateQemuSnapshotConfig: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/nodes/sample-node/qemu/sample-vmid/snapshot/sample-snapname/config")
+
+		var nilCtx context.Context
+		if err := svc.UpdateQemuSnapshotConfig(nilCtx, "sample-node", "sample-vmid", "sample-snapname", &nodes.UpdateQemuSnapshotConfigParams{}); err == nil {
+			t.Errorf("UpdateQemuSnapshotConfig: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateQemuSnapshotRollback", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateQemuSnapshotRollback(ctx, "sample-node", "sample-vmid", "sample-snapname", &nodes.CreateQemuSnapshotRollbackParams{})
+		if err != nil {
+			t.Fatalf("CreateQemuSnapshotRollback: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateQemuSnapshotRollback: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/qemu/sample-vmid/snapshot/sample-snapname/rollback")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateQemuSnapshotRollback(nilCtx, "sample-node", "sample-vmid", "sample-snapname", &nodes.CreateQemuSnapshotRollbackParams{}); err == nil {
+			t.Errorf("CreateQemuSnapshotRollback: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateQemuSpiceproxy", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateQemuSpiceproxy(ctx, "sample-node", "sample-vmid", &nodes.CreateQemuSpiceproxyParams{})
+		if err != nil {
+			t.Fatalf("CreateQemuSpiceproxy: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateQemuSpiceproxy: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/qemu/sample-vmid/spiceproxy")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateQemuSpiceproxy(nilCtx, "sample-node", "sample-vmid", &nodes.CreateQemuSpiceproxyParams{}); err == nil {
+			t.Errorf("CreateQemuSpiceproxy: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListQemuStatus", func(t *testing.T) {
-		_, err := svc.ListQemuStatus(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListQemuStatus(ctx, "sample-node", "sample-vmid")
+		if err != nil {
+			t.Fatalf("ListQemuStatus: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListQemuStatus: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/qemu/sample-vmid/status")
+
+		var nilCtx context.Context
+		if _, err := svc.ListQemuStatus(nilCtx, "sample-node", "sample-vmid"); err == nil {
+			t.Errorf("ListQemuStatus: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListQemuStatusCurrent", func(t *testing.T) {
-		_, err := svc.ListQemuStatusCurrent(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListQemuStatusCurrent(ctx, "sample-node", "sample-vmid")
+		if err != nil {
+			t.Fatalf("ListQemuStatusCurrent: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListQemuStatusCurrent: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/qemu/sample-vmid/status/current")
+
+		var nilCtx context.Context
+		if _, err := svc.ListQemuStatusCurrent(nilCtx, "sample-node", "sample-vmid"); err == nil {
+			t.Errorf("ListQemuStatusCurrent: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateQemuStatusReboot", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateQemuStatusReboot(ctx, "sample-node", "sample-vmid", &nodes.CreateQemuStatusRebootParams{})
+		if err != nil {
+			t.Fatalf("CreateQemuStatusReboot: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateQemuStatusReboot: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/qemu/sample-vmid/status/reboot")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateQemuStatusReboot(nilCtx, "sample-node", "sample-vmid", &nodes.CreateQemuStatusRebootParams{}); err == nil {
+			t.Errorf("CreateQemuStatusReboot: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateQemuStatusReset", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateQemuStatusReset(ctx, "sample-node", "sample-vmid", &nodes.CreateQemuStatusResetParams{})
+		if err != nil {
+			t.Fatalf("CreateQemuStatusReset: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateQemuStatusReset: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/qemu/sample-vmid/status/reset")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateQemuStatusReset(nilCtx, "sample-node", "sample-vmid", &nodes.CreateQemuStatusResetParams{}); err == nil {
+			t.Errorf("CreateQemuStatusReset: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateQemuStatusResume", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateQemuStatusResume(ctx, "sample-node", "sample-vmid", &nodes.CreateQemuStatusResumeParams{})
+		if err != nil {
+			t.Fatalf("CreateQemuStatusResume: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateQemuStatusResume: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/qemu/sample-vmid/status/resume")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateQemuStatusResume(nilCtx, "sample-node", "sample-vmid", &nodes.CreateQemuStatusResumeParams{}); err == nil {
+			t.Errorf("CreateQemuStatusResume: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateQemuStatusShutdown", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateQemuStatusShutdown(ctx, "sample-node", "sample-vmid", &nodes.CreateQemuStatusShutdownParams{})
+		if err != nil {
+			t.Fatalf("CreateQemuStatusShutdown: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateQemuStatusShutdown: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/qemu/sample-vmid/status/shutdown")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateQemuStatusShutdown(nilCtx, "sample-node", "sample-vmid", &nodes.CreateQemuStatusShutdownParams{}); err == nil {
+			t.Errorf("CreateQemuStatusShutdown: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateQemuStatusStart", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateQemuStatusStart(ctx, "sample-node", "sample-vmid", &nodes.CreateQemuStatusStartParams{})
+		if err != nil {
+			t.Fatalf("CreateQemuStatusStart: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateQemuStatusStart: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/qemu/sample-vmid/status/start")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateQemuStatusStart(nilCtx, "sample-node", "sample-vmid", &nodes.CreateQemuStatusStartParams{}); err == nil {
+			t.Errorf("CreateQemuStatusStart: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateQemuStatusStop", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateQemuStatusStop(ctx, "sample-node", "sample-vmid", &nodes.CreateQemuStatusStopParams{})
+		if err != nil {
+			t.Fatalf("CreateQemuStatusStop: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateQemuStatusStop: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/qemu/sample-vmid/status/stop")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateQemuStatusStop(nilCtx, "sample-node", "sample-vmid", &nodes.CreateQemuStatusStopParams{}); err == nil {
+			t.Errorf("CreateQemuStatusStop: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateQemuStatusSuspend", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateQemuStatusSuspend(ctx, "sample-node", "sample-vmid", &nodes.CreateQemuStatusSuspendParams{})
+		if err != nil {
+			t.Fatalf("CreateQemuStatusSuspend: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateQemuStatusSuspend: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/qemu/sample-vmid/status/suspend")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateQemuStatusSuspend(nilCtx, "sample-node", "sample-vmid", &nodes.CreateQemuStatusSuspendParams{}); err == nil {
+			t.Errorf("CreateQemuStatusSuspend: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateQemuTemplate", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateQemuTemplate(ctx, "sample-node", "sample-vmid", &nodes.CreateQemuTemplateParams{})
+		if err != nil {
+			t.Fatalf("CreateQemuTemplate: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateQemuTemplate: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/qemu/sample-vmid/template")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateQemuTemplate(nilCtx, "sample-node", "sample-vmid", &nodes.CreateQemuTemplateParams{}); err == nil {
+			t.Errorf("CreateQemuTemplate: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateQemuTermproxy", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateQemuTermproxy(ctx, "sample-node", "sample-vmid", &nodes.CreateQemuTermproxyParams{})
+		if err != nil {
+			t.Fatalf("CreateQemuTermproxy: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateQemuTermproxy: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/qemu/sample-vmid/termproxy")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateQemuTermproxy(nilCtx, "sample-node", "sample-vmid", &nodes.CreateQemuTermproxyParams{}); err == nil {
+			t.Errorf("CreateQemuTermproxy: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateQemuUnlink", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateQemuUnlink(ctx, "sample-node", "sample-vmid", &nodes.UpdateQemuUnlinkParams{Idlist: "sample-idlist"})
+		if err != nil {
+			t.Fatalf("UpdateQemuUnlink: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/nodes/sample-node/qemu/sample-vmid/unlink")
+		assertParamValue(t, got.form, "idlist", "sample-idlist")
+
+		var nilCtx context.Context
+		if err := svc.UpdateQemuUnlink(nilCtx, "sample-node", "sample-vmid", &nodes.UpdateQemuUnlinkParams{Idlist: "sample-idlist"}); err == nil {
+			t.Errorf("UpdateQemuUnlink: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateQemuVncproxy", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateQemuVncproxy(ctx, "sample-node", "sample-vmid", &nodes.CreateQemuVncproxyParams{})
+		if err != nil {
+			t.Fatalf("CreateQemuVncproxy: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateQemuVncproxy: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/qemu/sample-vmid/vncproxy")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateQemuVncproxy(nilCtx, "sample-node", "sample-vmid", &nodes.CreateQemuVncproxyParams{}); err == nil {
+			t.Errorf("CreateQemuVncproxy: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListQemuVncwebsocket", func(t *testing.T) {
-		_, err := svc.ListQemuVncwebsocket(ctx, "stub", "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListQemuVncwebsocket(ctx, "sample-node", "sample-vmid", &nodes.ListQemuVncwebsocketParams{Port: 42, Vncticket: "sample-vncticket"})
+		if err != nil {
+			t.Fatalf("ListQemuVncwebsocket: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListQemuVncwebsocket: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/qemu/sample-vmid/vncwebsocket")
+		assertParamValue(t, got.query, "port", "42")
+		assertParamValue(t, got.query, "vncticket", "sample-vncticket")
+
+		var nilCtx context.Context
+		if _, err := svc.ListQemuVncwebsocket(nilCtx, "sample-node", "sample-vmid", &nodes.ListQemuVncwebsocketParams{Port: 42, Vncticket: "sample-vncticket"}); err == nil {
+			t.Errorf("ListQemuVncwebsocket: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListQueryOciRepoTags", func(t *testing.T) {
-		_, err := svc.ListQueryOciRepoTags(ctx, "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListQueryOciRepoTags(ctx, "sample-node", &nodes.ListQueryOciRepoTagsParams{Reference: "sample-reference"})
+		if err != nil {
+			t.Fatalf("ListQueryOciRepoTags: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListQueryOciRepoTags: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/query-oci-repo-tags")
+		assertParamValue(t, got.query, "reference", "sample-reference")
+
+		var nilCtx context.Context
+		if _, err := svc.ListQueryOciRepoTags(nilCtx, "sample-node", &nodes.ListQueryOciRepoTagsParams{Reference: "sample-reference"}); err == nil {
+			t.Errorf("ListQueryOciRepoTags: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListQueryUrlMetadata", func(t *testing.T) {
-		_, err := svc.ListQueryUrlMetadata(ctx, "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListQueryUrlMetadata(ctx, "sample-node", &nodes.ListQueryUrlMetadataParams{Url: "sample-url"})
+		if err != nil {
+			t.Fatalf("ListQueryUrlMetadata: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListQueryUrlMetadata: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/query-url-metadata")
+		assertParamValue(t, got.query, "url", "sample-url")
+
+		var nilCtx context.Context
+		if _, err := svc.ListQueryUrlMetadata(nilCtx, "sample-node", &nodes.ListQueryUrlMetadataParams{Url: "sample-url"}); err == nil {
+			t.Errorf("ListQueryUrlMetadata: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListReplication", func(t *testing.T) {
-		_, err := svc.ListReplication(ctx, "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListReplication(ctx, "sample-node", &nodes.ListReplicationParams{})
+		if err != nil {
+			t.Fatalf("ListReplication: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListReplication: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/replication")
+
+		var nilCtx context.Context
+		if _, err := svc.ListReplication(nilCtx, "sample-node", &nodes.ListReplicationParams{}); err == nil {
+			t.Errorf("ListReplication: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetReplication", func(t *testing.T) {
-		_, err := svc.GetReplication(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.GetReplication(ctx, "sample-node", "sample-id")
+		if err != nil {
+			t.Fatalf("GetReplication: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetReplication: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/replication/sample-id")
+
+		var nilCtx context.Context
+		if _, err := svc.GetReplication(nilCtx, "sample-node", "sample-id"); err == nil {
+			t.Errorf("GetReplication: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListReplicationLog", func(t *testing.T) {
-		_, err := svc.ListReplicationLog(ctx, "stub", "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListReplicationLog(ctx, "sample-node", "sample-id", &nodes.ListReplicationLogParams{})
+		if err != nil {
+			t.Fatalf("ListReplicationLog: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListReplicationLog: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/replication/sample-id/log")
+
+		var nilCtx context.Context
+		if _, err := svc.ListReplicationLog(nilCtx, "sample-node", "sample-id", &nodes.ListReplicationLogParams{}); err == nil {
+			t.Errorf("ListReplicationLog: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateReplicationScheduleNow", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateReplicationScheduleNow(ctx, "sample-node", "sample-id")
+		if err != nil {
+			t.Fatalf("CreateReplicationScheduleNow: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateReplicationScheduleNow: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/replication/sample-id/schedule_now")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateReplicationScheduleNow(nilCtx, "sample-node", "sample-id"); err == nil {
+			t.Errorf("CreateReplicationScheduleNow: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListReplicationStatus", func(t *testing.T) {
-		_, err := svc.ListReplicationStatus(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListReplicationStatus(ctx, "sample-node", "sample-id")
+		if err != nil {
+			t.Fatalf("ListReplicationStatus: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListReplicationStatus: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/replication/sample-id/status")
+
+		var nilCtx context.Context
+		if _, err := svc.ListReplicationStatus(nilCtx, "sample-node", "sample-id"); err == nil {
+			t.Errorf("ListReplicationStatus: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListReport", func(t *testing.T) {
-		_, err := svc.ListReport(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListReport(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListReport: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListReport: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/report")
+
+		var nilCtx context.Context
+		if _, err := svc.ListReport(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListReport: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListRrd", func(t *testing.T) {
-		_, err := svc.ListRrd(ctx, "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListRrd(ctx, "sample-node", &nodes.ListRrdParams{Ds: "sample-ds", Timeframe: "sample-timeframe"})
+		if err != nil {
+			t.Fatalf("ListRrd: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListRrd: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/rrd")
+		assertParamValue(t, got.query, "ds", "sample-ds")
+		assertParamValue(t, got.query, "timeframe", "sample-timeframe")
+
+		var nilCtx context.Context
+		if _, err := svc.ListRrd(nilCtx, "sample-node", &nodes.ListRrdParams{Ds: "sample-ds", Timeframe: "sample-timeframe"}); err == nil {
+			t.Errorf("ListRrd: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListRrddata", func(t *testing.T) {
-		_, err := svc.ListRrddata(ctx, "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListRrddata(ctx, "sample-node", &nodes.ListRrddataParams{Timeframe: "sample-timeframe"})
+		if err != nil {
+			t.Fatalf("ListRrddata: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListRrddata: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/rrddata")
+		assertParamValue(t, got.query, "timeframe", "sample-timeframe")
+
+		var nilCtx context.Context
+		if _, err := svc.ListRrddata(nilCtx, "sample-node", &nodes.ListRrddataParams{Timeframe: "sample-timeframe"}); err == nil {
+			t.Errorf("ListRrddata: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListScan", func(t *testing.T) {
-		_, err := svc.ListScan(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListScan(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListScan: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListScan: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/scan")
+
+		var nilCtx context.Context
+		if _, err := svc.ListScan(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListScan: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListScanCifs", func(t *testing.T) {
-		_, err := svc.ListScanCifs(ctx, "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListScanCifs(ctx, "sample-node", &nodes.ListScanCifsParams{Server: "sample-server"})
+		if err != nil {
+			t.Fatalf("ListScanCifs: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListScanCifs: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/scan/cifs")
+		assertParamValue(t, got.query, "server", "sample-server")
+
+		var nilCtx context.Context
+		if _, err := svc.ListScanCifs(nilCtx, "sample-node", &nodes.ListScanCifsParams{Server: "sample-server"}); err == nil {
+			t.Errorf("ListScanCifs: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListScanIscsi", func(t *testing.T) {
-		_, err := svc.ListScanIscsi(ctx, "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListScanIscsi(ctx, "sample-node", &nodes.ListScanIscsiParams{Portal: "sample-portal"})
+		if err != nil {
+			t.Fatalf("ListScanIscsi: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListScanIscsi: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/scan/iscsi")
+		assertParamValue(t, got.query, "portal", "sample-portal")
+
+		var nilCtx context.Context
+		if _, err := svc.ListScanIscsi(nilCtx, "sample-node", &nodes.ListScanIscsiParams{Portal: "sample-portal"}); err == nil {
+			t.Errorf("ListScanIscsi: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListScanLvm", func(t *testing.T) {
-		_, err := svc.ListScanLvm(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListScanLvm(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListScanLvm: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListScanLvm: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/scan/lvm")
+
+		var nilCtx context.Context
+		if _, err := svc.ListScanLvm(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListScanLvm: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListScanLvmthin", func(t *testing.T) {
-		_, err := svc.ListScanLvmthin(ctx, "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListScanLvmthin(ctx, "sample-node", &nodes.ListScanLvmthinParams{Vg: "sample-vg"})
+		if err != nil {
+			t.Fatalf("ListScanLvmthin: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListScanLvmthin: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/scan/lvmthin")
+		assertParamValue(t, got.query, "vg", "sample-vg")
+
+		var nilCtx context.Context
+		if _, err := svc.ListScanLvmthin(nilCtx, "sample-node", &nodes.ListScanLvmthinParams{Vg: "sample-vg"}); err == nil {
+			t.Errorf("ListScanLvmthin: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListScanNfs", func(t *testing.T) {
-		_, err := svc.ListScanNfs(ctx, "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListScanNfs(ctx, "sample-node", &nodes.ListScanNfsParams{Server: "sample-server"})
+		if err != nil {
+			t.Fatalf("ListScanNfs: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListScanNfs: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/scan/nfs")
+		assertParamValue(t, got.query, "server", "sample-server")
+
+		var nilCtx context.Context
+		if _, err := svc.ListScanNfs(nilCtx, "sample-node", &nodes.ListScanNfsParams{Server: "sample-server"}); err == nil {
+			t.Errorf("ListScanNfs: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListScanPbs", func(t *testing.T) {
-		_, err := svc.ListScanPbs(ctx, "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListScanPbs(ctx, "sample-node", &nodes.ListScanPbsParams{Password: "sample-password", Server: "sample-server", Username: "sample-username"})
+		if err != nil {
+			t.Fatalf("ListScanPbs: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListScanPbs: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/scan/pbs")
+		assertParamValue(t, got.query, "password", "sample-password")
+		assertParamValue(t, got.query, "server", "sample-server")
+		assertParamValue(t, got.query, "username", "sample-username")
+
+		var nilCtx context.Context
+		if _, err := svc.ListScanPbs(nilCtx, "sample-node", &nodes.ListScanPbsParams{Password: "sample-password", Server: "sample-server", Username: "sample-username"}); err == nil {
+			t.Errorf("ListScanPbs: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListScanZfs", func(t *testing.T) {
-		_, err := svc.ListScanZfs(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListScanZfs(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListScanZfs: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListScanZfs: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/scan/zfs")
+
+		var nilCtx context.Context
+		if _, err := svc.ListScanZfs(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListScanZfs: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListSdn", func(t *testing.T) {
-		_, err := svc.ListSdn(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListSdn(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListSdn: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListSdn: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/sdn")
+
+		var nilCtx context.Context
+		if _, err := svc.ListSdn(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListSdn: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetSdnFabrics", func(t *testing.T) {
-		_, err := svc.GetSdnFabrics(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.GetSdnFabrics(ctx, "sample-node", "sample-fabric")
+		if err != nil {
+			t.Fatalf("GetSdnFabrics: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetSdnFabrics: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/sdn/fabrics/sample-fabric")
+
+		var nilCtx context.Context
+		if _, err := svc.GetSdnFabrics(nilCtx, "sample-node", "sample-fabric"); err == nil {
+			t.Errorf("GetSdnFabrics: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListSdnFabricsInterfaces", func(t *testing.T) {
-		_, err := svc.ListSdnFabricsInterfaces(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListSdnFabricsInterfaces(ctx, "sample-node", "sample-fabric")
+		if err != nil {
+			t.Fatalf("ListSdnFabricsInterfaces: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListSdnFabricsInterfaces: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/sdn/fabrics/sample-fabric/interfaces")
+
+		var nilCtx context.Context
+		if _, err := svc.ListSdnFabricsInterfaces(nilCtx, "sample-node", "sample-fabric"); err == nil {
+			t.Errorf("ListSdnFabricsInterfaces: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListSdnFabricsNeighbors", func(t *testing.T) {
-		_, err := svc.ListSdnFabricsNeighbors(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListSdnFabricsNeighbors(ctx, "sample-node", "sample-fabric")
+		if err != nil {
+			t.Fatalf("ListSdnFabricsNeighbors: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListSdnFabricsNeighbors: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/sdn/fabrics/sample-fabric/neighbors")
+
+		var nilCtx context.Context
+		if _, err := svc.ListSdnFabricsNeighbors(nilCtx, "sample-node", "sample-fabric"); err == nil {
+			t.Errorf("ListSdnFabricsNeighbors: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListSdnFabricsRoutes", func(t *testing.T) {
-		_, err := svc.ListSdnFabricsRoutes(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListSdnFabricsRoutes(ctx, "sample-node", "sample-fabric")
+		if err != nil {
+			t.Fatalf("ListSdnFabricsRoutes: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListSdnFabricsRoutes: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/sdn/fabrics/sample-fabric/routes")
+
+		var nilCtx context.Context
+		if _, err := svc.ListSdnFabricsRoutes(nilCtx, "sample-node", "sample-fabric"); err == nil {
+			t.Errorf("ListSdnFabricsRoutes: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetSdnVnets", func(t *testing.T) {
-		_, err := svc.GetSdnVnets(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.GetSdnVnets(ctx, "sample-node", "sample-vnet")
+		if err != nil {
+			t.Fatalf("GetSdnVnets: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetSdnVnets: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/sdn/vnets/sample-vnet")
+
+		var nilCtx context.Context
+		if _, err := svc.GetSdnVnets(nilCtx, "sample-node", "sample-vnet"); err == nil {
+			t.Errorf("GetSdnVnets: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListSdnVnetsMacVrf", func(t *testing.T) {
-		_, err := svc.ListSdnVnetsMacVrf(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListSdnVnetsMacVrf(ctx, "sample-node", "sample-vnet")
+		if err != nil {
+			t.Fatalf("ListSdnVnetsMacVrf: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListSdnVnetsMacVrf: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/sdn/vnets/sample-vnet/mac-vrf")
+
+		var nilCtx context.Context
+		if _, err := svc.ListSdnVnetsMacVrf(nilCtx, "sample-node", "sample-vnet"); err == nil {
+			t.Errorf("ListSdnVnetsMacVrf: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListSdnZones", func(t *testing.T) {
-		_, err := svc.ListSdnZones(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListSdnZones(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListSdnZones: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListSdnZones: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/sdn/zones")
+
+		var nilCtx context.Context
+		if _, err := svc.ListSdnZones(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListSdnZones: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetSdnZones", func(t *testing.T) {
-		_, err := svc.GetSdnZones(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.GetSdnZones(ctx, "sample-node", "sample-zone")
+		if err != nil {
+			t.Fatalf("GetSdnZones: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetSdnZones: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/sdn/zones/sample-zone")
+
+		var nilCtx context.Context
+		if _, err := svc.GetSdnZones(nilCtx, "sample-node", "sample-zone"); err == nil {
+			t.Errorf("GetSdnZones: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListSdnZonesBridges", func(t *testing.T) {
-		_, err := svc.ListSdnZonesBridges(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListSdnZonesBridges(ctx, "sample-node", "sample-zone")
+		if err != nil {
+			t.Fatalf("ListSdnZonesBridges: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListSdnZonesBridges: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/sdn/zones/sample-zone/bridges")
+
+		var nilCtx context.Context
+		if _, err := svc.ListSdnZonesBridges(nilCtx, "sample-node", "sample-zone"); err == nil {
+			t.Errorf("ListSdnZonesBridges: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListSdnZonesContent", func(t *testing.T) {
-		_, err := svc.ListSdnZonesContent(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListSdnZonesContent(ctx, "sample-node", "sample-zone")
+		if err != nil {
+			t.Fatalf("ListSdnZonesContent: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListSdnZonesContent: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/sdn/zones/sample-zone/content")
+
+		var nilCtx context.Context
+		if _, err := svc.ListSdnZonesContent(nilCtx, "sample-node", "sample-zone"); err == nil {
+			t.Errorf("ListSdnZonesContent: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListSdnZonesIpVrf", func(t *testing.T) {
-		_, err := svc.ListSdnZonesIpVrf(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListSdnZonesIpVrf(ctx, "sample-node", "sample-zone")
+		if err != nil {
+			t.Fatalf("ListSdnZonesIpVrf: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListSdnZonesIpVrf: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/sdn/zones/sample-zone/ip-vrf")
+
+		var nilCtx context.Context
+		if _, err := svc.ListSdnZonesIpVrf(nilCtx, "sample-node", "sample-zone"); err == nil {
+			t.Errorf("ListSdnZonesIpVrf: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListServices", func(t *testing.T) {
-		_, err := svc.ListServices(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListServices(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListServices: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListServices: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/services")
+
+		var nilCtx context.Context
+		if _, err := svc.ListServices(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListServices: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetServices", func(t *testing.T) {
-		_, err := svc.GetServices(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.GetServices(ctx, "sample-node", "sample-service")
+		if err != nil {
+			t.Fatalf("GetServices: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetServices: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/services/sample-service")
+
+		var nilCtx context.Context
+		if _, err := svc.GetServices(nilCtx, "sample-node", "sample-service"); err == nil {
+			t.Errorf("GetServices: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateServicesReload", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateServicesReload(ctx, "sample-node", "sample-service")
+		if err != nil {
+			t.Fatalf("CreateServicesReload: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateServicesReload: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/services/sample-service/reload")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateServicesReload(nilCtx, "sample-node", "sample-service"); err == nil {
+			t.Errorf("CreateServicesReload: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateServicesRestart", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateServicesRestart(ctx, "sample-node", "sample-service")
+		if err != nil {
+			t.Fatalf("CreateServicesRestart: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateServicesRestart: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/services/sample-service/restart")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateServicesRestart(nilCtx, "sample-node", "sample-service"); err == nil {
+			t.Errorf("CreateServicesRestart: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateServicesStart", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateServicesStart(ctx, "sample-node", "sample-service")
+		if err != nil {
+			t.Fatalf("CreateServicesStart: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateServicesStart: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/services/sample-service/start")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateServicesStart(nilCtx, "sample-node", "sample-service"); err == nil {
+			t.Errorf("CreateServicesStart: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListServicesState", func(t *testing.T) {
-		_, err := svc.ListServicesState(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListServicesState(ctx, "sample-node", "sample-service")
+		if err != nil {
+			t.Fatalf("ListServicesState: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListServicesState: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/services/sample-service/state")
+
+		var nilCtx context.Context
+		if _, err := svc.ListServicesState(nilCtx, "sample-node", "sample-service"); err == nil {
+			t.Errorf("ListServicesState: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateServicesStop", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateServicesStop(ctx, "sample-node", "sample-service")
+		if err != nil {
+			t.Fatalf("CreateServicesStop: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateServicesStop: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/services/sample-service/stop")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateServicesStop(nilCtx, "sample-node", "sample-service"); err == nil {
+			t.Errorf("CreateServicesStop: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateSpiceshell", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateSpiceshell(ctx, "sample-node", &nodes.CreateSpiceshellParams{})
+		if err != nil {
+			t.Fatalf("CreateSpiceshell: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateSpiceshell: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/spiceshell")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateSpiceshell(nilCtx, "sample-node", &nodes.CreateSpiceshellParams{}); err == nil {
+			t.Errorf("CreateSpiceshell: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateStartall", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateStartall(ctx, "sample-node", &nodes.CreateStartallParams{})
+		if err != nil {
+			t.Fatalf("CreateStartall: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateStartall: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/startall")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateStartall(nilCtx, "sample-node", &nodes.CreateStartallParams{}); err == nil {
+			t.Errorf("CreateStartall: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListStatus", func(t *testing.T) {
-		_, err := svc.ListStatus(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListStatus(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListStatus: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListStatus: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/status")
+
+		var nilCtx context.Context
+		if _, err := svc.ListStatus(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListStatus: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateStatus", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateStatus(ctx, "sample-node", &nodes.CreateStatusParams{Command: "sample-command"})
+		if err != nil {
+			t.Fatalf("CreateStatus: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/status")
+		assertParamValue(t, got.form, "command", "sample-command")
+
+		var nilCtx context.Context
+		if err := svc.CreateStatus(nilCtx, "sample-node", &nodes.CreateStatusParams{Command: "sample-command"}); err == nil {
+			t.Errorf("CreateStatus: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateStopall", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateStopall(ctx, "sample-node", &nodes.CreateStopallParams{})
+		if err != nil {
+			t.Fatalf("CreateStopall: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateStopall: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/stopall")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateStopall(nilCtx, "sample-node", &nodes.CreateStopallParams{}); err == nil {
+			t.Errorf("CreateStopall: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListStorage", func(t *testing.T) {
-		_, err := svc.ListStorage(ctx, "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListStorage(ctx, "sample-node", &nodes.ListStorageParams{})
+		if err != nil {
+			t.Fatalf("ListStorage: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListStorage: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/storage")
+
+		var nilCtx context.Context
+		if _, err := svc.ListStorage(nilCtx, "sample-node", &nodes.ListStorageParams{}); err == nil {
+			t.Errorf("ListStorage: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetStorage", func(t *testing.T) {
-		_, err := svc.GetStorage(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.GetStorage(ctx, "sample-node", "sample-storage")
+		if err != nil {
+			t.Fatalf("GetStorage: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetStorage: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/storage/sample-storage")
+
+		var nilCtx context.Context
+		if _, err := svc.GetStorage(nilCtx, "sample-node", "sample-storage"); err == nil {
+			t.Errorf("GetStorage: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListStorageContent", func(t *testing.T) {
-		_, err := svc.ListStorageContent(ctx, "stub", "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListStorageContent(ctx, "sample-node", "sample-storage", &nodes.ListStorageContentParams{})
+		if err != nil {
+			t.Fatalf("ListStorageContent: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListStorageContent: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/storage/sample-storage/content")
+
+		var nilCtx context.Context
+		if _, err := svc.ListStorageContent(nilCtx, "sample-node", "sample-storage", &nodes.ListStorageContentParams{}); err == nil {
+			t.Errorf("ListStorageContent: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateStorageContent", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateStorageContent(ctx, "sample-node", "sample-storage", &nodes.CreateStorageContentParams{Filename: "sample-filename", Size: "sample-size", Vmid: 42})
+		if err != nil {
+			t.Fatalf("CreateStorageContent: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateStorageContent: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/storage/sample-storage/content")
+		assertParamValue(t, got.form, "filename", "sample-filename")
+		assertParamValue(t, got.form, "size", "sample-size")
+		assertParamValue(t, got.form, "vmid", "42")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateStorageContent(nilCtx, "sample-node", "sample-storage", &nodes.CreateStorageContentParams{Filename: "sample-filename", Size: "sample-size", Vmid: 42}); err == nil {
+			t.Errorf("CreateStorageContent: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteStorageContent", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.DeleteStorageContent(ctx, "sample-node", "sample-storage", "sample-volume", &nodes.DeleteStorageContentParams{})
+		if err != nil {
+			t.Fatalf("DeleteStorageContent: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("DeleteStorageContent: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/nodes/sample-node/storage/sample-storage/content/sample-volume")
+
+		var nilCtx context.Context
+		if _, err := svc.DeleteStorageContent(nilCtx, "sample-node", "sample-storage", "sample-volume", &nodes.DeleteStorageContentParams{}); err == nil {
+			t.Errorf("DeleteStorageContent: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetStorageContent", func(t *testing.T) {
-		_, err := svc.GetStorageContent(ctx, "stub", "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.GetStorageContent(ctx, "sample-node", "sample-storage", "sample-volume")
+		if err != nil {
+			t.Fatalf("GetStorageContent: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetStorageContent: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/storage/sample-storage/content/sample-volume")
+
+		var nilCtx context.Context
+		if _, err := svc.GetStorageContent(nilCtx, "sample-node", "sample-storage", "sample-volume"); err == nil {
+			t.Errorf("GetStorageContent: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateStorageContent2", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateStorageContent2(ctx, "sample-node", "sample-storage", "sample-volume", &nodes.CreateStorageContent2Params{Target: "sample-target"})
+		if err != nil {
+			t.Fatalf("CreateStorageContent2: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateStorageContent2: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/storage/sample-storage/content/sample-volume")
+		assertParamValue(t, got.form, "target", "sample-target")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateStorageContent2(nilCtx, "sample-node", "sample-storage", "sample-volume", &nodes.CreateStorageContent2Params{Target: "sample-target"}); err == nil {
+			t.Errorf("CreateStorageContent2: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateStorageContent", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateStorageContent(ctx, "sample-node", "sample-storage", "sample-volume", &nodes.UpdateStorageContentParams{})
+		if err != nil {
+			t.Fatalf("UpdateStorageContent: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/nodes/sample-node/storage/sample-storage/content/sample-volume")
+
+		var nilCtx context.Context
+		if err := svc.UpdateStorageContent(nilCtx, "sample-node", "sample-storage", "sample-volume", &nodes.UpdateStorageContentParams{}); err == nil {
+			t.Errorf("UpdateStorageContent: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateStorageDownloadUrl", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateStorageDownloadUrl(ctx, "sample-node", "sample-storage", &nodes.CreateStorageDownloadUrlParams{Content: "sample-content", Filename: "sample-filename", Url: "sample-url"})
+		if err != nil {
+			t.Fatalf("CreateStorageDownloadUrl: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateStorageDownloadUrl: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/storage/sample-storage/download-url")
+		assertParamValue(t, got.form, "content", "sample-content")
+		assertParamValue(t, got.form, "filename", "sample-filename")
+		assertParamValue(t, got.form, "url", "sample-url")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateStorageDownloadUrl(nilCtx, "sample-node", "sample-storage", &nodes.CreateStorageDownloadUrlParams{Content: "sample-content", Filename: "sample-filename", Url: "sample-url"}); err == nil {
+			t.Errorf("CreateStorageDownloadUrl: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListStorageFileRestoreDownload", func(t *testing.T) {
-		_, err := svc.ListStorageFileRestoreDownload(ctx, "stub", "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListStorageFileRestoreDownload(ctx, "sample-node", "sample-storage", &nodes.ListStorageFileRestoreDownloadParams{Filepath: "sample-filepath", Volume: "sample-volume"})
+		if err != nil {
+			t.Fatalf("ListStorageFileRestoreDownload: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListStorageFileRestoreDownload: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/storage/sample-storage/file-restore/download")
+		assertParamValue(t, got.query, "filepath", "sample-filepath")
+		assertParamValue(t, got.query, "volume", "sample-volume")
+
+		var nilCtx context.Context
+		if _, err := svc.ListStorageFileRestoreDownload(nilCtx, "sample-node", "sample-storage", &nodes.ListStorageFileRestoreDownloadParams{Filepath: "sample-filepath", Volume: "sample-volume"}); err == nil {
+			t.Errorf("ListStorageFileRestoreDownload: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListStorageFileRestoreList", func(t *testing.T) {
-		_, err := svc.ListStorageFileRestoreList(ctx, "stub", "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListStorageFileRestoreList(ctx, "sample-node", "sample-storage", &nodes.ListStorageFileRestoreListParams{Filepath: "sample-filepath", Volume: "sample-volume"})
+		if err != nil {
+			t.Fatalf("ListStorageFileRestoreList: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListStorageFileRestoreList: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/storage/sample-storage/file-restore/list")
+		assertParamValue(t, got.query, "filepath", "sample-filepath")
+		assertParamValue(t, got.query, "volume", "sample-volume")
+
+		var nilCtx context.Context
+		if _, err := svc.ListStorageFileRestoreList(nilCtx, "sample-node", "sample-storage", &nodes.ListStorageFileRestoreListParams{Filepath: "sample-filepath", Volume: "sample-volume"}); err == nil {
+			t.Errorf("ListStorageFileRestoreList: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListStorageIdentity", func(t *testing.T) {
-		_, err := svc.ListStorageIdentity(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListStorageIdentity(ctx, "sample-node", "sample-storage")
+		if err != nil {
+			t.Fatalf("ListStorageIdentity: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListStorageIdentity: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/storage/sample-storage/identity")
+
+		var nilCtx context.Context
+		if _, err := svc.ListStorageIdentity(nilCtx, "sample-node", "sample-storage"); err == nil {
+			t.Errorf("ListStorageIdentity: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListStorageImportMetadata", func(t *testing.T) {
-		_, err := svc.ListStorageImportMetadata(ctx, "stub", "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListStorageImportMetadata(ctx, "sample-node", "sample-storage", &nodes.ListStorageImportMetadataParams{Volume: "sample-volume"})
+		if err != nil {
+			t.Fatalf("ListStorageImportMetadata: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListStorageImportMetadata: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/storage/sample-storage/import-metadata")
+		assertParamValue(t, got.query, "volume", "sample-volume")
+
+		var nilCtx context.Context
+		if _, err := svc.ListStorageImportMetadata(nilCtx, "sample-node", "sample-storage", &nodes.ListStorageImportMetadataParams{Volume: "sample-volume"}); err == nil {
+			t.Errorf("ListStorageImportMetadata: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateStorageOciRegistryPull", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateStorageOciRegistryPull(ctx, "sample-node", "sample-storage", &nodes.CreateStorageOciRegistryPullParams{Reference: "sample-reference"})
+		if err != nil {
+			t.Fatalf("CreateStorageOciRegistryPull: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateStorageOciRegistryPull: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/storage/sample-storage/oci-registry-pull")
+		assertParamValue(t, got.form, "reference", "sample-reference")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateStorageOciRegistryPull(nilCtx, "sample-node", "sample-storage", &nodes.CreateStorageOciRegistryPullParams{Reference: "sample-reference"}); err == nil {
+			t.Errorf("CreateStorageOciRegistryPull: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteStoragePrunebackups", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.DeleteStoragePrunebackups(ctx, "sample-node", "sample-storage", &nodes.DeleteStoragePrunebackupsParams{})
+		if err != nil {
+			t.Fatalf("DeleteStoragePrunebackups: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("DeleteStoragePrunebackups: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/nodes/sample-node/storage/sample-storage/prunebackups")
+
+		var nilCtx context.Context
+		if _, err := svc.DeleteStoragePrunebackups(nilCtx, "sample-node", "sample-storage", &nodes.DeleteStoragePrunebackupsParams{}); err == nil {
+			t.Errorf("DeleteStoragePrunebackups: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListStoragePrunebackups", func(t *testing.T) {
-		_, err := svc.ListStoragePrunebackups(ctx, "stub", "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListStoragePrunebackups(ctx, "sample-node", "sample-storage", &nodes.ListStoragePrunebackupsParams{})
+		if err != nil {
+			t.Fatalf("ListStoragePrunebackups: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListStoragePrunebackups: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/storage/sample-storage/prunebackups")
+
+		var nilCtx context.Context
+		if _, err := svc.ListStoragePrunebackups(nilCtx, "sample-node", "sample-storage", &nodes.ListStoragePrunebackupsParams{}); err == nil {
+			t.Errorf("ListStoragePrunebackups: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListStorageRrd", func(t *testing.T) {
-		_, err := svc.ListStorageRrd(ctx, "stub", "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListStorageRrd(ctx, "sample-node", "sample-storage", &nodes.ListStorageRrdParams{Ds: "sample-ds", Timeframe: "sample-timeframe"})
+		if err != nil {
+			t.Fatalf("ListStorageRrd: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListStorageRrd: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/storage/sample-storage/rrd")
+		assertParamValue(t, got.query, "ds", "sample-ds")
+		assertParamValue(t, got.query, "timeframe", "sample-timeframe")
+
+		var nilCtx context.Context
+		if _, err := svc.ListStorageRrd(nilCtx, "sample-node", "sample-storage", &nodes.ListStorageRrdParams{Ds: "sample-ds", Timeframe: "sample-timeframe"}); err == nil {
+			t.Errorf("ListStorageRrd: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListStorageRrddata", func(t *testing.T) {
-		_, err := svc.ListStorageRrddata(ctx, "stub", "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListStorageRrddata(ctx, "sample-node", "sample-storage", &nodes.ListStorageRrddataParams{Timeframe: "sample-timeframe"})
+		if err != nil {
+			t.Fatalf("ListStorageRrddata: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListStorageRrddata: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/storage/sample-storage/rrddata")
+		assertParamValue(t, got.query, "timeframe", "sample-timeframe")
+
+		var nilCtx context.Context
+		if _, err := svc.ListStorageRrddata(nilCtx, "sample-node", "sample-storage", &nodes.ListStorageRrddataParams{Timeframe: "sample-timeframe"}); err == nil {
+			t.Errorf("ListStorageRrddata: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListStorageStatus", func(t *testing.T) {
-		_, err := svc.ListStorageStatus(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListStorageStatus(ctx, "sample-node", "sample-storage")
+		if err != nil {
+			t.Fatalf("ListStorageStatus: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListStorageStatus: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/storage/sample-storage/status")
+
+		var nilCtx context.Context
+		if _, err := svc.ListStorageStatus(nilCtx, "sample-node", "sample-storage"); err == nil {
+			t.Errorf("ListStorageStatus: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateStorageUpload", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateStorageUpload(ctx, "sample-node", "sample-storage", &nodes.CreateStorageUploadParams{Content: "sample-content", Filename: "sample-filename"})
+		if err != nil {
+			t.Fatalf("CreateStorageUpload: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateStorageUpload: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/storage/sample-storage/upload")
+		assertParamValue(t, got.form, "content", "sample-content")
+		assertParamValue(t, got.form, "filename", "sample-filename")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateStorageUpload(nilCtx, "sample-node", "sample-storage", &nodes.CreateStorageUploadParams{Content: "sample-content", Filename: "sample-filename"}); err == nil {
+			t.Errorf("CreateStorageUpload: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteSubscription", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteSubscription(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("DeleteSubscription: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/nodes/sample-node/subscription")
+
+		var nilCtx context.Context
+		if err := svc.DeleteSubscription(nilCtx, "sample-node"); err == nil {
+			t.Errorf("DeleteSubscription: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListSubscription", func(t *testing.T) {
-		_, err := svc.ListSubscription(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListSubscription(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListSubscription: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListSubscription: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/subscription")
+
+		var nilCtx context.Context
+		if _, err := svc.ListSubscription(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListSubscription: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateSubscription", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateSubscription(ctx, "sample-node", &nodes.CreateSubscriptionParams{})
+		if err != nil {
+			t.Fatalf("CreateSubscription: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/subscription")
+
+		var nilCtx context.Context
+		if err := svc.CreateSubscription(nilCtx, "sample-node", &nodes.CreateSubscriptionParams{}); err == nil {
+			t.Errorf("CreateSubscription: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateSubscription", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateSubscription(ctx, "sample-node", &nodes.UpdateSubscriptionParams{Key: "sample-key"})
+		if err != nil {
+			t.Fatalf("UpdateSubscription: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/nodes/sample-node/subscription")
+		assertParamValue(t, got.form, "key", "sample-key")
+
+		var nilCtx context.Context
+		if err := svc.UpdateSubscription(nilCtx, "sample-node", &nodes.UpdateSubscriptionParams{Key: "sample-key"}); err == nil {
+			t.Errorf("UpdateSubscription: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateSuspendall", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateSuspendall(ctx, "sample-node", &nodes.CreateSuspendallParams{})
+		if err != nil {
+			t.Fatalf("CreateSuspendall: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateSuspendall: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/suspendall")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateSuspendall(nilCtx, "sample-node", &nodes.CreateSuspendallParams{}); err == nil {
+			t.Errorf("CreateSuspendall: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListSyslog", func(t *testing.T) {
-		_, err := svc.ListSyslog(ctx, "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListSyslog(ctx, "sample-node", &nodes.ListSyslogParams{})
+		if err != nil {
+			t.Fatalf("ListSyslog: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListSyslog: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/syslog")
+
+		var nilCtx context.Context
+		if _, err := svc.ListSyslog(nilCtx, "sample-node", &nodes.ListSyslogParams{}); err == nil {
+			t.Errorf("ListSyslog: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListTasks", func(t *testing.T) {
-		_, err := svc.ListTasks(ctx, "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListTasks(ctx, "sample-node", &nodes.ListTasksParams{})
+		if err != nil {
+			t.Fatalf("ListTasks: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListTasks: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/tasks")
+
+		var nilCtx context.Context
+		if _, err := svc.ListTasks(nilCtx, "sample-node", &nodes.ListTasksParams{}); err == nil {
+			t.Errorf("ListTasks: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteTasks", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteTasks(ctx, "sample-node", "sample-upid")
+		if err != nil {
+			t.Fatalf("DeleteTasks: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/nodes/sample-node/tasks/sample-upid")
+
+		var nilCtx context.Context
+		if err := svc.DeleteTasks(nilCtx, "sample-node", "sample-upid"); err == nil {
+			t.Errorf("DeleteTasks: expected error for nil context, got nil")
+		}
 	})
 	t.Run("GetTasks", func(t *testing.T) {
-		_, err := svc.GetTasks(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.GetTasks(ctx, "sample-node", "sample-upid")
+		if err != nil {
+			t.Fatalf("GetTasks: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetTasks: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/tasks/sample-upid")
+
+		var nilCtx context.Context
+		if _, err := svc.GetTasks(nilCtx, "sample-node", "sample-upid"); err == nil {
+			t.Errorf("GetTasks: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListTasksLog", func(t *testing.T) {
-		_, err := svc.ListTasksLog(ctx, "stub", "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListTasksLog(ctx, "sample-node", "sample-upid", &nodes.ListTasksLogParams{})
+		if err != nil {
+			t.Fatalf("ListTasksLog: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListTasksLog: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/tasks/sample-upid/log")
+
+		var nilCtx context.Context
+		if _, err := svc.ListTasksLog(nilCtx, "sample-node", "sample-upid", &nodes.ListTasksLogParams{}); err == nil {
+			t.Errorf("ListTasksLog: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListTasksStatus", func(t *testing.T) {
-		_, err := svc.ListTasksStatus(ctx, "stub", "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListTasksStatus(ctx, "sample-node", "sample-upid")
+		if err != nil {
+			t.Fatalf("ListTasksStatus: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListTasksStatus: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/tasks/sample-upid/status")
+
+		var nilCtx context.Context
+		if _, err := svc.ListTasksStatus(nilCtx, "sample-node", "sample-upid"); err == nil {
+			t.Errorf("ListTasksStatus: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateTermproxy", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateTermproxy(ctx, "sample-node", &nodes.CreateTermproxyParams{})
+		if err != nil {
+			t.Fatalf("CreateTermproxy: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateTermproxy: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/termproxy")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateTermproxy(nilCtx, "sample-node", &nodes.CreateTermproxyParams{}); err == nil {
+			t.Errorf("CreateTermproxy: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListTime", func(t *testing.T) {
-		_, err := svc.ListTime(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListTime(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListTime: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListTime: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/time")
+
+		var nilCtx context.Context
+		if _, err := svc.ListTime(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListTime: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateTime", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateTime(ctx, "sample-node", &nodes.UpdateTimeParams{Timezone: "sample-timezone"})
+		if err != nil {
+			t.Fatalf("UpdateTime: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/nodes/sample-node/time")
+		assertParamValue(t, got.form, "timezone", "sample-timezone")
+
+		var nilCtx context.Context
+		if err := svc.UpdateTime(nilCtx, "sample-node", &nodes.UpdateTimeParams{Timezone: "sample-timezone"}); err == nil {
+			t.Errorf("UpdateTime: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListVersion", func(t *testing.T) {
-		_, err := svc.ListVersion(ctx, "stub")
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListVersion(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListVersion: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListVersion: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/version")
+
+		var nilCtx context.Context
+		if _, err := svc.ListVersion(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListVersion: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateVncshell", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateVncshell(ctx, "sample-node", &nodes.CreateVncshellParams{})
+		if err != nil {
+			t.Fatalf("CreateVncshell: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateVncshell: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/vncshell")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateVncshell(nilCtx, "sample-node", &nodes.CreateVncshellParams{}); err == nil {
+			t.Errorf("CreateVncshell: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListVncwebsocket", func(t *testing.T) {
-		_, err := svc.ListVncwebsocket(ctx, "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListVncwebsocket(ctx, "sample-node", &nodes.ListVncwebsocketParams{Port: 42, Vncticket: "sample-vncticket"})
+		if err != nil {
+			t.Fatalf("ListVncwebsocket: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListVncwebsocket: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/vncwebsocket")
+		assertParamValue(t, got.query, "port", "42")
+		assertParamValue(t, got.query, "vncticket", "sample-vncticket")
+
+		var nilCtx context.Context
+		if _, err := svc.ListVncwebsocket(nilCtx, "sample-node", &nodes.ListVncwebsocketParams{Port: 42, Vncticket: "sample-vncticket"}); err == nil {
+			t.Errorf("ListVncwebsocket: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateVzdump", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateVzdump(ctx, "sample-node", &nodes.CreateVzdumpParams{})
+		if err != nil {
+			t.Fatalf("CreateVzdump: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateVzdump: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/vzdump")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateVzdump(nilCtx, "sample-node", &nodes.CreateVzdumpParams{}); err == nil {
+			t.Errorf("CreateVzdump: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListVzdumpDefaults", func(t *testing.T) {
-		_, err := svc.ListVzdumpDefaults(ctx, "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListVzdumpDefaults(ctx, "sample-node", &nodes.ListVzdumpDefaultsParams{})
+		if err != nil {
+			t.Fatalf("ListVzdumpDefaults: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListVzdumpDefaults: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/vzdump/defaults")
+
+		var nilCtx context.Context
+		if _, err := svc.ListVzdumpDefaults(nilCtx, "sample-node", &nodes.ListVzdumpDefaultsParams{}); err == nil {
+			t.Errorf("ListVzdumpDefaults: expected error for nil context, got nil")
+		}
 	})
 	t.Run("ListVzdumpExtractconfig", func(t *testing.T) {
-		_, err := svc.ListVzdumpExtractconfig(ctx, "stub", nil)
-		_ = err // smoke: any outcome is acceptable; the stub server is permissive
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListVzdumpExtractconfig(ctx, "sample-node", &nodes.ListVzdumpExtractconfigParams{Volume: "sample-volume"})
+		if err != nil {
+			t.Fatalf("ListVzdumpExtractconfig: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListVzdumpExtractconfig: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/vzdump/extractconfig")
+		assertParamValue(t, got.query, "volume", "sample-volume")
+
+		var nilCtx context.Context
+		if _, err := svc.ListVzdumpExtractconfig(nilCtx, "sample-node", &nodes.ListVzdumpExtractconfigParams{Volume: "sample-volume"}); err == nil {
+			t.Errorf("ListVzdumpExtractconfig: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateWakeonlan", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateWakeonlan(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("CreateWakeonlan: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateWakeonlan: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/wakeonlan")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateWakeonlan(nilCtx, "sample-node"); err == nil {
+			t.Errorf("CreateWakeonlan: expected error for nil context, got nil")
+		}
+	})
+	t.Run("ErrorPath_GET", func(t *testing.T) {
+		harness.set(http.StatusInternalServerError, `{"data":null,"success":0,"message":"boom"}`)
+
+		_, err := svc.ListNodes(ctx)
+		if err == nil {
+			t.Fatalf("ListNodes: expected error on 500 response, got nil")
+		}
+	})
+	t.Run("ErrorPath_POST", func(t *testing.T) {
+		harness.set(http.StatusInternalServerError, `{"data":null,"success":0,"message":"boom"}`)
+
+		_, err := svc.CreateAplinfo(ctx, "sample-node", &nodes.CreateAplinfoParams{Storage: "sample-storage", Template: "sample-template"})
+		if err == nil {
+			t.Fatalf("CreateAplinfo: expected error on 500 response, got nil")
+		}
+	})
+	t.Run("ErrorPath_PUT", func(t *testing.T) {
+		harness.set(http.StatusInternalServerError, `{"data":null,"success":0,"message":"boom"}`)
+
+		err := svc.UpdateAptRepositories(ctx, "sample-node", &nodes.UpdateAptRepositoriesParams{Handle: "sample-handle"})
+		if err == nil {
+			t.Fatalf("UpdateAptRepositories: expected error on 500 response, got nil")
+		}
+	})
+	t.Run("ErrorPath_DELETE", func(t *testing.T) {
+		harness.set(http.StatusInternalServerError, `{"data":null,"success":0,"message":"boom"}`)
+
+		_, err := svc.DeleteCephFs(ctx, "sample-node", "sample-name", &nodes.DeleteCephFsParams{})
+		if err == nil {
+			t.Fatalf("DeleteCephFs: expected error on 500 response, got nil")
+		}
 	})
 }
