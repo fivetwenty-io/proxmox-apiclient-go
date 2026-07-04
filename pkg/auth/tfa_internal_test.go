@@ -6,6 +6,7 @@ package auth
 import (
 	"bufio"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 )
@@ -309,5 +310,226 @@ func TestNewInteractiveTFAHandler(t *testing.T) {
 
 	if h.reader == nil {
 		t.Error("NewInteractiveTFAHandler().reader is nil")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// promptUsernameFrom
+// ---------------------------------------------------------------------------
+
+func TestPromptUsernameFrom(t *testing.T) {
+	t.Parallel()
+
+	got, err := promptUsernameFrom(strings.NewReader("alice@pve\n"), "Username: ")
+	if err != nil {
+		t.Fatalf("promptUsernameFrom() error = %v", err)
+	}
+
+	if got != "alice@pve" {
+		t.Errorf("promptUsernameFrom() = %q, want %q", got, "alice@pve")
+	}
+}
+
+func TestPromptUsernameFrom_TrimsWhitespace(t *testing.T) {
+	t.Parallel()
+
+	got, err := promptUsernameFrom(strings.NewReader("  bob  \n"), "Username: ")
+	if err != nil {
+		t.Fatalf("promptUsernameFrom() error = %v", err)
+	}
+
+	if got != "bob" {
+		t.Errorf("promptUsernameFrom() = %q, want %q", got, "bob")
+	}
+}
+
+func TestPromptUsernameFrom_ReadError(t *testing.T) {
+	t.Parallel()
+
+	// An empty reader yields io.EOF with no delimiter ever found, so
+	// ReadString reports an error.
+	_, err := promptUsernameFrom(strings.NewReader(""), "Username: ")
+	if err == nil {
+		t.Fatal("expected error for empty reader, got nil")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// promptPasswordFrom
+// ---------------------------------------------------------------------------
+
+// newPipeWithContent returns the read end of an os.Pipe pre-loaded with
+// content, having closed the write end. A pipe's file descriptor is never a
+// terminal, so promptPasswordFrom deterministically takes the non-tty
+// (plain-read) fallback path regardless of the environment running the test.
+func newPipeWithContent(t *testing.T, content string) *os.File {
+	t.Helper()
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe() error = %v", err)
+	}
+
+	t.Cleanup(func() {
+		_ = r.Close()
+	})
+
+	_, writeErr := w.WriteString(content)
+	if writeErr != nil {
+		t.Fatalf("write to pipe error = %v", writeErr)
+	}
+
+	closeErr := w.Close()
+	if closeErr != nil {
+		t.Fatalf("close pipe writer error = %v", closeErr)
+	}
+
+	return r
+}
+
+func TestPromptPasswordFrom_NonTerminal_ReadsLine(t *testing.T) {
+	t.Parallel()
+
+	r := newPipeWithContent(t, "s3cr3t\n")
+
+	got, err := promptPasswordFrom(r, "Password: ")
+	if err != nil {
+		t.Fatalf("promptPasswordFrom() error = %v", err)
+	}
+
+	if got != "s3cr3t" {
+		t.Errorf("promptPasswordFrom() = %q, want %q", got, "s3cr3t")
+	}
+}
+
+// TestPromptPasswordFrom_NonTerminal_ReadError verifies that a non-EOF read
+// failure (here, reading from an already-closed file) is surfaced as an
+// error rather than silently returning an empty password.
+func TestPromptPasswordFrom_NonTerminal_ReadError(t *testing.T) {
+	t.Parallel()
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe() error = %v", err)
+	}
+
+	closeWriterErr := w.Close()
+	if closeWriterErr != nil {
+		t.Fatalf("close pipe writer error = %v", closeWriterErr)
+	}
+
+	closeReaderErr := r.Close()
+	if closeReaderErr != nil {
+		t.Fatalf("close pipe reader error = %v", closeReaderErr)
+	}
+
+	_, err = promptPasswordFrom(r, "Password: ")
+	if err == nil {
+		t.Fatal("expected error when the password file is already closed, got nil")
+	}
+}
+
+func TestPromptPasswordFrom_NonTerminal_NoTrailingNewline(t *testing.T) {
+	t.Parallel()
+
+	// No trailing newline: ReadString returns io.EOF alongside the data it
+	// did read. That must still be treated as a successful read.
+	r := newPipeWithContent(t, "no-newline-secret")
+
+	got, err := promptPasswordFrom(r, "Password: ")
+	if err != nil {
+		t.Fatalf("promptPasswordFrom() error = %v", err)
+	}
+
+	if got != "no-newline-secret" {
+		t.Errorf("promptPasswordFrom() = %q, want %q", got, "no-newline-secret")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// promptCredentialsFrom
+// ---------------------------------------------------------------------------
+
+func TestPromptCredentialsFrom_UsernameWithRealm(t *testing.T) {
+	t.Parallel()
+
+	passwordFile := newPipeWithContent(t, "hunter2\n")
+
+	creds, err := promptCredentialsFrom(strings.NewReader("alice@pve\n"), passwordFile)
+	if err != nil {
+		t.Fatalf("promptCredentialsFrom() error = %v", err)
+	}
+
+	if creds.Username != "alice" {
+		t.Errorf("Username = %q, want %q", creds.Username, "alice")
+	}
+
+	if creds.Realm != "pve" {
+		t.Errorf("Realm = %q, want %q", creds.Realm, "pve")
+	}
+
+	if creds.Password != "hunter2" {
+		t.Errorf("Password = %q, want %q", creds.Password, "hunter2")
+	}
+}
+
+func TestPromptCredentialsFrom_UsernameWithoutRealm_DefaultsToPAM(t *testing.T) {
+	t.Parallel()
+
+	passwordFile := newPipeWithContent(t, "hunter2\n")
+
+	creds, err := promptCredentialsFrom(strings.NewReader("root\n"), passwordFile)
+	if err != nil {
+		t.Fatalf("promptCredentialsFrom() error = %v", err)
+	}
+
+	if creds.Username != "root" {
+		t.Errorf("Username = %q, want %q", creds.Username, "root")
+	}
+
+	if creds.Realm != realmPAM {
+		t.Errorf("Realm = %q, want default %q", creds.Realm, realmPAM)
+	}
+}
+
+func TestPromptCredentialsFrom_UsernameReadError(t *testing.T) {
+	t.Parallel()
+
+	passwordFile := newPipeWithContent(t, "hunter2\n")
+
+	_, err := promptCredentialsFrom(strings.NewReader(""), passwordFile)
+	if err == nil {
+		t.Fatal("expected error when username reader fails, got nil")
+	}
+}
+
+// TestPromptCredentialsFrom_PasswordReadError verifies that a failing
+// password read (here, an already-closed file) propagates as an error and
+// does not return partial credentials.
+func TestPromptCredentialsFrom_PasswordReadError(t *testing.T) {
+	t.Parallel()
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe() error = %v", err)
+	}
+
+	closeWriterErr := w.Close()
+	if closeWriterErr != nil {
+		t.Fatalf("close pipe writer error = %v", closeWriterErr)
+	}
+
+	closeReaderErr := r.Close()
+	if closeReaderErr != nil {
+		t.Fatalf("close pipe reader error = %v", closeReaderErr)
+	}
+
+	creds, err := promptCredentialsFrom(strings.NewReader("alice@pve\n"), r)
+	if err == nil {
+		t.Fatal("expected error when password file is already closed, got nil")
+	}
+
+	if creds != nil {
+		t.Errorf("credentials = %+v, want nil on password read error", creds)
 	}
 }

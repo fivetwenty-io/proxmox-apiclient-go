@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -1243,5 +1244,189 @@ func TestNewTicketAuthenticator_CookieNameFallback(t *testing.T) {
 	headers := ticketAuth.GetHeaders()
 	if !strings.HasPrefix(headers["Cookie"], "PVEAuthCookie=") {
 		t.Errorf("Cookie = %q, want prefix %q", headers["Cookie"], "PVEAuthCookie=")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 15. Logout status-code handling.
+// ---------------------------------------------------------------------------
+
+// TestTicketAuthenticator_Logout_StatusHandling verifies that Logout only
+// clears the local ticket on a 2xx response from the server; on any other
+// status the ticket is retained and the returned error mentions the HTTP
+// status so the caller can retry.
+func TestTicketAuthenticator_Logout_StatusHandling(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name          string
+		logoutStatus  int
+		logoutBody    string
+		wantErr       bool
+		wantTicketNil bool
+	}{
+		{
+			name:          "200 OK clears ticket",
+			logoutStatus:  http.StatusOK,
+			logoutBody:    `{"data":null,"success":1}`,
+			wantErr:       false,
+			wantTicketNil: true,
+		},
+		{
+			name:          "403 forbidden retains ticket",
+			logoutStatus:  http.StatusForbidden,
+			logoutBody:    `{"message":"permission denied","success":0}`,
+			wantErr:       true,
+			wantTicketNil: false,
+		},
+		{
+			name:          "500 internal server error retains ticket",
+			logoutStatus:  http.StatusInternalServerError,
+			logoutBody:    `{"message":"internal error","success":0}`,
+			wantErr:       true,
+			wantTicketNil: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			srv := newLogoutStatusServer(tc.logoutStatus, tc.logoutBody)
+			defer srv.Close()
+
+			ticketAuth := newRootTicketAuthenticator(srv, testSecretPass)
+
+			authErr := ticketAuth.Authenticate()
+			if authErr != nil {
+				t.Fatalf("Authenticate() error = %v", authErr)
+			}
+
+			logoutErr := ticketAuth.Logout()
+			assertLogoutError(t, logoutErr, tc.wantErr, tc.logoutStatus)
+			assertLogoutTicketState(t, ticketAuth, tc.wantTicketNil)
+		})
+	}
+}
+
+// newLogoutStatusServer builds a mock PVE server that always succeeds login,
+// and responds to DELETE /access/ticket (logout) with logoutStatus/logoutBody.
+func newLogoutStatusServer(logoutStatus int, logoutBody string) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(respWriter http.ResponseWriter, httpReq *http.Request) {
+		switch {
+		case httpReq.Method == http.MethodPost && httpReq.URL.Path == pathAccessTicket:
+			writeFullTicket(respWriter, okFullTicket("LOGOUT-TICKET", "LOGOUT-CSRF", testUserRootPAM))
+
+		case httpReq.Method == http.MethodDelete && httpReq.URL.Path == pathAccessTicket:
+			respWriter.WriteHeader(logoutStatus)
+			_, _ = io.WriteString(respWriter, logoutBody)
+
+		default:
+			http.NotFound(respWriter, httpReq)
+		}
+	}))
+}
+
+// assertLogoutError checks Logout()'s returned error against wantErr, and
+// when an error is expected, that it mentions the HTTP status that produced it.
+func assertLogoutError(t *testing.T, err error, wantErr bool, status int) {
+	t.Helper()
+
+	if wantErr && err == nil {
+		t.Fatal("Logout() error = nil, want non-nil")
+	}
+
+	if !wantErr && err != nil {
+		t.Fatalf("Logout() error = %v, want nil", err)
+	}
+
+	if !wantErr {
+		return
+	}
+
+	wantStatus := strconv.Itoa(status)
+	if !strings.Contains(err.Error(), wantStatus) {
+		t.Errorf("Logout() error = %q, want it to mention status %s", err.Error(), wantStatus)
+	}
+}
+
+// assertLogoutTicketState checks that the local ticket was cleared or
+// retained as expected, and that IsAuthenticated() agrees.
+func assertLogoutTicketState(t *testing.T, ticketAuth *auth.TicketAuthenticator, wantTicketNil bool) {
+	t.Helper()
+
+	ticket := ticketAuth.GetTicket()
+
+	if wantTicketNil {
+		if ticket != nil {
+			t.Error("expected GetTicket() == nil after successful logout")
+		}
+
+		if ticketAuth.IsAuthenticated() {
+			t.Error("expected IsAuthenticated() == false after successful logout")
+		}
+
+		return
+	}
+
+	if ticket == nil {
+		t.Error("expected GetTicket() to be retained after failed logout")
+	}
+
+	if !ticketAuth.IsAuthenticated() {
+		t.Error("expected IsAuthenticated() == true after failed logout (ticket retained)")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 16. Non-JSON (reverse-proxy) error bodies on the TFA endpoint.
+// ---------------------------------------------------------------------------
+
+// TestCompleteTFA_NonJSONErrorPage verifies that a non-2xx response with a
+// non-JSON body (e.g. an HTML 502 page from a reverse proxy) is not fed to
+// the JSON decoder. CompleteTFA must return a nil Go error alongside an
+// AuthResult whose Error mentions the HTTP status, matching the behavior for
+// a non-2xx response carrying a valid JSON error body.
+func TestCompleteTFA_NonJSONErrorPage(t *testing.T) {
+	t.Parallel()
+
+	const htmlBody = `<html><body><h1>502 Bad Gateway</h1></body></html>`
+
+	srv := httptest.NewServer(http.HandlerFunc(func(respWriter http.ResponseWriter, httpReq *http.Request) {
+		if httpReq.Method == http.MethodPost && httpReq.URL.Path == pathAccessTFA {
+			respWriter.Header().Set("Content-Type", "text/html")
+			respWriter.WriteHeader(http.StatusBadGateway)
+			_, _ = io.WriteString(respWriter, htmlBody)
+
+			return
+		}
+
+		http.NotFound(respWriter, httpReq)
+	}))
+	defer srv.Close()
+
+	ticketAuth := newRootTicketAuthenticator(srv, "password")
+	challenge := &auth.TFAChallenge{Ticket: testPartialTicket, Types: []string{testTOTPType}}
+	response := &auth.TFAResponse{Response: "000000", Type: testTOTPType}
+
+	result, err := ticketAuth.CompleteTFA(challenge, response)
+	if err != nil {
+		t.Fatalf("CompleteTFA() returned unexpected error = %v", err)
+	}
+
+	if result.Success {
+		t.Error("AuthResult.Success = true, want false for 502 HTML response")
+	}
+
+	if result.Error == nil {
+		t.Fatal("AuthResult.Error is nil, want non-nil for 502 HTML response")
+	}
+
+	if !strings.Contains(result.Error.Error(), "502") {
+		t.Errorf("AuthResult.Error = %q, want it to mention HTTP status 502", result.Error.Error())
+	}
+
+	if ticketAuth.IsAuthenticated() {
+		t.Error("expected IsAuthenticated() == false after failed TFA")
 	}
 }
