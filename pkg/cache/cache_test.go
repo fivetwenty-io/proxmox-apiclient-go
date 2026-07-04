@@ -1,6 +1,7 @@
 package cache_test
 
 import (
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -78,17 +79,24 @@ func TestCache_TTLExpiration(t *testing.T) {
 func TestCache_LRUEviction(t *testing.T) {
 	t.Parallel()
 
+	// Values are sized so that estimateSize (len(string)) makes each entry
+	// ~1KB; 3 entries exactly fill MaxSize, so a 4th forces an eviction.
+	value1 := strings.Repeat("a", 1024)
+	value2 := strings.Repeat("b", 1024)
+	value3 := strings.Repeat("c", 1024)
+	value4 := strings.Repeat("d", 1024)
+
 	config := cache.DefaultConfig()
 	config.Enabled = true
-	config.MaxSize = 3 * 1024 // 3KB total (3 entries with 1KB each)
+	config.MaxSize = 3 * 1024 // 3KB total (3 entries with ~1KB each)
 
 	testCache := cache.NewCache(config)
 	defer testCache.Close()
 
 	// Add 3 entries (fills cache)
-	testCache.Set("key1", "value1", 1*time.Minute)
-	testCache.Set("key2", "value2", 1*time.Minute)
-	testCache.Set("key3", "value3", 1*time.Minute)
+	testCache.Set("key1", value1, 1*time.Minute)
+	testCache.Set("key2", value2, 1*time.Minute)
+	testCache.Set("key3", value3, 1*time.Minute)
 
 	// Access in order: key1, key2, key3 (key1 becomes LRU)
 	if _, found := testCache.Get("key1"); !found {
@@ -104,7 +112,7 @@ func TestCache_LRUEviction(t *testing.T) {
 	}
 
 	// Add 4th entry (should evict oldest which is key1 since it was accessed first)
-	testCache.Set("key4", "value4", 1*time.Minute)
+	testCache.Set("key4", value4, 1*time.Minute)
 
 	// key1 should be evicted (it's the LRU)
 	if _, found := testCache.Get("key1"); found {
@@ -127,6 +135,93 @@ func TestCache_LRUEviction(t *testing.T) {
 	stats := testCache.Stats()
 	if stats.Evictions < 1 {
 		t.Errorf("Expected at least 1 eviction, got %d", stats.Evictions)
+	}
+}
+
+// TestCache_SizeBasedEviction_RealisticValues verifies that estimateSize is
+// type-aware: a cache sized to hold one large value plus a couple of small
+// values should not evict on Set until the large value alone would exceed
+// MaxSize, and adding the large value should evict enough small values to fit.
+func TestCache_SizeBasedEviction_RealisticValues(t *testing.T) {
+	t.Parallel()
+
+	smallValue := "x" // 1 byte
+	largeValue := strings.Repeat("y", 4096)
+
+	config := cache.DefaultConfig()
+	config.Enabled = true
+	config.MaxSize = 4096 + 4 // room for the large value plus a few small ones, not all five
+
+	testCache := cache.NewCache(config)
+	defer testCache.Close()
+
+	// Several tiny values fit comfortably alongside each other under a byte-
+	// accurate size model; a flat-1KB-per-entry model would have evicted
+	// after 4 entries even though the actual bytes stored are tiny.
+	testCache.Set("small1", smallValue, time.Minute)
+	testCache.Set("small2", smallValue, time.Minute)
+	testCache.Set("small3", smallValue, time.Minute)
+	testCache.Set("small4", smallValue, time.Minute)
+	testCache.Set("small5", smallValue, time.Minute)
+
+	stats := testCache.Stats()
+	if stats.Evictions != 0 {
+		t.Errorf("small values: want 0 evictions, got %d (stats.Size=%d)", stats.Evictions, stats.Size)
+	}
+
+	if stats.Entries != 5 {
+		t.Errorf("small values: want 5 entries, got %d", stats.Entries)
+	}
+
+	// Adding the large value must evict enough small entries to stay within
+	// MaxSize.
+	testCache.Set("large", largeValue, time.Minute)
+
+	stats = testCache.Stats()
+	if stats.Size > config.MaxSize {
+		t.Errorf("size after large Set: want <= %d, got %d", config.MaxSize, stats.Size)
+	}
+
+	if stats.Evictions == 0 {
+		t.Error("large value: want at least 1 eviction to make room")
+	}
+
+	if _, found := testCache.Get("large"); !found {
+		t.Error("large value: want present after Set")
+	}
+}
+
+// selfSizingValue reports a fixed footprint through the cache.Sizer interface.
+type selfSizingValue struct {
+	payload []byte
+}
+
+func (v *selfSizingValue) CacheSize() int64 {
+	return int64(len(v.payload))
+}
+
+func TestCache_SizerValues_UseReportedSize(t *testing.T) {
+	t.Parallel()
+
+	config := cache.DefaultConfig()
+	config.Enabled = true
+	config.MaxSize = 100
+
+	testCache := cache.NewCache(config)
+	defer testCache.Close()
+
+	// A Sizer-reported 90-byte value fits within the 100-byte budget; a
+	// JSON-based estimate of the same struct would base64-inflate the payload
+	// and overshoot it.
+	testCache.Set("sized", &selfSizingValue{payload: make([]byte, 90)}, time.Minute)
+
+	stats := testCache.Stats()
+	if stats.Size != 90 {
+		t.Errorf("Sizer value: want accounted size 90, got %d", stats.Size)
+	}
+
+	if stats.Evictions != 0 {
+		t.Errorf("Sizer value: want 0 evictions, got %d", stats.Evictions)
 	}
 }
 
