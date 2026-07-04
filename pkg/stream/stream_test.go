@@ -1,6 +1,7 @@
 package stream_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -556,6 +557,125 @@ func TestReader_Read(t *testing.T) {
 
 	if bytesRead == 0 {
 		t.Error("Reader.Read: want n>0")
+	}
+}
+
+// TestReader_Read_SmallBuffer_IOCopyReconstructsExactBytes drives Reader.Read
+// through io.CopyBuffer with a buffer far smaller than a single marshaled
+// item, forcing every item to be served across several Read calls. This
+// exercises the internal remainder buffering that keeps Reader from silently
+// dropping bytes when the caller's buffer is undersized.
+func TestReader_Read_SmallBuffer_IOCopyReconstructsExactBytes(t *testing.T) {
+	t.Parallel()
+
+	reader := newJSONLinesReader(`{"id":1}`, `{"id":2}`, `{"id":3}`)
+
+	strm := stream.New(reader, nil)
+	defer strm.Close() //nolint:errcheck
+
+	strmReader := stream.NewReader(strm)
+
+	var out bytes.Buffer
+
+	// 3-byte copy buffer: smaller than any marshaled item, so io.CopyBuffer
+	// must call Read many times per item.
+	n, err := io.CopyBuffer(&out, strmReader, make([]byte, 3))
+	if err != nil {
+		t.Fatalf("io.CopyBuffer: %v", err)
+	}
+
+	want := "{\"id\":1}\n{\"id\":2}\n{\"id\":3}\n"
+	if out.String() != want {
+		t.Errorf("reconstructed bytes: want %q, got %q", want, out.String())
+	}
+
+	if int(n) != len(want) {
+		t.Errorf("bytes copied: want %d, got %d", len(want), n)
+	}
+}
+
+// TestReader_Read_IOReadFull_ExactLength reads the whole known-length output
+// in a single io.ReadFull call. io.ReadFull loops calling Read until the
+// destination is full or an error occurs, so this confirms Reader never
+// returns fewer total bytes than were marshaled even when individual Read
+// calls return partial data.
+func TestReader_Read_IOReadFull_ExactLength(t *testing.T) {
+	t.Parallel()
+
+	reader := newJSONLinesReader(`{"a":1}`, `{"b":2}`, `{"c":3}`)
+
+	strm := stream.New(reader, nil)
+	defer strm.Close() //nolint:errcheck
+
+	strmReader := stream.NewReader(strm)
+
+	want := "{\"a\":1}\n{\"b\":2}\n{\"c\":3}\n"
+	buf := make([]byte, len(want))
+
+	n, err := io.ReadFull(strmReader, buf)
+	if err != nil {
+		t.Fatalf("io.ReadFull: %v", err)
+	}
+
+	if n != len(want) {
+		t.Fatalf("io.ReadFull: want n=%d, got %d", len(want), n)
+	}
+
+	if string(buf) != want {
+		t.Errorf("reconstructed bytes: want %q, got %q", want, string(buf))
+	}
+
+	// Stream is now exhausted; a further Read must report io.EOF.
+	extra := make([]byte, 1)
+
+	_, err = strmReader.Read(extra)
+	if !errors.Is(err, io.EOF) {
+		t.Errorf("Read after exhaustion: want io.EOF, got %v", err)
+	}
+}
+
+// TestReader_Read_PartialThenRemainder manually drives Read with a buffer
+// smaller than one item to check that the second call resumes mid-item
+// (rather than fetching a new item) and that byte order is preserved.
+func TestReader_Read_PartialThenRemainder(t *testing.T) {
+	t.Parallel()
+
+	reader := newJSONLinesReader(`{"id":1}`)
+
+	strm := stream.New(reader, nil)
+	defer strm.Close() //nolint:errcheck
+
+	strmReader := stream.NewReader(strm)
+
+	want := "{\"id\":1}\n"
+
+	first := make([]byte, 4)
+
+	firstReadLen, err := strmReader.Read(first)
+	if err != nil {
+		t.Fatalf("first Read: %v", err)
+	}
+
+	if firstReadLen != 4 {
+		t.Fatalf("first Read: want n=4, got %d", firstReadLen)
+	}
+
+	rest := make([]byte, 64)
+
+	secondReadLen, err := strmReader.Read(rest)
+	if err != nil {
+		t.Fatalf("second Read: %v", err)
+	}
+
+	got := string(first[:firstReadLen]) + string(rest[:secondReadLen])
+	if got != want {
+		t.Errorf("reconstructed bytes: want %q, got %q", want, got)
+	}
+
+	// Item and stream are both exhausted now.
+	thirdReadLen, err := strmReader.Read(rest)
+	if thirdReadLen != 0 || !errors.Is(err, io.EOF) {
+		t.Errorf("Read after exhaustion: want (0, io.EOF), got (%d, %v)", thirdReadLen, err)
 	}
 }
 

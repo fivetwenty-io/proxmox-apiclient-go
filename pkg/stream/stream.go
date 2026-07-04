@@ -1,4 +1,3 @@
-// Package stream provides response streaming functionality for the PVE API client.
 package stream
 
 import (
@@ -502,9 +501,15 @@ func (s *Stream) trySendError(err error) {
 	}
 }
 
-// Reader provides a reader interface for streaming.
+// Reader adapts a Stream to the io.Reader interface. Each stream item is
+// marshaled to JSON and emitted followed by a newline, so a Reader's output
+// is a valid JSON Lines byte stream regardless of the underlying Stream's
+// configured Format; callers who need the original wire format should read
+// from the Stream directly instead of through Reader.
 type Reader struct {
-	stream *Stream
+	stream    *Stream
+	remainder []byte // undelivered bytes from the most recently marshaled item
+	err       error  // sticky terminal error once the stream is exhausted or fails
 }
 
 // NewReader creates a new stream reader.
@@ -512,20 +517,38 @@ func NewReader(stream *Stream) *Reader {
 	return &Reader{stream: stream}
 }
 
-// Read implements io.Reader interface.
+// Read implements io.Reader. It satisfies the io.Reader contract: when the
+// caller's buffer is smaller than the next marshaled item, the remainder is
+// buffered internally and served on subsequent calls before the next item is
+// pulled from the stream, so no bytes are ever dropped.
 func (r *Reader) Read(buffer []byte) (int, error) {
-	item, err := r.stream.Read()
-	if err != nil {
-		return 0, err
+	if len(buffer) == 0 {
+		return 0, nil
 	}
 
-	// Convert item to bytes
-	data, err := json.Marshal(item)
-	if err != nil {
-		return 0, fmt.Errorf("failed to marshal item to JSON: %w", err)
+	if len(r.remainder) == 0 {
+		if r.err != nil {
+			return 0, r.err
+		}
+
+		item, err := r.stream.Read()
+		if err != nil {
+			r.err = err
+
+			return 0, err
+		}
+
+		data, err := json.Marshal(item)
+		if err != nil {
+			return 0, fmt.Errorf("failed to marshal item to JSON: %w", err)
+		}
+
+		data = append(data, '\n')
+		r.remainder = data
 	}
 
-	n := copy(buffer, data)
+	n := copy(buffer, r.remainder)
+	r.remainder = r.remainder[n:]
 
 	return n, nil
 }
