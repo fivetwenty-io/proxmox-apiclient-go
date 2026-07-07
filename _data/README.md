@@ -1,8 +1,9 @@
-# PVE API Specification Data
+# Proxmox API Specification Data
 
-This directory holds the upstream Proxmox VE API specification used as input
-to the typed client codegen pipeline at `cmd/pvegen`. The generator emits
-typed bindings for all six top-level PVE namespaces:
+This directory holds the upstream Proxmox API specifications used as input
+to the typed client codegen pipeline at `cmd/pvegen`: `apidoc.json` for
+Proxmox VE and `pbs-apidoc.json` for Proxmox Backup Server. For PVE, the
+generator emits typed bindings for all six top-level namespaces:
 
 - `/version`  → `pkg/api/version/`
 - `/access`   → `pkg/api/access/`
@@ -85,8 +86,37 @@ To refresh against a newer PVE release:
    make check
    ```
 
+## PBS specification (`pbs-apidoc.json`)
+
+The same tree format published by the Proxmox Backup Server API viewer.
+`cmd/pvegen --dialect pbs` reads it and emits `pkg/pbs/<ns>/` bindings for
+ten namespaces (`access`, `admin`, `config`, `nodes`, `ping`, `pull`,
+`push`, `status`, `tape`, `version`), skipping the `/backup` and `/reader`
+HTTP/2 chunk-protocol endpoints and the `GET /` directory index.
+
+**Current pin: fetched 2026-07-07 — 232 paths / 349 method-operations in
+the API tree (346 generated).**
+
+Dialect differences from the PVE spec (all tolerated by the generator):
+`additionalProperties` is a JSON boolean rather than 0/1, `format` is a
+nested schema object rather than a format-name string, `typetext` is
+absent, and streaming endpoints carry `method: DOWNLOAD`/`UPLOAD` under
+their GET/POST verb keys.
+
+To refresh against a newer PBS release, follow the PVE steps above with:
+
+- Source: `https://pbs.proxmox.com/docs/api-viewer/apidoc.js`
+- Assignment to look for: `var apiSchema = [ ... ];` (not `const`)
+- Output: `_data/pbs-apidoc.json`
+
+The extracted array has three top-level nodes: the `/` API tree plus the
+`/backup/_upgrade_` and `/reader/_upgrade_` protocol trees. Keep all three
+— the generator skips the protocol trees itself, and dropping them would
+make future spec diffs noisier.
+
 ## Versioning
 
-`apidoc.json` is treated as a vendored input. A bump to a newer PVE
-spec is a deliberate, reviewed change: it produces a diff in
-`pkg/api/**/*_gen.go` that callers can inspect for breaking changes.
+`apidoc.json` and `pbs-apidoc.json` are treated as vendored inputs. A bump
+to a newer PVE/PBS spec is a deliberate, reviewed change: it produces a
+diff in `pkg/api/**/*_gen.go` or `pkg/pbs/**/*_gen.go` that callers can
+inspect for breaking changes.

@@ -5,6 +5,18 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v3.4.0] — 2026-07-07
+
+### Changed
+
+- **Module renamed** from `github.com/fivetwenty-io/pve-apiclient-go/v3` to `github.com/fivetwenty-io/proxmox-apiclient-go/v3` — the library now covers more than one Proxmox product. Versions up to v3.3.1 remain published under the old path; see MIGRATION.md for the one-line consumer migration. The TOFU fingerprint cache moved to `~/.config/proxmox-apiclient-go/fingerprints.json` (the legacy location is still read if the new one does not exist).
+
+### Added
+
+- **Proxmox Backup Server support**: generated typed bindings for the full PBS JSON API (346 endpoints) under `pkg/pbs/*` (`access`, `admin`, `config`, `nodes`, `tape`, `status`, `version`, `ping`, `pull`, `push`), produced by `cmd/pvegen --dialect pbs` from the vendored `_data/pbs-apidoc.json`. The HTTP/2 chunk-protocol endpoints (`/backup`, `/reader`) are intentionally excluded.
+- `pkg/pbs.NewClient` / `pkg/pbs.DefaultOptions`: a preset over `pkg/client` that applies the PBS wire defaults — port 8007, `PBSAPIToken` Authorization prefix, `PBSAuthCookie` ticket cookie. Everything else (TLS pinning, retries, logging, ticket login) is the shared client, unchanged.
+- `cmd/pvegen --dialect {pve|pbs}` flag selecting spec dialect, naming overrides, and output/import roots. Spec loading was also hardened: boolean `leaf`/`allowtoken`/`optional` encodings no longer break parsing.
+
 ## [v3.2.9] — 2026-06-22
 
 ### Added

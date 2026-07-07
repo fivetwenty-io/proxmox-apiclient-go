@@ -132,6 +132,10 @@ linters:
       - pkg/api/clusterstorage/.*_smoke_test\.go
       - pkg/api/nodes/.*_smoke_test\.go
       - pkg/api/pools/.*_smoke_test\.go
+      # Every pkg/pbs subdirectory is generator-owned (hand-written code
+      # lives only at the pkg/pbs root), so a wildcard is safe here.
+      - pkg/pbs/.*/.*_gen\.go
+      - pkg/pbs/.*/.*_smoke_test\.go
 
     # gosec exclusions mirror the standalone gosec scope wired into the
     # Makefile and CI. These rules are domain-inherent to a Proxmox API
@@ -210,6 +214,8 @@ formatters:
       - pkg/api/clusterstorage/.*_smoke_test\.go
       - pkg/api/nodes/.*_smoke_test\.go
       - pkg/api/pools/.*_smoke_test\.go
+      - pkg/pbs/.*/.*_gen\.go
+      - pkg/pbs/.*/.*_smoke_test\.go
 
 # Issues configuration
 issues:

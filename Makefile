@@ -29,7 +29,12 @@ GO_FILES := $(shell find . -name '*.go' -type f -not -path "./vendor/*")
 GOSEC_EXCLUDE_DIRS := -exclude-dir=examples -exclude-dir=cmd \
 	-exclude-dir=pkg/api/access -exclude-dir=pkg/api/cluster \
 	-exclude-dir=pkg/api/clusterstorage -exclude-dir=pkg/api/nodes \
-	-exclude-dir=pkg/api/pools -exclude-dir=pkg/api/version
+	-exclude-dir=pkg/api/pools -exclude-dir=pkg/api/version \
+	-exclude-dir=pkg/pbs/access -exclude-dir=pkg/pbs/admin \
+	-exclude-dir=pkg/pbs/config -exclude-dir=pkg/pbs/nodes \
+	-exclude-dir=pkg/pbs/ping -exclude-dir=pkg/pbs/pull \
+	-exclude-dir=pkg/pbs/push -exclude-dir=pkg/pbs/status \
+	-exclude-dir=pkg/pbs/tape -exclude-dir=pkg/pbs/version
 GOSEC_EXCLUDE_RULES := -exclude=G117,G123,G402,G704
 GOSEC_FLAGS := $(GOSEC_EXCLUDE_DIRS) $(GOSEC_EXCLUDE_RULES)
 
@@ -104,11 +109,11 @@ generate: ## Regenerate typed API bindings from _data/apidoc.json
 verify-generated: ## Verify generated files are in sync with the spec
 	@echo "$(GREEN)Verifying generated files...$(RESET)"
 	@go generate ./...
-	@dirty=$$(git status --porcelain -- pkg/api _data | grep -vE '^A[ M]' || true); \
+	@dirty=$$(git status --porcelain -- pkg/api pkg/pbs _data | grep -vE '^A[ M]' || true); \
 	if [ -n "$$dirty" ]; then \
 		echo "$(YELLOW)Generated files are out of sync. Run 'make generate' and commit:$(RESET)"; \
 		echo "$$dirty"; \
-		git --no-pager diff -- pkg/api _data | head -200; \
+		git --no-pager diff -- pkg/api pkg/pbs _data | head -200; \
 		exit 1; \
 	fi
 	@echo "$(GREEN)✓ Generated files are up to date$(RESET)"

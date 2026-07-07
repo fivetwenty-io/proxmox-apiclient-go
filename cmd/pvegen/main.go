@@ -74,6 +74,9 @@ const (
 	// namespaceVersion is the one top-level spec namespace whose smoke test
 	// emission emitNamespace deliberately skips (see the doc comment there).
 	namespaceVersion = "version"
+	// namespaceRoot is the namespace namespaceOf assigns to the bare "/"
+	// path (the API directory index in the PBS spec).
+	namespaceRoot = "root"
 )
 
 // Go type name constants returned by goTypeFor and consumed when
@@ -96,51 +99,111 @@ var (
 // "word[%d]". The captured group is the base name (e.g. "net" for "net[n]").
 var indexedParamRe = regexp.MustCompile(`^([a-z][a-z0-9]*)(?:\[n\]|\[%d\])$`)
 
-// methodNameOverrides pins the emitted Go method name for specific
-// (HTTP-verb, path) tuples. The default naming rule produces
-// "ListVersion" for GET /version (singular, parameterless, non-dynamic
-// tail); the version package has hand-written tests that predate the
-// generator and depend on the shorter "Get" name. Keeping those tests
-// stable is cheaper than rewriting them.
-//
-//nolint:gochecknoglobals // intentional package-level lookup table; must be visible to assignMethodNames
-var methodNameOverrides = map[string]string{
-	"GET /version": methodPrefixGet,
+// dialectConfig captures the differences between the two apidoc dialects
+// the generator understands: "pve" (_data/apidoc.json → pkg/api) and
+// "pbs" (_data/pbs-apidoc.json → pkg/pbs). Both trees share the same
+// node/schema shape; the dialect only controls naming overrides, which
+// namespaces are emitted, and where smoke tests import the generated
+// package from.
+type dialectConfig struct {
+	// pkgImportRoot is the module-relative root the generated smoke
+	// tests import the package under test from ("pkg/api" or "pkg/pbs").
+	pkgImportRoot string
+
+	// methodNameOverrides pins the emitted Go method name for specific
+	// "VERB /path" tuples where the default naming rule produces an
+	// awkward identifier ("ListVersion", "CreatePull", ...).
+	methodNameOverrides map[string]string
+
+	// namespaceOutputDir overrides the on-disk directory for a top-level
+	// spec namespace whose default name would clash with an existing
+	// hand-written package. The map key is the path-prefix segment from
+	// the spec; the value is the directory under --out and also the Go
+	// package name. Keep this list short — every entry is a deviation
+	// from the "namespace name == directory name" convention and needs a
+	// note in design.md.
+	namespaceOutputDir map[string]string
+
+	// skipNamespaces drops entire top-level namespaces from emission.
+	skipNamespaces map[string]bool
+
+	// skipSmokeTests lists namespaces whose smoke test emission is
+	// suppressed because hand-written tests already own the package.
+	skipSmokeTests map[string]bool
 }
 
-// namespaceOutputDir overrides the on-disk directory for a top-level
-// spec namespace whose default name would clash with an existing
-// hand-written package. The map key is the path-prefix segment from
-// apidoc.json; the value is the directory under --out and also the Go
-// package name. Keep this list short — every entry is a deviation
-// from the "namespace name == directory name" convention and needs a
-// note in design.md.
-//
-//nolint:gochecknoglobals // intentional package-level lookup table; must be visible to emitNamespace
-var namespaceOutputDir = map[string]string{
-	// /storage top-level endpoints (datacenter storage config) live in
-	// pkg/api/clusterstorage. pkg/api/storage is owned by hand-written
-	// nodes/{node}/storage helpers that predate the generator.
-	"storage": "clusterstorage",
+//nolint:gochecknoglobals // intentional package-level lookup table; consulted throughout emission
+var dialects = map[string]*dialectConfig{
+	"pve": {
+		pkgImportRoot: "pkg/api",
+		// The version package has hand-written tests that predate the
+		// generator and depend on the shorter "Get" name. Keeping those
+		// tests stable is cheaper than rewriting them.
+		methodNameOverrides: map[string]string{
+			"GET /version": methodPrefixGet,
+		},
+		namespaceOutputDir: map[string]string{
+			// /storage top-level endpoints (datacenter storage config)
+			// live in pkg/api/clusterstorage. pkg/api/storage is owned by
+			// hand-written nodes/{node}/storage helpers that predate the
+			// generator.
+			"storage": "clusterstorage",
+		},
+		skipNamespaces: map[string]bool{},
+		// The version package has hand-written tests already and the
+		// generated smoke test must not stomp on them.
+		skipSmokeTests: map[string]bool{namespaceVersion: true},
+	},
+	"pbs": {
+		pkgImportRoot: "pkg/pbs",
+		methodNameOverrides: map[string]string{
+			"GET /version": methodPrefixGet,
+			"GET /ping":    "Ping",
+			"POST /pull":   "Pull",
+			"POST /push":   "Push",
+		},
+		namespaceOutputDir: map[string]string{},
+		skipNamespaces: map[string]bool{
+			// "root" is the GET / directory index — not a usable API.
+			namespaceRoot: true,
+			// /backup and /reader are HTTP/2 protocol-upgrade endpoints
+			// for the chunked backup stream (proxmox-backup-client
+			// territory), not JSON API calls.
+			"backup": true,
+			"reader": true,
+		},
+		skipSmokeTests: map[string]bool{},
+	},
 }
+
+// activeDialect is selected once in main from the --dialect flag and read
+// everywhere else; the generator is single-threaded.
+//
+//nolint:gochecknoglobals // set once at startup, read-only afterwards
+var activeDialect = dialects["pve"]
 
 // node mirrors the structure of a single tree entry in apidoc.json.
 type node struct {
-	Path     string                  `json:"path"`
-	Text     string                  `json:"text"`
-	Leaf     int                     `json:"leaf"`
+	Path string `json:"path"`
+	Text string `json:"text"`
+	// Leaf is 0/1 in current specs but is never consumed by codegen;
+	// kept raw so a dialect that encodes it as a boolean cannot break
+	// spec loading.
+	Leaf     json.RawMessage         `json:"leaf,omitempty"`
 	Info     map[string]endpointInfo `json:"info"`
 	Children []*node                 `json:"children,omitempty"`
 }
 
 // endpointInfo describes a single HTTP verb on an endpoint.
 type endpointInfo struct {
-	Method      string          `json:"method"`
-	Name        string          `json:"name"`
-	Description string          `json:"description"`
-	Parameters  *schema         `json:"parameters,omitempty"`
-	Returns     *schema         `json:"returns,omitempty"`
-	AllowToken  int             `json:"allowtoken"`
+	Method      string  `json:"method"`
+	Name        string  `json:"name"`
+	Description string  `json:"description"`
+	Parameters  *schema `json:"parameters,omitempty"`
+	Returns     *schema `json:"returns,omitempty"`
+	// AllowToken is 0/1 in the PVE spec, absent in PBS, and never
+	// consumed by codegen; kept raw for the same reason as node.Leaf.
+	AllowToken  json.RawMessage `json:"allowtoken,omitempty"`
 	Permissions json.RawMessage `json:"permissions,omitempty"`
 }
 
@@ -180,10 +243,19 @@ type endpoint struct {
 func main() {
 	specPath := flag.String("spec", "_data/apidoc.json", "Path to apidoc.json")
 	outDir := flag.String("out", "pkg/api", "Root output directory")
+	dialectName := flag.String("dialect", "pve", "Apidoc dialect: pve or pbs")
 
 	var nsList stringSlice
 	flag.Var(&nsList, "namespace", "Namespace to emit (repeatable). Defaults to every namespace in the spec.")
 	flag.Parse()
+
+	cfg, ok := dialects[*dialectName]
+	if !ok {
+		fmt.Fprintf(os.Stderr, "pvegen: unknown dialect %q (want pve or pbs)\n", *dialectName)
+		os.Exit(1)
+	}
+
+	activeDialect = cfg
 
 	tree, err := loadSpec(*specPath)
 	if err != nil {
@@ -346,7 +418,7 @@ func collectEndpoints(tree []*node) []endpoint {
 func namespaceOf(path string) string {
 	trimmed := strings.TrimPrefix(path, "/")
 	if trimmed == "" {
-		return "root"
+		return namespaceRoot
 	}
 
 	if idx := strings.Index(trimmed, "/"); idx >= 0 {
@@ -356,10 +428,16 @@ func namespaceOf(path string) string {
 	return trimmed
 }
 
-// groupByNamespace buckets endpoints by their top-level namespace.
+// groupByNamespace buckets endpoints by their top-level namespace,
+// dropping namespaces the active dialect excludes from emission.
 func groupByNamespace(eps []endpoint) map[string][]endpoint {
 	out := map[string][]endpoint{}
+
 	for _, endpt := range eps {
+		if activeDialect.skipNamespaces[endpt.GoNamespace] {
+			continue
+		}
+
 		out[endpt.GoNamespace] = append(out[endpt.GoNamespace], endpt)
 	}
 
@@ -465,7 +543,7 @@ func assignMethodNames(eps []endpoint) {
 
 	for idx := range eps {
 		key := strings.ToUpper(eps[idx].Verb) + " " + eps[idx].Path
-		if override, ok := methodNameOverrides[key]; ok {
+		if override, ok := activeDialect.methodNameOverrides[key]; ok {
 			eps[idx].GoMethod = override
 			seen[override]++
 
@@ -619,7 +697,7 @@ func emitNamespace(outRoot, nsName string, eps []endpoint) error {
 	assignMethodNames(eps)
 
 	dirName := nsName
-	if override, ok := namespaceOutputDir[nsName]; ok {
+	if override, ok := activeDialect.namespaceOutputDir[nsName]; ok {
 		dirName = override
 	}
 
@@ -636,10 +714,10 @@ func emitNamespace(outRoot, nsName string, eps []endpoint) error {
 		return err
 	}
 
-	// Smoke test is only emitted for non-version namespaces. The
-	// version package has hand-written tests already and we must not
-	// stomp on them.
-	if nsName != namespaceVersion {
+	// Smoke tests are skipped for namespaces the dialect marks as owned
+	// by hand-written tests (PVE's version package) so the generator
+	// never stomps on them.
+	if !activeDialect.skipSmokeTests[nsName] {
 		err = emitNamespaceSmokeTest(dir, dirName, pkgName, nsName, eps)
 		if err != nil {
 			return err
@@ -1557,6 +1635,13 @@ func isOptional(objSchema *schema) bool {
 	err = json.Unmarshal(objSchema.Optional, &asStr)
 	if err == nil {
 		return asStr == "1" || strings.EqualFold(asStr, "true")
+	}
+
+	var asBool bool
+
+	err = json.Unmarshal(objSchema.Optional, &asBool)
+	if err == nil {
+		return asBool
 	}
 
 	return false
