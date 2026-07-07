@@ -9,7 +9,7 @@
 // The complete typed API for task status and logs — every parameter, every
 // response field, every endpoint under /nodes/{node}/tasks — lives in the
 // generated package
-// github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/api/nodes. Prefer this
+// github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/api/nodes. Prefer this
 // package whenever you have a UPID from another call (qemu, lxc, storage,
 // …) and need to wait for it to finish; reach for pkg/api/nodes when you
 // need task log entries, listing, or other fields this package does not
@@ -25,8 +25,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fivetwenty-io/pve-apiclient-go/v3/internal/constants"
-	"github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/client"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/constants"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/client"
 )
 
 var (

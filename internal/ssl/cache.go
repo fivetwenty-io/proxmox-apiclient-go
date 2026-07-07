@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/fivetwenty-io/pve-apiclient-go/v3/internal/constants"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/constants"
 )
 
 // FingerprintCache manages persistent storage of certificate fingerprints.
@@ -434,5 +434,19 @@ func GetDefaultCacheFile() string {
 	}
 
 	// Return path to cache file in user's config directory
-	return filepath.Join(home, ".config", "pve-apiclient-go", "fingerprints.json")
+	path := filepath.Join(home, ".config", "proxmox-apiclient-go", "fingerprints.json")
+
+	// Fall back to the legacy pve-apiclient-go location when the new path does
+	// not exist yet but a cache from before the module rename does.
+	_, err = os.Stat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		legacy := filepath.Join(home, ".config", "pve-apiclient-go", "fingerprints.json")
+
+		_, err = os.Stat(legacy)
+		if err == nil {
+			return legacy
+		}
+	}
+
+	return path
 }

@@ -3,7 +3,7 @@ package pool_test
 import (
 	"testing"
 
-	"github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/pool"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/pool"
 )
 
 // TestCovPutWithoutGetDoesNotGoBelowZero verifies that Put() without a matching

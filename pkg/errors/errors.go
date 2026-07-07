@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/fivetwenty-io/pve-apiclient-go/v3/internal/constants"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/constants"
 )
 
 // Sentinel errors for HTTP status classes. Use errors.Is to test wrapped APIErrors.

@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/api/storage"
-	pveclient "github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/client"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/api/storage"
+	pveclient "github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/client"
 )
 
 func optsFromServerURL(u string) pveclient.Options {

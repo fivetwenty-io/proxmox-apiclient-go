@@ -9,8 +9,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/auth"
-	pve "github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/client"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/auth"
+	pve "github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/client"
 	"strconv"
 )
 

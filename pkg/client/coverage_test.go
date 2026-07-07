@@ -8,8 +8,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/cache"
-	"github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/client"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/cache"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/client"
 )
 
 // optsFromServer builds client options pointing at an httptest.Server URL.

@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/api/qemu"
-	pveclient "github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/client"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/api/qemu"
+	pveclient "github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/client"
 )
 
 // Constants for strings that appear ≥3 times across the qemu_test package.

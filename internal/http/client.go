@@ -18,12 +18,12 @@ import (
 	"time"
 
 	"crypto/x509"
-	"github.com/fivetwenty-io/pve-apiclient-go/v3/internal/constants"
-	issl "github.com/fivetwenty-io/pve-apiclient-go/v3/internal/ssl"
-	"github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/auth"
-	"github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/cache"
-	apierrors "github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/errors"
-	pmetrics "github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/metrics"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/constants"
+	issl "github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/ssl"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/auth"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/cache"
+	apierrors "github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/errors"
+	pmetrics "github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/metrics"
 )
 
 // Client implements the HTTP client for PVE API communication.
@@ -739,7 +739,7 @@ func (c *Client) buildUploadRequest(ctx context.Context, path string, fields map
 
 	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "pve-apiclient-go/1.0")
+	req.Header.Set("User-Agent", "proxmox-apiclient-go/1.0")
 	c.applyCustomHeaders(req)
 
 	return req, nil
@@ -869,7 +869,7 @@ func (c *Client) buildRequestWithContext(ctx context.Context, method, path strin
 
 	// Set standard headers
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "pve-apiclient-go/1.0")
+	req.Header.Set("User-Agent", "proxmox-apiclient-go/1.0")
 	c.applyCustomHeaders(req)
 
 	return req, nil

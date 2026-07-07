@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/auth"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/auth"
 )
 
 func TestParseTicketTimestamp(t *testing.T) {

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	ih "github.com/fivetwenty-io/pve-apiclient-go/v3/internal/http"
-	"github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/logging/slogadapter"
+	ih "github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/http"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/logging/slogadapter"
 )
 
 // captureLogger returns a slog.Logger that writes JSON to buf.

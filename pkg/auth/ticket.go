@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/fivetwenty-io/pve-apiclient-go/v3/internal/constants"
-	apierrors "github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/errors"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/constants"
+	apierrors "github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/errors"
 )
 
 // maxErrorBodySnippet bounds how much of a non-2xx response body is read for

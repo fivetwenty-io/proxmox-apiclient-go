@@ -704,7 +704,7 @@ func renderNamespaceSourceHeader(builder *strings.Builder, pkgName, ns string) {
 	builder.WriteString("\t\"sort\"\n")
 	builder.WriteString("\t\"strconv\"\n")
 	builder.WriteString("\t\"strings\"\n\n")
-	builder.WriteString("\t\"github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/client\"\n")
+	builder.WriteString("\t\"github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/client\"\n")
 	builder.WriteString(")\n\n")
 
 	// Suppress "imported and not used" when a namespace happens to use

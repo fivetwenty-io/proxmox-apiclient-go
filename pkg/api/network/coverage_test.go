@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/api/network"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/api/network"
 )
 
 // ---------- BridgeExists: non-list data → false ----------

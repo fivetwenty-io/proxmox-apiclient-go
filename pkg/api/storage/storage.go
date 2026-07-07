@@ -9,9 +9,9 @@
 // The complete typed API for node-level storage content — every parameter,
 // every response field, every endpoint under /nodes/{node}/storage — lives
 // in the generated package
-// github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/api/nodes. Cluster-wide
+// github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/api/nodes. Cluster-wide
 // storage configuration (as opposed to per-node content) lives in
-// github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/api/clusterstorage.
+// github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/api/clusterstorage.
 // Prefer this package for common volume lifecycle and upload operations,
 // especially where the DeleteVolume*Async imgdel-await guidance matters;
 // reach for pkg/api/nodes when you need a parameter or response field this
@@ -26,8 +26,8 @@ import (
 	"io"
 	"net/url"
 
-	"github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/client"
-	pveerr "github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/errors"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/client"
+	pveerr "github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/errors"
 )
 
 var errSizeGiBPositive = errors.New("sizeGiB must be > 0")

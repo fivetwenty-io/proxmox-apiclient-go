@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/stream"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/stream"
 )
 
 // newJSONLinesReader wraps lines as io.ReadCloser of JSON-lines content.

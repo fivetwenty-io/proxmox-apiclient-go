@@ -1,11 +1,11 @@
-# pve-apiclient-go
+# proxmox-apiclient-go
 
 A typed Go client for the Proxmox VE 9.x REST API.
 
 ## Installation
 
 ```bash
-go get github.com/fivetwenty-io/pve-apiclient-go/v3
+go get github.com/fivetwenty-io/proxmox-apiclient-go/v3
 ```
 
 ## Quickstart
@@ -20,9 +20,9 @@ import (
     "fmt"
     "log"
 
-    pve "github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/client"
-    "github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/api/version"
-    "github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/api/access"
+    pve "github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/client"
+    "github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/api/version"
+    "github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/api/access"
 )
 
 func main() {
@@ -111,7 +111,7 @@ See `pkg/auth` for the `TFAChallenge` and `TFAResponse` types.
   (VNC, SPICE, terminal, migration tunnel).
 
 ```go
-import "github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/websocket"
+import "github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/websocket"
 
 proxy, err := websocket.NewProxyClient(&websocket.ProxyConfig{
     Host:       "pve.example.com",
@@ -154,7 +154,7 @@ endpoints. They are generated from `_data/apidoc.json` by `cmd/pvegen` and
 Construct a service with the shared client:
 
 ```go
-import "github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/api/cluster"
+import "github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/api/cluster"
 
 csvc := cluster.New(client)
 list, err := csvc.ListCluster(ctx)
@@ -221,7 +221,7 @@ The library is organized in three layers:
 `pkg/errors` defines sentinel errors for HTTP status classes:
 
 ```go
-import apierrors "github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/errors"
+import apierrors "github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/errors"
 import "errors"
 
 _, err := svc.GetUsers(ctx, "root@pam")

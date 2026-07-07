@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/api/tasks"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/api/tasks"
 )
 
 // ---- ParseUPID tests ----

@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	ihssl "github.com/fivetwenty-io/pve-apiclient-go/v3/internal/ssl"
-	pve "github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/client"
+	ihssl "github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/ssl"
+	pve "github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/client"
 )
 
 // newTLSServer returns a TLS server that mimics minimal PVE API behavior.

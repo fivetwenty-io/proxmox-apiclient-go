@@ -5,7 +5,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/client"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/client"
 )
 
 func TestPVEFloat_Unmarshal(t *testing.T) {

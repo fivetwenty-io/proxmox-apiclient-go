@@ -11,7 +11,7 @@
 // Use this package to construct ipconfigN values and attach user-data (and
 // optionally network-data) snippets without hand-rolling the PVE string
 // format or the two-step upload-then-set-config sequence; reach for
-// github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/api/nodes directly when
+// github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/api/nodes directly when
 // you need to read back the current cloud-init config/dump or set fields
 // this package does not cover.
 package cloudinit
@@ -23,7 +23,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/client"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/client"
 )
 
 const dhcpIPConfig = "ip=dhcp"

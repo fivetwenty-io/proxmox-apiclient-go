@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/auth"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/auth"
 )
 
 func TestTicketAuthenticator_NewFormatAndCookieName(t *testing.T) {

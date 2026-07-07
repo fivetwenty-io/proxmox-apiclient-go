@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	issl "github.com/fivetwenty-io/pve-apiclient-go/v3/internal/ssl"
-	"github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/cache"
+	issl "github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/ssl"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/cache"
 )
 
 // Package-level string constants used across multiple files in this package.

@@ -38,7 +38,7 @@ The detector performs four checks with different confidence levels:
 ### Quick Detection
 
 ```go
-import pvectx "github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/context"
+import pvectx "github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/context"
 
 if pvectx.IsRunningOnPVENode() {
     fmt.Println("Running on PVE node")

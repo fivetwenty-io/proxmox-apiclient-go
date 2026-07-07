@@ -1,6 +1,6 @@
 # Auto-Login Example
 
-This example demonstrates the auto-login feature introduced in pve-apiclient-go v3.1.0.
+This example demonstrates the auto-login feature introduced in proxmox-apiclient-go (pve-apiclient-go) v3.1.0.
 
 ## Overview
 

@@ -224,7 +224,7 @@ func DefaultRequestConfig() *RequestConfig {
 	return &RequestConfig{
 		DefaultHeaders: map[string]string{
 			"Accept":     "application/json",
-			"User-Agent": "pve-apiclient-go/1.0",
+			"User-Agent": "proxmox-apiclient-go/1.0",
 		},
 		QueryEncoder: func(v url.Values) string {
 			return v.Encode()

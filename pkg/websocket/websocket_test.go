@@ -13,7 +13,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	pkgws "github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/websocket"
+	pkgws "github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/websocket"
 )
 
 // newWSServer returns an httptest server that upgrades to WebSocket, sends

@@ -7,7 +7,7 @@
 // The complete typed API for node network configuration — every parameter,
 // every response field, every endpoint under /nodes/{node}/network — lives
 // in the generated package
-// github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/api/nodes. Prefer this
+// github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/api/nodes. Prefer this
 // package when you want idempotent bridge create/delete without hand-rolling
 // the existence check; reach for pkg/api/nodes when you need a parameter or
 // response field this package does not expose, or when you want
@@ -19,7 +19,7 @@ import (
 	"fmt"
 	"net/url"
 
-	"github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/client"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/client"
 )
 
 // Service defines network helpers.

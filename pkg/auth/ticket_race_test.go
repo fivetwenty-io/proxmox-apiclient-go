@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/auth"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/auth"
 )
 
 // loginResponse is the JSON body returned by the mock PVE login endpoint.

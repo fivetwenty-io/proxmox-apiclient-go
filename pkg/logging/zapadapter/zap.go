@@ -3,7 +3,7 @@
 package zapadapter
 
 import (
-	ih "github.com/fivetwenty-io/pve-apiclient-go/v3/internal/http"
+	ih "github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/http"
 	"go.uber.org/zap"
 )
 

@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/fivetwenty-io/pve-apiclient-go/v3/internal/constants"
-	"github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/cache"
-	pvectx "github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/context"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/constants"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/cache"
+	pvectx "github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/context"
 )
 
 // ExecutionMode indicates where the client is running (local PVE node or remote).

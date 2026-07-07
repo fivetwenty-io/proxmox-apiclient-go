@@ -6,10 +6,10 @@ import (
 	"log"
 	"os"
 
-	"github.com/fivetwenty-io/pve-apiclient-go/v3/internal/constants"
-	"github.com/fivetwenty-io/pve-apiclient-go/v3/internal/ssl"
-	pve "github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/client"
-	pveerrors "github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/errors"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/constants"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/ssl"
+	pve "github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/client"
+	pveerrors "github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/errors"
 )
 
 const exampleFingerprint = "AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99"

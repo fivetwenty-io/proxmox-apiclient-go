@@ -6,8 +6,8 @@ import (
 	"context"
 	"os"
 
-	pve "github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/client"
-	"github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/logging/zapadapter"
+	pve "github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/client"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/logging/zapadapter"
 	"go.uber.org/zap"
 )
 

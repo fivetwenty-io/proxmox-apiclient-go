@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/api/qemu"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/api/qemu"
 )
 
 func TestAttachDiskInvalidBus(t *testing.T) {

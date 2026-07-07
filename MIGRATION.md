@@ -1,8 +1,33 @@
 # Migration notes
 
+## Module rename: pve-apiclient-go → proxmox-apiclient-go
+
+The library now covers Proxmox Backup Server (PBS) in addition to Proxmox VE,
+so the module moved from `github.com/fivetwenty-io/pve-apiclient-go/v3` to
+`github.com/fivetwenty-io/proxmox-apiclient-go/v3` (starting with v3.4.0).
+
+To migrate, update `go.mod` and rewrite import paths:
+
+```bash
+go mod edit -droprequire github.com/fivetwenty-io/pve-apiclient-go/v3
+go mod edit -require github.com/fivetwenty-io/proxmox-apiclient-go/v3@latest
+grep -rl 'fivetwenty-io/pve-apiclient-go' --include='*.go' . \
+  | xargs sed -i 's|fivetwenty-io/pve-apiclient-go|fivetwenty-io/proxmox-apiclient-go|g'
+go mod tidy
+```
+
+No Go API changes accompany the rename — package names, types, and behavior
+are identical. Versions up to v3.3.1 remain available under the old module
+path; new development happens only under the new path.
+
+The default TOFU fingerprint cache location moved to
+`~/.config/proxmox-apiclient-go/fingerprints.json`; an existing legacy cache
+at `~/.config/pve-apiclient-go/fingerprints.json` is still picked up
+automatically until the new file exists.
+
 ## Existing v3 users
 
-The module path (`github.com/fivetwenty-io/pve-apiclient-go/v3`) is unchanged.
+Within the (renamed) module path, the v3 Go API surface is unchanged.
 There are no breaking changes to the hand-written packages (`pkg/api/qemu`,
 `pkg/api/lxc`, `pkg/api/network`, `pkg/api/cloudinit`, `pkg/api/storage`,
 `pkg/api/tasks`, `pkg/client`, `pkg/auth`, `pkg/errors`, `pkg/websocket`).

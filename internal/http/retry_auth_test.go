@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/auth"
-	apierrors "github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/errors"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/auth"
+	apierrors "github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/errors"
 )
 
 // errorsAs is a thin wrapper so the test reads clearly.

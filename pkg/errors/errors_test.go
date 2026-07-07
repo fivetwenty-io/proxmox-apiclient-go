@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"testing"
 
-	pveerr "github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/errors"
+	pveerr "github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/errors"
 )
 
 // Repeated string constants used across multiple tests.

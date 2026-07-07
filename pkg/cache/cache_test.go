@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/cache"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/cache"
 )
 
 func TestCache_BasicGetSet(t *testing.T) {

@@ -1,4 +1,4 @@
-# Contributing to pve-apiclient-go
+# Contributing to proxmox-apiclient-go
 
 Thank you for your interest in contributing to the Proxmox VE API Go Client!
 
@@ -48,8 +48,8 @@ Please be respectful and constructive in all interactions.
 
 ```bash
 # Clone the repository
-git clone https://github.com/fivetwenty-io/pve-apiclient-go.git
-cd pve-apiclient-go
+git clone https://github.com/fivetwenty-io/proxmox-apiclient-go.git
+cd proxmox-apiclient-go
 
 # Install dependencies
 go mod download

@@ -3,7 +3,7 @@ package auth_test
 import (
 	"testing"
 
-	"github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/auth"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/auth"
 )
 
 func TestNewAPITokenAuthenticator(t *testing.T) {

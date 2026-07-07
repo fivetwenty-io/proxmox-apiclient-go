@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"log"
 
-	pve "github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/client"
-	pvectx "github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/context"
+	pve "github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/client"
+	pvectx "github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/context"
 )
 
 func main() {

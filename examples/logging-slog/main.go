@@ -5,9 +5,9 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/fivetwenty-io/pve-apiclient-go/v3/internal/constants"
-	pve "github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/client"
-	"github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/logging/slogadapter"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/constants"
+	pve "github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/client"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/logging/slogadapter"
 )
 
 func main() {

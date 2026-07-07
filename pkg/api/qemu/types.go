@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/fivetwenty-io/pve-apiclient-go/v3/internal/constants"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/constants"
 )
 
 var diskKeyPattern = regexp.MustCompile(`^(scsi|virtio|ide|sata)(\d+)$`)

@@ -12,8 +12,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/api/nodes"
-	pveclient "github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/client"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/api/nodes"
+	pveclient "github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/client"
 )
 
 var _ = json.RawMessage(nil)

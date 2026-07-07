@@ -20,7 +20,7 @@ Request caching reduces API load and improves performance by storing responses f
 ### Basic Cache Configuration
 
 ```go
-import pve "github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/client"
+import pve "github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/client"
 
 cacheConfig := pve.CacheConfig{
     Enabled:         true,

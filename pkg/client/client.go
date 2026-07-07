@@ -7,10 +7,10 @@ import (
 	"io"
 	"time"
 
-	pvehttp "github.com/fivetwenty-io/pve-apiclient-go/v3/internal/http"
-	issl "github.com/fivetwenty-io/pve-apiclient-go/v3/internal/ssl"
-	"github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/auth"
-	pmetrics "github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/metrics"
+	pvehttp "github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/http"
+	issl "github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/ssl"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/auth"
+	pmetrics "github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/metrics"
 )
 
 // ErrAuthNotConfigured is returned when authentication is not configured.

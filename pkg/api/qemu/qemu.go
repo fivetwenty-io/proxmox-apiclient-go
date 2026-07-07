@@ -6,7 +6,7 @@
 //
 // The complete typed API for QEMU VMs — every parameter, every response
 // field, every endpoint under /nodes/{node}/qemu — lives in the generated
-// package github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/api/nodes. Prefer
+// package github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/api/nodes. Prefer
 // this package for common lifecycle operations (create, start, stop, clone,
 // snapshot) where the narrower surface reads more directly; reach for
 // pkg/api/nodes when you need a parameter or response field this package
@@ -19,7 +19,7 @@ import (
 	"fmt"
 	"net/url"
 
-	"github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/client"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/client"
 )
 
 // Service defines QEMU VM helpers.

@@ -3,7 +3,7 @@ package qemu_test
 import (
 	"testing"
 
-	"github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/api/qemu"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/api/qemu"
 )
 
 const volIDDisk9003 = "data:vm-9003-disk-0"

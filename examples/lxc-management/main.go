@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/api/lxc"
-	pve "github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/client"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/api/lxc"
+	pve "github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/client"
 )
 
 const (

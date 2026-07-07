@@ -10,11 +10,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/fivetwenty-io/pve-apiclient-go/v3/internal/constants"
-	"github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/api/cloudinit"
-	"github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/api/qemu"
-	"github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/api/tasks"
-	pve "github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/client"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/constants"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/api/cloudinit"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/api/qemu"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/api/tasks"
+	pve "github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/client"
 )
 
 var errDirectoryTraversal = errors.New("invalid path: contains directory traversal")

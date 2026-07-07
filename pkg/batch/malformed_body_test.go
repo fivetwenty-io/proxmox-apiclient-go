@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/batch"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/batch"
 )
 
 // TestMalformedBodyCountedAsFailure is a regression test: a 2xx response whose

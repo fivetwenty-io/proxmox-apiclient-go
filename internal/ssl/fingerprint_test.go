@@ -3,7 +3,7 @@ package ssl_test
 import (
 	"testing"
 
-	"github.com/fivetwenty-io/pve-apiclient-go/v3/internal/ssl"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/ssl"
 )
 
 const (

@@ -4,7 +4,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/auth"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/auth"
 )
 
 // TestAPITokenAuthenticator_ConcurrentAccess exercises SetToken against

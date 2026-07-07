@@ -16,10 +16,10 @@ import (
 	"testing"
 	"time"
 
-	issl "github.com/fivetwenty-io/pve-apiclient-go/v3/internal/ssl"
-	"github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/auth"
-	"github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/cache"
-	apierrors "github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/errors"
+	issl "github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/ssl"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/auth"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/cache"
+	apierrors "github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/errors"
 )
 
 var (

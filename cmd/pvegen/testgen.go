@@ -335,8 +335,8 @@ func renderBehaviorTestPreamble(builder *strings.Builder, pkgName string) {
 	builder.WriteString("\t\"strconv\"\n")
 	builder.WriteString("\t\"sync\"\n")
 	builder.WriteString("\t\"testing\"\n\n")
-	fmt.Fprintf(builder, "\t\"github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/api/%s\"\n", pkgName)
-	builder.WriteString("\tpveclient \"github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/client\"\n")
+	fmt.Fprintf(builder, "\t\"github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/api/%s\"\n", pkgName)
+	builder.WriteString("\tpveclient \"github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/client\"\n")
 	builder.WriteString(")\n\n")
 
 	// Anti-unused-import guard: exercised unconditionally regardless of

@@ -15,9 +15,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fivetwenty-io/pve-apiclient-go/v3/internal/constants"
-	"github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/cache"
-	pmetrics "github.com/fivetwenty-io/pve-apiclient-go/v3/pkg/metrics"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/constants"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/cache"
+	pmetrics "github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/metrics"
 )
 
 // ---------------------------------------------------------------------------
@@ -613,8 +613,8 @@ func TestDo_Headers_UserAgent(t *testing.T) {
 	client := clientPointedAt(t, srv.URL)
 	_, _ = client.Do("GET", "/version", nil)
 
-	if !strings.Contains(gotUA, "pve-apiclient-go") {
-		t.Errorf("User-Agent = %q, want pve-apiclient-go/*", gotUA)
+	if !strings.Contains(gotUA, "proxmox-apiclient-go") {
+		t.Errorf("User-Agent = %q, want proxmox-apiclient-go/*", gotUA)
 	}
 }
 

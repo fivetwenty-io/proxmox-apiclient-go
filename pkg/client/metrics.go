@@ -1,7 +1,7 @@
 package client
 
 import (
-	pvehttp "github.com/fivetwenty-io/pve-apiclient-go/v3/internal/http"
+	pvehttp "github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/http"
 	"time"
 )
 
