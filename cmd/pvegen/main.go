@@ -1277,7 +1277,7 @@ func renderResponseType(builder *strings.Builder, endpt endpoint) {
 		if ret.Items != nil {
 			it, err := goTypeFor(ret.Items)
 			if err == nil {
-				inner = responseFloatType(responseBoolType(it))
+				inner = responseIntType(responseFloatType(responseBoolType(it)))
 			}
 		}
 
@@ -1316,13 +1316,14 @@ func renderObjectFields(objSchema *schema) (string, error) {
 			goType = goTypeRawMessage
 		}
 
-		// Response booleans and floats use the tolerant client.PVEBool and
-		// client.PVEFloat: the PVE API renders booleans (true/false, 1/0,
-		// "1"/"0", ...) and documented numbers (PSI pressure metrics arrive as
-		// strings) inconsistently, so plain bool/float64 fail to decode real
-		// get-by-id payloads. Request params keep plain types (see
+		// Response booleans, floats, and integers use the tolerant
+		// client.PVEBool, client.PVEFloat, and client.PVEInt: the PVE API
+		// renders booleans (true/false, 1/0, "1"/"0", ...) and documented
+		// numbers (PSI pressure metrics and firewall rule positions arrive as
+		// strings) inconsistently, so plain bool/float64/int64 fail to decode
+		// real get-by-id payloads. Request params keep plain types (see
 		// emitRegularFields); only response shapes are retyped.
-		goType = responseFloatType(responseBoolType(goType))
+		goType = responseIntType(responseFloatType(responseBoolType(goType)))
 
 		opt := isOptional(prop)
 		if opt && !isAlreadyNilable(goType) {
@@ -1610,6 +1611,24 @@ func responseFloatType(goType string) string {
 		return "client.PVEFloat"
 	case "[]" + goTypeFloat64:
 		return "[]client.PVEFloat"
+	default:
+		return goType
+	}
+}
+
+// responseIntType rewrites an integer Go type produced by goTypeFor into the
+// tolerant client.PVEInt used in response shapes. Scalar "int64" and slice
+// "[]int64" are handled; every other type is returned unchanged. Only response
+// structs call this — request params keep plain int64 so query encoding is
+// unaffected. PVE renders documented integers inconsistently (notably the
+// firewall rule position arrives as a string), so a plain int64 fails to
+// decode real payloads.
+func responseIntType(goType string) string {
+	switch goType {
+	case goTypeInt64:
+		return "client.PVEInt"
+	case "[]" + goTypeInt64:
+		return "[]client.PVEInt"
 	default:
 		return goType
 	}

@@ -689,7 +689,7 @@ type CreateTfaResponse struct {
 	// Id The id if a newly added TFA entry.
 	Id *string `json:"id,omitempty"`
 	// Recovery A list of recovery codes as integers.
-	Recovery []int64 `json:"recovery"`
+	Recovery []client.PVEInt `json:"recovery"`
 }
 
 // CreateTfa implements Service.CreateTfa. POST /access/tfa/{userid}.
@@ -1062,7 +1062,7 @@ type GetUsersResponse struct {
 	// Enable Enable the account (default). You can set this to '0' to disable the account.
 	Enable *client.PVEBool `json:"enable,omitempty"`
 	// Expire Account expiration date (seconds since epoch). '0' means no expiration date.
-	Expire *int64 `json:"expire,omitempty"`
+	Expire *client.PVEInt `json:"expire,omitempty"`
 	// Firstname First name.
 	Firstname *string `json:"firstname,omitempty"`
 	// Lastname Last name.
@@ -1228,7 +1228,7 @@ type GetUsersTokenResponse struct {
 	// Enable Enable the account (default). You can set this to '0' to disable the account.
 	Enable *client.PVEBool `json:"enable,omitempty"`
 	// Expire Account expiration date (seconds since epoch). '0' means no expiration date.
-	Expire *int64 `json:"expire,omitempty"`
+	Expire *client.PVEInt `json:"expire,omitempty"`
 	// Tokenid API Token ID
 	Tokenid string `json:"tokenid"`
 }

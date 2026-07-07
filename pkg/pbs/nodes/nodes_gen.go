@@ -851,7 +851,7 @@ type ListConfigResponse struct {
 	// Location The location of the PBS instance.
 	Location *string `json:"location,omitempty"`
 	// TaskLogMaxDays Maximum days to keep Task logs
-	TaskLogMaxDays *int64 `json:"task-log-max-days,omitempty"`
+	TaskLogMaxDays *client.PVEInt `json:"task-log-max-days,omitempty"`
 }
 
 // ListConfig implements Service.ListConfig. GET /nodes/{node}/config.
@@ -1821,7 +1821,7 @@ type GetNetworkResponse struct {
 	// Method6 Interface configuration method
 	Method6 *string `json:"method6,omitempty"`
 	// Mtu Maximum Transmission Unit
-	Mtu *int64 `json:"mtu,omitempty"`
+	Mtu *client.PVEInt `json:"mtu,omitempty"`
 	// Name Network interface name.
 	Name string `json:"name"`
 	// Options Option list (inet)
@@ -1833,7 +1833,7 @@ type GetNetworkResponse struct {
 	// Type Network interface type
 	Type string `json:"type"`
 	// VlanId VLAN ID.
-	VlanId *int64 `json:"vlan-id,omitempty"`
+	VlanId *client.PVEInt `json:"vlan-id,omitempty"`
 	// VlanRawDevice Network interface name.
 	VlanRawDevice *string `json:"vlan-raw-device,omitempty"`
 }
@@ -2178,7 +2178,7 @@ type ListStatusResponse struct {
 	// Swap Node swap usage counters
 	Swap json.RawMessage `json:"swap"`
 	// Uptime The current uptime of the server.
-	Uptime int64 `json:"uptime"`
+	Uptime client.PVEInt `json:"uptime"`
 	// Wait Total IO wait since last query.
 	Wait client.PVEFloat `json:"wait"`
 }
@@ -2269,7 +2269,7 @@ func (s *service) DeleteSubscription(ctx context.Context, node string) error {
 // ListSubscriptionResponse mirrors the shape returned by GET /nodes/{node}/subscription.
 type ListSubscriptionResponse struct {
 	// Checktime timestamp of the last check done
-	Checktime *int64 `json:"checktime,omitempty"`
+	Checktime *client.PVEInt `json:"checktime,omitempty"`
 	// Key the subscription key, if set and permitted to access
 	Key *string `json:"key,omitempty"`
 	// Message a more human readable status message
@@ -2600,7 +2600,7 @@ func (s *service) ListTasksLog(ctx context.Context, node string, upid string, pa
 // ListTasksStatusResponse mirrors the shape returned by GET /nodes/{node}/tasks/{upid}/status.
 type ListTasksStatusResponse struct {
 	// Endtime The task end time (Epoch)
-	Endtime *int64 `json:"endtime,omitempty"`
+	Endtime *client.PVEInt `json:"endtime,omitempty"`
 	// Exitstatus 'OK', 'Error: <msg>', or 'unknown'.
 	Exitstatus *string `json:"exitstatus,omitempty"`
 	// Id Worker ID (arbitrary ASCII string)
@@ -2608,11 +2608,11 @@ type ListTasksStatusResponse struct {
 	// Node Node name (or 'localhost')
 	Node string `json:"node"`
 	// Pid The Unix PID.
-	Pid int64 `json:"pid"`
+	Pid client.PVEInt `json:"pid"`
 	// Pstart The Unix process start time from `/proc/pid/stat`
-	Pstart int64 `json:"pstart"`
+	Pstart client.PVEInt `json:"pstart"`
 	// Starttime The task start time (Epoch)
-	Starttime int64 `json:"starttime"`
+	Starttime client.PVEInt `json:"starttime"`
 	// Status 'running' or 'stopped'
 	Status string `json:"status"`
 	// Tokenid The token ID part of an API token authentication id.  This alone does NOT uniquely identify the API token - use a full `Authid` for such use cases.
@@ -2663,7 +2663,7 @@ type CreateTermproxyParams struct {
 // CreateTermproxyResponse mirrors the shape returned by POST /nodes/{node}/termproxy.
 type CreateTermproxyResponse struct {
 	// Port port used to bind termproxy to
-	Port int64 `json:"port"`
+	Port client.PVEInt `json:"port"`
 	// Ticket ticket used to verifiy websocket connection
 	Ticket string `json:"ticket"`
 	// Upid UPID for termproxy worker task
@@ -2716,9 +2716,9 @@ func (s *service) CreateTermproxy(ctx context.Context, node string, params *Crea
 // ListTimeResponse mirrors the shape returned by GET /nodes/{node}/time.
 type ListTimeResponse struct {
 	// Localtime Seconds since 1970-01-01 00:00:00 UTC. (local time)
-	Localtime int64 `json:"localtime"`
+	Localtime client.PVEInt `json:"localtime"`
 	// Time Seconds since 1970-01-01 00:00:00 UTC.
-	Time int64 `json:"time"`
+	Time client.PVEInt `json:"time"`
 	// Timezone Time zone. The file '/usr/share/zoneinfo/zone.tab' contains the list of valid names.
 	Timezone string `json:"timezone"`
 }

@@ -677,7 +677,7 @@ type GetAccessAdResponse struct {
 	// Mode LDAP connection type
 	Mode *string `json:"mode,omitempty"`
 	// Port AD server Port
-	Port *int64 `json:"port,omitempty"`
+	Port *client.PVEInt `json:"port,omitempty"`
 	// Realm Realm name.
 	Realm string `json:"realm"`
 	// Server1 AD server address
@@ -778,7 +778,7 @@ type UpdateAccessAdResponse struct {
 	// Mode LDAP connection type
 	Mode *string `json:"mode,omitempty"`
 	// Port AD server Port
-	Port *int64 `json:"port,omitempty"`
+	Port *client.PVEInt `json:"port,omitempty"`
 	// Realm Realm name.
 	Realm string `json:"realm"`
 	// Server1 AD server address
@@ -990,7 +990,7 @@ type GetAccessLdapResponse struct {
 	// Mode LDAP connection type
 	Mode *string `json:"mode,omitempty"`
 	// Port Port
-	Port *int64 `json:"port,omitempty"`
+	Port *client.PVEInt `json:"port,omitempty"`
 	// Realm Realm name.
 	Realm string `json:"realm"`
 	// Server1 LDAP server address
@@ -1095,7 +1095,7 @@ type UpdateAccessLdapResponse struct {
 	// Mode LDAP connection type
 	Mode *string `json:"mode,omitempty"`
 	// Port Port
-	Port *int64 `json:"port,omitempty"`
+	Port *client.PVEInt `json:"port,omitempty"`
 	// Realm Realm name.
 	Realm string `json:"realm"`
 	// Server1 LDAP server address
@@ -2139,7 +2139,7 @@ type GetAcmePluginsResponse struct {
 	// Type Plugin type.
 	Type string `json:"type"`
 	// ValidationDelay Extra delay in seconds to wait before requesting validation.  Allows to cope with long TTL of DNS records.
-	ValidationDelay *int64 `json:"validation-delay,omitempty"`
+	ValidationDelay *client.PVEInt `json:"validation-delay,omitempty"`
 }
 
 // GetAcmePlugins implements Service.GetAcmePlugins. GET /config/acme/plugins/{id}.
@@ -2631,17 +2631,17 @@ type GetDatastoreResponse struct {
 	// GcSchedule Run garbage collection job at specified schedule.
 	GcSchedule *string `json:"gc-schedule,omitempty"`
 	// KeepDaily Number of daily backups to keep.
-	KeepDaily *int64 `json:"keep-daily,omitempty"`
+	KeepDaily *client.PVEInt `json:"keep-daily,omitempty"`
 	// KeepHourly Number of hourly backups to keep.
-	KeepHourly *int64 `json:"keep-hourly,omitempty"`
+	KeepHourly *client.PVEInt `json:"keep-hourly,omitempty"`
 	// KeepLast Number of backups to keep.
-	KeepLast *int64 `json:"keep-last,omitempty"`
+	KeepLast *client.PVEInt `json:"keep-last,omitempty"`
 	// KeepMonthly Number of monthly backups to keep.
-	KeepMonthly *int64 `json:"keep-monthly,omitempty"`
+	KeepMonthly *client.PVEInt `json:"keep-monthly,omitempty"`
 	// KeepWeekly Number of weekly backups to keep.
-	KeepWeekly *int64 `json:"keep-weekly,omitempty"`
+	KeepWeekly *client.PVEInt `json:"keep-weekly,omitempty"`
 	// KeepYearly Number of yearly backups to keep.
-	KeepYearly *int64 `json:"keep-yearly,omitempty"`
+	KeepYearly *client.PVEInt `json:"keep-yearly,omitempty"`
 	// MaintenanceMode Maintenance mode, type is either 'offline' or 'read-only', message should be enclosed in "
 	MaintenanceMode *string `json:"maintenance-mode,omitempty"`
 	// Name Datastore name.
@@ -2865,7 +2865,7 @@ type GetDriveResponse struct {
 	// Changer Tape Changer Identifier.
 	Changer *string `json:"changer,omitempty"`
 	// ChangerDrivenum Associated changer drive number (requires option changer)
-	ChangerDrivenum *int64 `json:"changer-drivenum,omitempty"`
+	ChangerDrivenum *client.PVEInt `json:"changer-drivenum,omitempty"`
 	// Name Drive Identifier.
 	Name string `json:"name"`
 	// Path The path to a LTO SCSI-generic tape device (i.e. '/dev/sg0')
@@ -3442,7 +3442,7 @@ type GetMetricsInfluxdbHttpResponse struct {
 	// Enable Enables or disables the metrics server
 	Enable *client.PVEBool `json:"enable,omitempty"`
 	// MaxBodySize The (optional) maximum body size
-	MaxBodySize *int64 `json:"max-body-size,omitempty"`
+	MaxBodySize *client.PVEInt `json:"max-body-size,omitempty"`
 	// Name Metrics Server ID.
 	Name string `json:"name"`
 	// Organization InfluxDB Organization.
@@ -3660,7 +3660,7 @@ type GetMetricsInfluxdbUdpResponse struct {
 	// Host host:port combination (Host can be DNS name or IP address).
 	Host string `json:"host"`
 	// Mtu The MTU
-	Mtu *int64 `json:"mtu,omitempty"`
+	Mtu *client.PVEInt `json:"mtu,omitempty"`
 	// Name Metrics Server ID.
 	Name string `json:"name"`
 }
@@ -4302,7 +4302,7 @@ type GetNotificationsEndpointsSmtpResponse struct {
 	// Origin The origin of a notification configuration entry.
 	Origin *string `json:"origin,omitempty"`
 	// Port The port to connect to. If not set, the used port defaults to 25 (insecure), 465 (tls) or 587 (starttls), depending on the value of mode
-	Port *int64 `json:"port,omitempty"`
+	Port *client.PVEInt `json:"port,omitempty"`
 	// Server Host name or IP of the SMTP relay.
 	Server string `json:"server"`
 	// Username Username to use during authentication. If no username is set, no authentication will be performed. The PLAIN and LOGIN authentication methods are supported
@@ -5089,19 +5089,19 @@ type GetPruneResponse struct {
 	// Id Job ID.
 	Id string `json:"id"`
 	// KeepDaily Number of daily backups to keep.
-	KeepDaily *int64 `json:"keep-daily,omitempty"`
+	KeepDaily *client.PVEInt `json:"keep-daily,omitempty"`
 	// KeepHourly Number of hourly backups to keep.
-	KeepHourly *int64 `json:"keep-hourly,omitempty"`
+	KeepHourly *client.PVEInt `json:"keep-hourly,omitempty"`
 	// KeepLast Number of backups to keep.
-	KeepLast *int64 `json:"keep-last,omitempty"`
+	KeepLast *client.PVEInt `json:"keep-last,omitempty"`
 	// KeepMonthly Number of monthly backups to keep.
-	KeepMonthly *int64 `json:"keep-monthly,omitempty"`
+	KeepMonthly *client.PVEInt `json:"keep-monthly,omitempty"`
 	// KeepWeekly Number of weekly backups to keep.
-	KeepWeekly *int64 `json:"keep-weekly,omitempty"`
+	KeepWeekly *client.PVEInt `json:"keep-weekly,omitempty"`
 	// KeepYearly Number of yearly backups to keep.
-	KeepYearly *int64 `json:"keep-yearly,omitempty"`
+	KeepYearly *client.PVEInt `json:"keep-yearly,omitempty"`
 	// MaxDepth How many levels of namespaces should be operated on (0 == no recursion, empty == automatic full recursion, namespace depths reduce maximum allowed value)
-	MaxDepth *int64 `json:"max-depth,omitempty"`
+	MaxDepth *client.PVEInt `json:"max-depth,omitempty"`
 	// Ns Namespace.
 	Ns *string `json:"ns,omitempty"`
 	// Schedule Run prune job at specified schedule.
@@ -5333,7 +5333,7 @@ type GetRemoteResponse struct {
 	// Name Remote ID.
 	Name string `json:"name"`
 	// Port The (optional) port
-	Port *int64 `json:"port,omitempty"`
+	Port *client.PVEInt `json:"port,omitempty"`
 	// UseNodeProxy Use the http proxy configuration of the node for remote connections.
 	UseNodeProxy *client.PVEBool `json:"use-node-proxy,omitempty"`
 }
@@ -5702,11 +5702,11 @@ type GetS3Response struct {
 	// PathStyle Use path style bucket addressing over vhost style.
 	PathStyle *client.PVEBool `json:"path-style,omitempty"`
 	// Port Port to access S3 object store.
-	Port *int64 `json:"port,omitempty"`
+	Port *client.PVEInt `json:"port,omitempty"`
 	// ProviderQuirks List of provider specific feature implementation quirks.
 	ProviderQuirks []string `json:"provider-quirks,omitempty"`
 	// PutRateLimit Rate limit for put requests given as #request/s.
-	PutRateLimit *int64 `json:"put-rate-limit,omitempty"`
+	PutRateLimit *client.PVEInt `json:"put-rate-limit,omitempty"`
 	// RateIn Byte size with optional unit (B, KB (base 10), MB, GB, ..., KiB (base 2), MiB, Gib, ...).
 	RateIn *string `json:"rate-in,omitempty"`
 	// RateOut Byte size with optional unit (B, KB (base 10), MB, GB, ..., KiB (base 2), MiB, Gib, ...).
@@ -6018,7 +6018,7 @@ type GetSyncResponse struct {
 	// Id Job ID.
 	Id string `json:"id"`
 	// MaxDepth How many levels of namespaces should be operated on (0 == no recursion, empty == automatic full recursion, namespace depths reduce maximum allowed value)
-	MaxDepth *int64 `json:"max-depth,omitempty"`
+	MaxDepth *client.PVEInt `json:"max-depth,omitempty"`
 	// Ns Namespace.
 	Ns *string `json:"ns,omitempty"`
 	// Owner Authentication ID
@@ -6046,13 +6046,13 @@ type GetSyncResponse struct {
 	// SyncDirection Direction of the sync job, push or pull
 	SyncDirection *string `json:"sync-direction,omitempty"`
 	// TransferLast Limit transfer to last N snapshots (per group), skipping others
-	TransferLast *int64 `json:"transfer-last,omitempty"`
+	TransferLast *client.PVEInt `json:"transfer-last,omitempty"`
 	// UnmountOnDone Unmount involved removable datastore after the sync job finishes. Requires 'run-on-mount' to be enabled.
 	UnmountOnDone *client.PVEBool `json:"unmount-on-done,omitempty"`
 	// VerifiedOnly Only synchronize verified backup snapshots, exclude others.
 	VerifiedOnly *client.PVEBool `json:"verified-only,omitempty"`
 	// WorkerThreads The number of worker threads to process groups in parallel.
-	WorkerThreads *int64 `json:"worker-threads,omitempty"`
+	WorkerThreads *client.PVEInt `json:"worker-threads,omitempty"`
 }
 
 // GetSync implements Service.GetSync. GET /config/sync/{id}.
@@ -6322,7 +6322,7 @@ type GetTapeBackupJobResponse struct {
 	// LatestOnly Backup latest snapshots only.
 	LatestOnly *client.PVEBool `json:"latest-only,omitempty"`
 	// MaxDepth How many levels of namespaces should be operated on (0 == no recursion)
-	MaxDepth *int64 `json:"max-depth,omitempty"`
+	MaxDepth *client.PVEInt `json:"max-depth,omitempty"`
 	// NotificationMode Configure how notifications for this datastore should be sent. `legacy-sendmail` sends email notifications to the user configured in `notify-user` via the system's `sendmail` executable. `notification-system` emits matchable notification events to the notification system.
 	NotificationMode *string `json:"notification-mode,omitempty"`
 	// NotifyUser User ID
@@ -6336,7 +6336,7 @@ type GetTapeBackupJobResponse struct {
 	// Store Datastore name.
 	Store string `json:"store"`
 	// WorkerThreads The number of threads to use for the tape backup job.
-	WorkerThreads *int64 `json:"worker-threads,omitempty"`
+	WorkerThreads *client.PVEInt `json:"worker-threads,omitempty"`
 }
 
 // GetTapeBackupJob implements Service.GetTapeBackupJob. GET /config/tape-backup-job/{id}.
@@ -6563,7 +6563,7 @@ func (s *service) DeleteTapeEncryptionKeys(ctx context.Context, fingerprint stri
 // GetTapeEncryptionKeysResponse mirrors the shape returned by GET /config/tape-encryption-keys/{fingerprint}.
 type GetTapeEncryptionKeysResponse struct {
 	// Created Key creation time
-	Created int64 `json:"created"`
+	Created client.PVEInt `json:"created"`
 	// Fingerprint X509 certificate fingerprint (sha256).
 	Fingerprint *string `json:"fingerprint,omitempty"`
 	// Hint Password hint
@@ -6571,7 +6571,7 @@ type GetTapeEncryptionKeysResponse struct {
 	// Kdf Key derivation function for password protected encryption keys.
 	Kdf string `json:"kdf"`
 	// Modified Key modification time
-	Modified int64 `json:"modified"`
+	Modified client.PVEInt `json:"modified"`
 	// Path Path to key (if stored in a file)
 	Path *string `json:"path,omitempty"`
 }
@@ -7009,19 +7009,19 @@ type GetVerifyResponse struct {
 	// IgnoreVerified Do not verify backups that are already verified if their verification is not outdated.
 	IgnoreVerified *client.PVEBool `json:"ignore-verified,omitempty"`
 	// MaxDepth How many levels of namespaces should be operated on (0 == no recursion)
-	MaxDepth *int64 `json:"max-depth,omitempty"`
+	MaxDepth *client.PVEInt `json:"max-depth,omitempty"`
 	// Ns Namespace.
 	Ns *string `json:"ns,omitempty"`
 	// OutdatedAfter Days after that a verification becomes outdated. (0 is deprecated)'
-	OutdatedAfter *int64 `json:"outdated-after,omitempty"`
+	OutdatedAfter *client.PVEInt `json:"outdated-after,omitempty"`
 	// ReadThreads The number of threads to use for reading chunks in verify job.
-	ReadThreads *int64 `json:"read-threads,omitempty"`
+	ReadThreads *client.PVEInt `json:"read-threads,omitempty"`
 	// Schedule Run verify job at specified schedule.
 	Schedule *string `json:"schedule,omitempty"`
 	// Store Datastore name.
 	Store string `json:"store"`
 	// VerifyThreads The number of threads to use for verifying chunks in verify job.
-	VerifyThreads *int64 `json:"verify-threads,omitempty"`
+	VerifyThreads *client.PVEInt `json:"verify-threads,omitempty"`
 }
 
 // GetVerify implements Service.GetVerify. GET /config/verify/{id}.

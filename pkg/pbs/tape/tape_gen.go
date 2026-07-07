@@ -1060,19 +1060,19 @@ type ListDriveReadLabelParams struct {
 // ListDriveReadLabelResponse mirrors the shape returned by GET /tape/drive/{drive}/read-label.
 type ListDriveReadLabelResponse struct {
 	// Ctime Creation time stamp
-	Ctime int64 `json:"ctime"`
+	Ctime client.PVEInt `json:"ctime"`
 	// EncryptionKeyFingerprint Encryption key fingerprint
 	EncryptionKeyFingerprint *string `json:"encryption-key-fingerprint,omitempty"`
 	// LabelText Media label text (or Barcode)
 	LabelText string `json:"label-text"`
 	// MediaSetCtime MediaSet Creation time stamp
-	MediaSetCtime *int64 `json:"media-set-ctime,omitempty"`
+	MediaSetCtime *client.PVEInt `json:"media-set-ctime,omitempty"`
 	// MediaSetUuid MediaSet Uuid (We use the all-zero Uuid to reserve an empty media for a specific pool).
 	MediaSetUuid *string `json:"media-set-uuid,omitempty"`
 	// Pool MediaSet Pool
 	Pool *string `json:"pool,omitempty"`
 	// SeqNr MediaSet media sequence number
-	SeqNr *int64 `json:"seq-nr,omitempty"`
+	SeqNr *client.PVEInt `json:"seq-nr,omitempty"`
 	// Uuid Media Uuid.
 	Uuid string `json:"uuid"`
 }
@@ -1192,15 +1192,15 @@ type ListDriveStatusResponse struct {
 	// AlertFlags Tape Alert Flags
 	AlertFlags *string `json:"alert-flags,omitempty"`
 	// BlockNumber Current block number
-	BlockNumber *int64 `json:"block-number,omitempty"`
+	BlockNumber *client.PVEInt `json:"block-number,omitempty"`
 	// Blocksize Block size (0 is variable size)
-	Blocksize int64 `json:"blocksize"`
+	Blocksize client.PVEInt `json:"blocksize"`
 	// BufferMode Drive buffer mode
-	BufferMode int64 `json:"buffer-mode"`
+	BufferMode client.PVEInt `json:"buffer-mode"`
 	// BytesRead Total Bytes Read in Medium Life
-	BytesRead *int64 `json:"bytes-read,omitempty"`
+	BytesRead *client.PVEInt `json:"bytes-read,omitempty"`
 	// BytesWritten Total Bytes Written in Medium Life
-	BytesWritten *int64 `json:"bytes-written,omitempty"`
+	BytesWritten *client.PVEInt `json:"bytes-written,omitempty"`
 	// Compression Compression enabled
 	Compression client.PVEBool `json:"compression"`
 	// Density The density of a tape medium, derived from the LTO version.
@@ -1208,11 +1208,11 @@ type ListDriveStatusResponse struct {
 	// DriveActivity The DT Device Activity from DT Device Status LP page
 	DriveActivity *string `json:"drive-activity,omitempty"`
 	// FileNumber Current file number
-	FileNumber *int64 `json:"file-number,omitempty"`
+	FileNumber *client.PVEInt `json:"file-number,omitempty"`
 	// Manufactured Medium Manufacture Date (epoch)
-	Manufactured *int64 `json:"manufactured,omitempty"`
+	Manufactured *client.PVEInt `json:"manufactured,omitempty"`
 	// MediumPasses Count of the total number of times the medium has passed over the head.
-	MediumPasses *int64 `json:"medium-passes,omitempty"`
+	MediumPasses *client.PVEInt `json:"medium-passes,omitempty"`
 	// MediumWearout Estimated tape wearout factor (assuming max. 16000 end-to-end passes)
 	MediumWearout *client.PVEFloat `json:"medium-wearout,omitempty"`
 	// Product Product
@@ -1222,7 +1222,7 @@ type ListDriveStatusResponse struct {
 	// Vendor Vendor
 	Vendor string `json:"vendor"`
 	// VolumeMounts Number of mounts for the current volume (i.e., Thread Count)
-	VolumeMounts *int64 `json:"volume-mounts,omitempty"`
+	VolumeMounts *client.PVEInt `json:"volume-mounts,omitempty"`
 	// WriteProtect Media is write protected
 	WriteProtect *client.PVEBool `json:"write-protect,omitempty"`
 }
@@ -1310,53 +1310,53 @@ func (s *service) CreateDriveUnload(ctx context.Context, drive string, params *C
 // ListDriveVolumeStatisticsResponse mirrors the shape returned by GET /tape/drive/{drive}/volume-statistics.
 type ListDriveVolumeStatisticsResponse struct {
 	// BeginningOfMediumPasses Beginning of medium passes
-	BeginningOfMediumPasses int64 `json:"beginning-of-medium-passes"`
+	BeginningOfMediumPasses client.PVEInt `json:"beginning-of-medium-passes"`
 	// LastLoadReadCompressionRatio Last load read compression ratio
-	LastLoadReadCompressionRatio int64 `json:"last-load-read-compression-ratio"`
+	LastLoadReadCompressionRatio client.PVEInt `json:"last-load-read-compression-ratio"`
 	// LastLoadWriteCompressionRatio Last load write compression ratio
-	LastLoadWriteCompressionRatio int64 `json:"last-load-write-compression-ratio"`
+	LastLoadWriteCompressionRatio client.PVEInt `json:"last-load-write-compression-ratio"`
 	// LastMountBytesRead Last mount bytes read
-	LastMountBytesRead int64 `json:"last-mount-bytes-read"`
+	LastMountBytesRead client.PVEInt `json:"last-mount-bytes-read"`
 	// LastMountBytesWritten Last mount bytes written
-	LastMountBytesWritten int64 `json:"last-mount-bytes-written"`
+	LastMountBytesWritten client.PVEInt `json:"last-mount-bytes-written"`
 	// LastMountUnrecoveredReadErrors Last mount unrecovered read errors
-	LastMountUnrecoveredReadErrors int64 `json:"last-mount-unrecovered-read-errors"`
+	LastMountUnrecoveredReadErrors client.PVEInt `json:"last-mount-unrecovered-read-errors"`
 	// LastMountUnrecoveredWriteErrors Last mount unrecovered write errors
-	LastMountUnrecoveredWriteErrors int64 `json:"last-mount-unrecovered-write-errors"`
+	LastMountUnrecoveredWriteErrors client.PVEInt `json:"last-mount-unrecovered-write-errors"`
 	// LifetimeBytesRead Lifetime bytes read
-	LifetimeBytesRead int64 `json:"lifetime-bytes-read"`
+	LifetimeBytesRead client.PVEInt `json:"lifetime-bytes-read"`
 	// LifetimeBytesWritten Lifetime bytes written
-	LifetimeBytesWritten int64 `json:"lifetime-bytes-written"`
+	LifetimeBytesWritten client.PVEInt `json:"lifetime-bytes-written"`
 	// MediumMountTime Medium mount time
-	MediumMountTime int64 `json:"medium-mount-time"`
+	MediumMountTime client.PVEInt `json:"medium-mount-time"`
 	// MediumReadyTime Medium ready time
-	MediumReadyTime int64 `json:"medium-ready-time"`
+	MediumReadyTime client.PVEInt `json:"medium-ready-time"`
 	// MiddleOfTapePasses Middle of medium passes
-	MiddleOfTapePasses int64 `json:"middle-of-tape-passes"`
+	MiddleOfTapePasses client.PVEInt `json:"middle-of-tape-passes"`
 	// Serial Volume serial number
 	Serial string `json:"serial"`
 	// TotalNativeCapacity Total native capacity
-	TotalNativeCapacity int64 `json:"total-native-capacity"`
+	TotalNativeCapacity client.PVEInt `json:"total-native-capacity"`
 	// TotalUsedNativeCapacity Total used native capacity
-	TotalUsedNativeCapacity int64 `json:"total-used-native-capacity"`
+	TotalUsedNativeCapacity client.PVEInt `json:"total-used-native-capacity"`
 	// VolumeDatasetsRead Total datasets read
-	VolumeDatasetsRead int64 `json:"volume-datasets-read"`
+	VolumeDatasetsRead client.PVEInt `json:"volume-datasets-read"`
 	// VolumeDatasetsWritten Total data sets written
-	VolumeDatasetsWritten int64 `json:"volume-datasets-written"`
+	VolumeDatasetsWritten client.PVEInt `json:"volume-datasets-written"`
 	// VolumeMounts Volume mounts (thread count)
-	VolumeMounts int64 `json:"volume-mounts"`
+	VolumeMounts client.PVEInt `json:"volume-mounts"`
 	// VolumeRecoveredReadErrors Total read retries
-	VolumeRecoveredReadErrors int64 `json:"volume-recovered-read-errors"`
+	VolumeRecoveredReadErrors client.PVEInt `json:"volume-recovered-read-errors"`
 	// VolumeRecoveredWriteDataErrors Write retries
-	VolumeRecoveredWriteDataErrors int64 `json:"volume-recovered-write-data-errors"`
+	VolumeRecoveredWriteDataErrors client.PVEInt `json:"volume-recovered-write-data-errors"`
 	// VolumeUnrecoveredReadErrors Total unrecovered read errors
-	VolumeUnrecoveredReadErrors int64 `json:"volume-unrecovered-read-errors"`
+	VolumeUnrecoveredReadErrors client.PVEInt `json:"volume-unrecovered-read-errors"`
 	// VolumeUnrecoveredWriteDataErrors Total unrecovered write errors
-	VolumeUnrecoveredWriteDataErrors int64 `json:"volume-unrecovered-write-data-errors"`
+	VolumeUnrecoveredWriteDataErrors client.PVEInt `json:"volume-unrecovered-write-data-errors"`
 	// VolumeUnrecoveredWriteServoErrors Total fatal suspended writes
-	VolumeUnrecoveredWriteServoErrors int64 `json:"volume-unrecovered-write-servo-errors"`
+	VolumeUnrecoveredWriteServoErrors client.PVEInt `json:"volume-unrecovered-write-servo-errors"`
 	// VolumeWriteServoErrors Total suspended writes
-	VolumeWriteServoErrors int64 `json:"volume-write-servo-errors"`
+	VolumeWriteServoErrors client.PVEInt `json:"volume-write-servo-errors"`
 	// Worm Volume is WORM
 	Worm client.PVEBool `json:"worm"`
 	// WriteProtect Write protect

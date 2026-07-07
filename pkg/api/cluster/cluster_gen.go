@@ -1357,7 +1357,7 @@ type GetAcmePluginsResponse struct {
 	// Type ACME challenge type.
 	Type string `json:"type"`
 	// ValidationDelay Extra delay in seconds to wait before requesting validation. Allows to cope with a long TTL of DNS records.
-	ValidationDelay *int64 `json:"validation-delay,omitempty"`
+	ValidationDelay *client.PVEInt `json:"validation-delay,omitempty"`
 }
 
 // GetAcmePlugins implements Service.GetAcmePlugins. GET /cluster/acme/plugins/{id}.
@@ -1720,7 +1720,7 @@ type GetBackupResponse struct {
 	// All Backup all known guest systems on this host.
 	All *client.PVEBool `json:"all,omitempty"`
 	// Bwlimit Limit I/O bandwidth (in KiB/s).
-	Bwlimit *int64 `json:"bwlimit,omitempty"`
+	Bwlimit *client.PVEInt `json:"bwlimit,omitempty"`
 	// Comment Description for the Job.
 	Comment *string `json:"comment,omitempty"`
 	// Compress Compress dump file.
@@ -1738,9 +1738,9 @@ type GetBackupResponse struct {
 	// Id The job ID.
 	Id string `json:"id"`
 	// Ionice Set IO priority when using the BFQ scheduler. For snapshot and suspend mode backups of VMs, this only affects the compressor. A value of 8 means the idle priority is used, otherwise the best-effort priority is used with the specified value.
-	Ionice *int64 `json:"ionice,omitempty"`
+	Ionice *client.PVEInt `json:"ionice,omitempty"`
 	// Lockwait Maximal time to wait for the global lock (minutes).
-	Lockwait *int64 `json:"lockwait,omitempty"`
+	Lockwait *client.PVEInt `json:"lockwait,omitempty"`
 	// Mailnotification Deprecated: use notification targets/matchers instead. Specify when to send a notification mail
 	Mailnotification *string `json:"mailnotification,omitempty"`
 	// Mailto Deprecated: Use notification targets/matchers instead. Comma-separated list of email addresses or users that should receive email notifications.
@@ -1748,7 +1748,7 @@ type GetBackupResponse struct {
 	// Mode Backup mode.
 	Mode *string `json:"mode,omitempty"`
 	// NextRun UNIX timestamp when this backup job will be executed next
-	NextRun *int64 `json:"next-run,omitempty"`
+	NextRun *client.PVEInt `json:"next-run,omitempty"`
 	// Node Only run if executed on this node.
 	Node *string `json:"node,omitempty"`
 	// NotesTemplate Template string for generating notes for the backup(s). It can contain variables which will be replaced by their values. Currently supported are {{cluster}}, {{guestname}}, {{node}}, and {{vmid}}, but more might be added in the future. Needs to be a single line, newline and backslash need to be escaped as '\n' and '\\' respectively.
@@ -1760,7 +1760,7 @@ type GetBackupResponse struct {
 	// Performance Other performance-related settings.
 	Performance json.RawMessage `json:"performance,omitempty"`
 	// Pigz Use pigz instead of gzip when N>0. N=1 uses half of cores, N>1 uses N as thread count.
-	Pigz *int64 `json:"pigz,omitempty"`
+	Pigz *client.PVEInt `json:"pigz,omitempty"`
 	// Pool Backup all known guest systems included in the specified pool.
 	Pool *string `json:"pool,omitempty"`
 	// Protected If true, mark backup(s) as protected.
@@ -1782,7 +1782,7 @@ type GetBackupResponse struct {
 	// Stop Stop running backup jobs on this host.
 	Stop *client.PVEBool `json:"stop,omitempty"`
 	// Stopwait Maximal time to wait until a guest system is stopped (minutes).
-	Stopwait *int64 `json:"stopwait,omitempty"`
+	Stopwait *client.PVEInt `json:"stopwait,omitempty"`
 	// Storage Store resulting file to this storage.
 	Storage *string `json:"storage,omitempty"`
 	// Tmpdir Store temporary files to specified directory.
@@ -1790,7 +1790,7 @@ type GetBackupResponse struct {
 	// Vmid The ID of the guest system you want to backup.
 	Vmid *string `json:"vmid,omitempty"`
 	// Zstd Zstd threads. N=0 uses half of the available cores, if N is set to a value bigger than 0, N is used as thread count.
-	Zstd *int64 `json:"zstd,omitempty"`
+	Zstd *client.PVEInt `json:"zstd,omitempty"`
 }
 
 // GetBackup implements Service.GetBackup. GET /cluster/backup/{id}.
@@ -3558,19 +3558,19 @@ type GetFirewallGroups2Response struct {
 	// Dport Restrict TCP/UDP destination port
 	Dport *string `json:"dport,omitempty"`
 	// Enable Flag to enable/disable a rule
-	Enable *int64 `json:"enable,omitempty"`
+	Enable *client.PVEInt `json:"enable,omitempty"`
 	// IcmpType Specify icmp-type. Only valid if proto equals 'icmp' or 'icmpv6'/'ipv6-icmp'
 	IcmpType *string `json:"icmp-type,omitempty"`
 	// Iface Network interface name. You have to use network configuration key names for VMs and containers
 	Iface *string `json:"iface,omitempty"`
 	// Ipversion IP version (4 or 6) - automatically determined from source/dest addresses
-	Ipversion *int64 `json:"ipversion,omitempty"`
+	Ipversion *client.PVEInt `json:"ipversion,omitempty"`
 	// Log Log level for firewall rule
 	Log *string `json:"log,omitempty"`
 	// Macro Use predefined standard macro
 	Macro *string `json:"macro,omitempty"`
 	// Pos Rule position in the ruleset
-	Pos int64 `json:"pos"`
+	Pos client.PVEInt `json:"pos"`
 	// Proto IP protocol. You can use protocol names ('tcp'/'udp') or simple numbers, as defined in '/etc/protocols'
 	Proto *string `json:"proto,omitempty"`
 	// Source Restrict packet source address
@@ -4002,7 +4002,7 @@ type ListFirewallOptionsResponse struct {
 	// Ebtables Enable ebtables rules cluster wide.
 	Ebtables *client.PVEBool `json:"ebtables,omitempty"`
 	// Enable Enable or disable the firewall cluster wide.
-	Enable *int64 `json:"enable,omitempty"`
+	Enable *client.PVEInt `json:"enable,omitempty"`
 	// LogRatelimit Log ratelimiting settings
 	LogRatelimit *string `json:"log_ratelimit,omitempty"`
 	// PolicyForward Forward policy.
@@ -4287,19 +4287,19 @@ type GetFirewallRulesResponse struct {
 	// Dport Restrict TCP/UDP destination port
 	Dport *string `json:"dport,omitempty"`
 	// Enable Flag to enable/disable a rule
-	Enable *int64 `json:"enable,omitempty"`
+	Enable *client.PVEInt `json:"enable,omitempty"`
 	// IcmpType Specify icmp-type. Only valid if proto equals 'icmp' or 'icmpv6'/'ipv6-icmp'
 	IcmpType *string `json:"icmp-type,omitempty"`
 	// Iface Network interface name. You have to use network configuration key names for VMs and containers
 	Iface *string `json:"iface,omitempty"`
 	// Ipversion IP version (4 or 6) - automatically determined from source/dest addresses
-	Ipversion *int64 `json:"ipversion,omitempty"`
+	Ipversion *client.PVEInt `json:"ipversion,omitempty"`
 	// Log Log level for firewall rule
 	Log *string `json:"log,omitempty"`
 	// Macro Use predefined standard macro
 	Macro *string `json:"macro,omitempty"`
 	// Pos Rule position in the ruleset
-	Pos int64 `json:"pos"`
+	Pos client.PVEInt `json:"pos"`
 	// Proto IP protocol. You can use protocol names ('tcp'/'udp') or simple numbers, as defined in '/etc/protocols'
 	Proto *string `json:"proto,omitempty"`
 	// Source Restrict packet source address
@@ -4766,9 +4766,9 @@ type GetHaResourcesResponse struct {
 	// Group The HA group identifier.
 	Group *string `json:"group,omitempty"`
 	// MaxRelocate Maximal number of service relocate tries when a service fails to start.
-	MaxRelocate *int64 `json:"max_relocate,omitempty"`
+	MaxRelocate *client.PVEInt `json:"max_relocate,omitempty"`
 	// MaxRestart Maximal number of tries to restart the service on a node after its start failed.
-	MaxRestart *int64 `json:"max_restart,omitempty"`
+	MaxRestart *client.PVEInt `json:"max_restart,omitempty"`
 	// Sid HA resource ID. This consists of a resource type followed by a resource specific name, separated with colon (example: vm:100 / ct:100). For virtual machines and containers, you can simply use the VM or CT id as a shortcut (example: 100).
 	Sid string `json:"sid"`
 	// State Requested resource state.
@@ -7216,7 +7216,7 @@ type GetNotificationsEndpointsSmtpResponse struct {
 	// Name The name of the endpoint.
 	Name string `json:"name"`
 	// Port The port to be used. Defaults to 465 for TLS based connections, 587 for STARTTLS based connections and port 25 for insecure plain-text connections.
-	Port *int64 `json:"port,omitempty"`
+	Port *client.PVEInt `json:"port,omitempty"`
 	// Server The address of the SMTP server.
 	Server string `json:"server"`
 	// Username Username for SMTP authentication
@@ -8156,13 +8156,13 @@ type GetQemuCustomCpuModelsResponse struct {
 	// Flags List of additional CPU flags separated by ';'. Use '+FLAG' to enable, '-FLAG' to disable a flag. There is a special 'nested-virt' shorthand which controls nested virtualization for the current CPU ('svm' for AMD and 'vmx' for Intel). Custom CPU models can specify any flag supported by QEMU/KVM, VM-specific flags must be from the following set for security reasons: aes, amd-no-ssb, amd-ssbd, hv-evmcs, hv-tlbflush, ibpb, md-clear, nested-virt, pcid, pdpe1gb, spec-ctrl, ssbd, virt-ssbd
 	Flags *string `json:"flags,omitempty"`
 	// GuestPhysBits Number of physical address bits available to the guest.
-	GuestPhysBits *int64 `json:"guest-phys-bits,omitempty"`
+	GuestPhysBits *client.PVEInt `json:"guest-phys-bits,omitempty"`
 	// Hidden Do not identify as a KVM virtual machine. Only affects vCPUs with x86-64 architecture.
 	Hidden *client.PVEBool `json:"hidden,omitempty"`
 	// HvVendorId The Hyper-V vendor ID. Some drivers or programs inside Windows guests need a specific ID.
 	HvVendorId *string `json:"hv-vendor-id,omitempty"`
 	// Level Maximum input value for the basic CPUID leaves the guest can query - that is the vendor (leaf 0), family/model/stepping and feature bits (leaf 1), cache and topology info (leaves 4 and B), and so on. Higher-numbered leaves are hidden. Setting '30' is a common workaround for Hyper-V boot failures on Windows guests running on recent Intel hosts. Only applies when the vCPU architecture is x86_64.
-	Level *int64 `json:"level,omitempty"`
+	Level *client.PVEInt `json:"level,omitempty"`
 	// PhysBits The physical memory address bits that are reported to the guest OS. Should be smaller or equal to the host's. Set to 'host' to use value from host CPU, but note that doing so will break live migration to CPUs with other values.
 	PhysBits *string `json:"phys-bits,omitempty"`
 	// ReportedModel CPU model and vendor to report to the guest. Must be a QEMU/KVM supported model. Only valid for custom CPU model definitions, default models will always report themselves to the guest OS.
@@ -8382,11 +8382,11 @@ type GetReplicationResponse struct {
 	// Disable Flag to disable/deactivate the entry.
 	Disable *client.PVEBool `json:"disable,omitempty"`
 	// Guest Guest ID.
-	Guest int64 `json:"guest"`
+	Guest client.PVEInt `json:"guest"`
 	// Id Replication Job ID. The ID is composed of a Guest ID and a job number, separated by a hyphen, i.e. '<GUEST>-<JOBNUM>'.
 	Id string `json:"id"`
 	// Jobnum Unique, sequential ID assigned to each job.
-	Jobnum int64 `json:"jobnum"`
+	Jobnum client.PVEInt `json:"jobnum"`
 	// Rate Rate limit in mbps (megabytes per second) as floating point number.
 	Rate *client.PVEFloat `json:"rate,omitempty"`
 	// RemoveJob Mark the replication job for removal. The job will remove all local replication snapshots. When set to 'full', it also tries to remove replicated volumes on the target. The job then removes itself from the configuration file.
@@ -10784,7 +10784,7 @@ type GetSdnRouteMapsEntriesEntryResponse struct {
 	ExitAction *string  `json:"exit-action,omitempty"`
 	Match      []string `json:"match,omitempty"`
 	// Order The index of this route map entry
-	Order int64 `json:"order"`
+	Order client.PVEInt `json:"order"`
 	// RouteMapId The SDN route map identifier
 	RouteMapId string   `json:"route-map-id"`
 	Set        []string `json:"set,omitempty"`
@@ -11367,19 +11367,19 @@ type GetSdnVnetsFirewallRulesResponse struct {
 	// Dport Restrict TCP/UDP destination port
 	Dport *string `json:"dport,omitempty"`
 	// Enable Flag to enable/disable a rule
-	Enable *int64 `json:"enable,omitempty"`
+	Enable *client.PVEInt `json:"enable,omitempty"`
 	// IcmpType Specify icmp-type. Only valid if proto equals 'icmp' or 'icmpv6'/'ipv6-icmp'
 	IcmpType *string `json:"icmp-type,omitempty"`
 	// Iface Network interface name. You have to use network configuration key names for VMs and containers
 	Iface *string `json:"iface,omitempty"`
 	// Ipversion IP version (4 or 6) - automatically determined from source/dest addresses
-	Ipversion *int64 `json:"ipversion,omitempty"`
+	Ipversion *client.PVEInt `json:"ipversion,omitempty"`
 	// Log Log level for firewall rule
 	Log *string `json:"log,omitempty"`
 	// Macro Use predefined standard macro
 	Macro *string `json:"macro,omitempty"`
 	// Pos Rule position in the ruleset
-	Pos int64 `json:"pos"`
+	Pos client.PVEInt `json:"pos"`
 	// Proto IP protocol. You can use protocol names ('tcp'/'udp') or simple numbers, as defined in '/etc/protocols'
 	Proto *string `json:"proto,omitempty"`
 	// Source Restrict packet source address

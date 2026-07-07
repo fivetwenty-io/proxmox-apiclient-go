@@ -1437,7 +1437,7 @@ func (s *service) DeleteTfa(ctx context.Context, userid string, id string, param
 // GetTfa2Response mirrors the shape returned by GET /access/tfa/{userid}/{id}.
 type GetTfa2Response struct {
 	// Created Creation time of this entry as unix epoch.
-	Created int64 `json:"created"`
+	Created client.PVEInt `json:"created"`
 	// Description User chosen description for this entry.
 	Description string `json:"description"`
 	// Enable Whether this TFA entry is currently enabled.
@@ -1731,9 +1731,9 @@ type GetUsersResponse struct {
 	// Enable Enable the account (default). You can set this to '0' to disable the account
 	Enable *client.PVEBool `json:"enable,omitempty"`
 	// Expire Account expiration date (seconds since epoch). '0' means no expiration date.
-	Expire    *int64   `json:"expire,omitempty"`
-	Firstname *string  `json:"firstname,omitempty"`
-	Groups    []string `json:"groups,omitempty"`
+	Expire    *client.PVEInt `json:"expire,omitempty"`
+	Firstname *string        `json:"firstname,omitempty"`
+	Groups    []string       `json:"groups,omitempty"`
 	// Keys Keys for two factor auth (yubico).
 	Keys     *string         `json:"keys,omitempty"`
 	Lastname *string         `json:"lastname,omitempty"`
@@ -1927,7 +1927,7 @@ func (s *service) DeleteUsersToken(ctx context.Context, userid string, tokenid s
 type GetUsersTokenResponse struct {
 	Comment *string `json:"comment,omitempty"`
 	// Expire API token expiration date (seconds since epoch). '0' means no expiration date.
-	Expire *int64 `json:"expire,omitempty"`
+	Expire *client.PVEInt `json:"expire,omitempty"`
 	// Privsep Restrict API token privileges with separate ACLs (default), or give full privileges of corresponding user.
 	Privsep *client.PVEBool `json:"privsep,omitempty"`
 }
@@ -2037,7 +2037,7 @@ type UpdateUsersTokenParams struct {
 type UpdateUsersTokenResponse struct {
 	Comment *string `json:"comment,omitempty"`
 	// Expire API token expiration date (seconds since epoch). '0' means no expiration date.
-	Expire *int64 `json:"expire,omitempty"`
+	Expire *client.PVEInt `json:"expire,omitempty"`
 	// FullTokenid The full token id. Only set when 'regenerate' was set.
 	FullTokenid *string `json:"full-tokenid,omitempty"`
 	// Privsep Restrict API token privileges with separate ACLs (default), or give full privileges of corresponding user.

@@ -520,35 +520,35 @@ type ListDatastoreGcResponse struct {
 	// CacheStats Garbage collection cache statistics
 	CacheStats json.RawMessage `json:"cache-stats,omitempty"`
 	// DiskBytes Bytes used on disk.
-	DiskBytes int64 `json:"disk-bytes"`
+	DiskBytes client.PVEInt `json:"disk-bytes"`
 	// DiskChunks Chunks used on disk.
-	DiskChunks int64 `json:"disk-chunks"`
+	DiskChunks client.PVEInt `json:"disk-chunks"`
 	// Duration Duration of last gc run
-	Duration *int64 `json:"duration,omitempty"`
+	Duration *client.PVEInt `json:"duration,omitempty"`
 	// IndexDataBytes Sum of bytes referred by index files.
-	IndexDataBytes int64 `json:"index-data-bytes"`
+	IndexDataBytes client.PVEInt `json:"index-data-bytes"`
 	// IndexFileCount Number of processed index files.
-	IndexFileCount int64 `json:"index-file-count"`
+	IndexFileCount client.PVEInt `json:"index-file-count"`
 	// LastRunEndtime Endtime of the last gc run
-	LastRunEndtime *int64 `json:"last-run-endtime,omitempty"`
+	LastRunEndtime *client.PVEInt `json:"last-run-endtime,omitempty"`
 	// LastRunState State of the last gc run
 	LastRunState *string `json:"last-run-state,omitempty"`
 	// NextRun Time of the next gc run
-	NextRun *int64 `json:"next-run,omitempty"`
+	NextRun *client.PVEInt `json:"next-run,omitempty"`
 	// PendingBytes Sum of pending bytes (pending removal - kept for safety).
-	PendingBytes int64 `json:"pending-bytes"`
+	PendingBytes client.PVEInt `json:"pending-bytes"`
 	// PendingChunks Number of pending chunks (pending removal - kept for safety).
-	PendingChunks int64 `json:"pending-chunks"`
+	PendingChunks client.PVEInt `json:"pending-chunks"`
 	// RemovedBad Number of chunks marked as .bad by verify that have been removed by GC.
-	RemovedBad int64 `json:"removed-bad"`
+	RemovedBad client.PVEInt `json:"removed-bad"`
 	// RemovedBytes Sum of removed bytes.
-	RemovedBytes int64 `json:"removed-bytes"`
+	RemovedBytes client.PVEInt `json:"removed-bytes"`
 	// RemovedChunks Number of removed chunks.
-	RemovedChunks int64 `json:"removed-chunks"`
+	RemovedChunks client.PVEInt `json:"removed-chunks"`
 	// Schedule Schedule of the gc job
 	Schedule *string `json:"schedule,omitempty"`
 	// StillBad Number of chunks still marked as .bad after garbage collection.
-	StillBad int64 `json:"still-bad"`
+	StillBad client.PVEInt `json:"still-bad"`
 	// Store Datastore
 	Store string `json:"store"`
 	// Upid Unique Process/Task Identifier
@@ -714,11 +714,11 @@ type DeleteDatastoreGroupsParams struct {
 // DeleteDatastoreGroupsResponse mirrors the shape returned by DELETE /admin/datastore/{store}/groups.
 type DeleteDatastoreGroupsResponse struct {
 	// ProtectedSnapshots Number of entities
-	ProtectedSnapshots int64 `json:"protected-snapshots"`
+	ProtectedSnapshots client.PVEInt `json:"protected-snapshots"`
 	// RemovedGroups Number of entities
-	RemovedGroups int64 `json:"removed-groups"`
+	RemovedGroups client.PVEInt `json:"removed-groups"`
 	// RemovedSnapshots Number of entities
-	RemovedSnapshots int64 `json:"removed-snapshots"`
+	RemovedSnapshots client.PVEInt `json:"removed-snapshots"`
 }
 
 // DeleteDatastoreGroups implements Service.DeleteDatastoreGroups. DELETE /admin/datastore/{store}/groups.
@@ -1645,7 +1645,7 @@ type ListDatastoreStatusParams struct {
 // ListDatastoreStatusResponse mirrors the shape returned by GET /admin/datastore/{store}/status.
 type ListDatastoreStatusResponse struct {
 	// Avail Available space (bytes).
-	Avail int64 `json:"avail"`
+	Avail client.PVEInt `json:"avail"`
 	// BackendType Datastore backend type
 	BackendType string `json:"backend-type"`
 	// Counts Counts of groups/snapshots per BackupType.
@@ -1655,9 +1655,9 @@ type ListDatastoreStatusResponse struct {
 	// S3Statistics Statistics specific to the S3 backend
 	S3Statistics json.RawMessage `json:"s3-statistics,omitempty"`
 	// Total Total space (bytes).
-	Total int64 `json:"total"`
+	Total client.PVEInt `json:"total"`
 	// Used Used space (bytes).
-	Used int64 `json:"used"`
+	Used client.PVEInt `json:"used"`
 }
 
 // ListDatastoreStatus implements Service.ListDatastoreStatus. GET /admin/datastore/{store}/status.
