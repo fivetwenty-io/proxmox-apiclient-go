@@ -71,6 +71,9 @@ const (
 	// on a dynamic-tail path (see goMethodBaseName) and the methodNameOverrides
 	// value for GET /version.
 	methodPrefixGet = "Get"
+	// overrideGetVersion is the methodNameOverrides key for the version
+	// endpoint's GET method, shared by all three dialects (pve, pbs, pdm).
+	overrideGetVersion = "GET /version"
 	// namespaceVersion is the one top-level spec namespace whose smoke test
 	// emission emitNamespace deliberately skips (see the doc comment there).
 	namespaceVersion = "version"
@@ -142,7 +145,7 @@ var dialects = map[string]*dialectConfig{
 		// generator and depend on the shorter "Get" name. Keeping those
 		// tests stable is cheaper than rewriting them.
 		methodNameOverrides: map[string]string{
-			"GET /version": methodPrefixGet,
+			overrideGetVersion: methodPrefixGet,
 		},
 		namespaceOutputDir: map[string]string{
 			// /storage top-level endpoints (datacenter storage config)
@@ -159,10 +162,10 @@ var dialects = map[string]*dialectConfig{
 	"pbs": {
 		pkgImportRoot: "pkg/pbs",
 		methodNameOverrides: map[string]string{
-			"GET /version": methodPrefixGet,
-			"GET /ping":    "Ping",
-			"POST /pull":   "Pull",
-			"POST /push":   "Push",
+			overrideGetVersion: methodPrefixGet,
+			"GET /ping":        "Ping",
+			"POST /pull":       "Pull",
+			"POST /push":       "Push",
 		},
 		namespaceOutputDir: map[string]string{},
 		skipNamespaces: map[string]bool{
@@ -179,8 +182,8 @@ var dialects = map[string]*dialectConfig{
 	"pdm": {
 		pkgImportRoot: "pkg/pdm",
 		methodNameOverrides: map[string]string{
-			"GET /version": methodPrefixGet,
-			"GET /ping":    "Ping",
+			overrideGetVersion: methodPrefixGet,
+			"GET /ping":        "Ping",
 		},
 		namespaceOutputDir: map[string]string{
 			// "auto-install" contains a hyphen, which is not a legal Go
