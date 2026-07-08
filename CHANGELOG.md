@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Proxmox Datacenter Manager support**: generated typed bindings for the
-  full PDM JSON API (327 endpoints, PDM 1.1.6) under `pkg/pdm/*` (`access`,
+  full PDM JSON API (327 method-operations, PDM 1.1.6) under `pkg/pdm/*` (`access`,
   `autoinstall`, `ceph`, `config`, `nodes`, `pbs`, `ping`, `pve`, `remotes`,
   `resources`, `sdn`, `subscriptions`, `version`), produced by
   `cmd/pvegen --dialect pdm` from the vendored `_data/pdm-apidoc.json`. The
