@@ -2,6 +2,8 @@ module github.com/fivetwenty-io/proxmox-apiclient-go/v3
 
 go 1.26.4
 
+toolchain go1.26.5
+
 require (
 	github.com/gorilla/websocket v1.5.3
 	go.uber.org/zap v1.27.0
