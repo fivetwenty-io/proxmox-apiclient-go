@@ -5,6 +5,33 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v3.6.0] — 2026-07-08
+
+### Added
+
+- **Proxmox Datacenter Manager support**: generated typed bindings for the
+  full PDM JSON API (327 endpoints, PDM 1.1.6) under `pkg/pdm/*` (`access`,
+  `autoinstall`, `ceph`, `config`, `nodes`, `pbs`, `ping`, `pve`, `remotes`,
+  `resources`, `sdn`, `subscriptions`, `version`), produced by
+  `cmd/pvegen --dialect pdm` from the vendored `_data/pdm-apidoc.json`. The
+  `/pve` and `/pbs` trees are PDM's proxied per-remote operations against
+  managed instances, including cross-cluster guest migration. The
+  `/auto-install` namespace is emitted as package `autoinstall` (a hyphen is
+  not a legal Go package name).
+- `pkg/pdm.NewClient` / `pkg/pdm.DefaultOptions`: a preset over `pkg/client`
+  that applies the PDM wire defaults — port 8443, `PDMAPIToken`
+  Authorization prefix, `PDMAuthCookie` ticket cookie. Everything else (TLS
+  pinning, retries, logging) is the shared client, unchanged.
+- `cmd/pvegen --dialect pdm` selecting the PDM spec dialect.
+
+## [v3.5.0] — 2026-07-07
+
+### Added
+
+- Tolerant `client.PVEInt` type for response integer fields the upstream
+  API encodes inconsistently (native number or quoted string), following
+  the `PVEFloat` pattern from v3.2.5.
+
 ## [v3.4.0] — 2026-07-07
 
 ### Changed
