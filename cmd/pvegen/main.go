@@ -99,9 +99,10 @@ var (
 // "word[%d]". The captured group is the base name (e.g. "net" for "net[n]").
 var indexedParamRe = regexp.MustCompile(`^([a-z][a-z0-9]*)(?:\[n\]|\[%d\])$`)
 
-// dialectConfig captures the differences between the two apidoc dialects
-// the generator understands: "pve" (_data/apidoc.json → pkg/api) and
-// "pbs" (_data/pbs-apidoc.json → pkg/pbs). Both trees share the same
+// dialectConfig captures the differences between the apidoc dialects
+// the generator understands: "pve" (_data/apidoc.json → pkg/api),
+// "pbs" (_data/pbs-apidoc.json → pkg/pbs), and "pdm"
+// (_data/pdm-apidoc.json → pkg/pdm). All trees share the same
 // node/schema shape; the dialect only controls naming overrides, which
 // namespaces are emitted, and where smoke tests import the generated
 // package from.
@@ -174,6 +175,23 @@ var dialects = map[string]*dialectConfig{
 		},
 		skipSmokeTests: map[string]bool{},
 	},
+	"pdm": {
+		pkgImportRoot: "pkg/pdm",
+		methodNameOverrides: map[string]string{
+			"GET /version": methodPrefixGet,
+			"GET /ping":    "Ping",
+		},
+		namespaceOutputDir: map[string]string{
+			// "auto-install" contains a hyphen, which is not a legal Go
+			// package name; emit as pkg/pdm/autoinstall.
+			"auto-install": "autoinstall",
+		},
+		skipNamespaces: map[string]bool{
+			// "root" is the GET / directory index — not a usable API.
+			namespaceRoot: true,
+		},
+		skipSmokeTests: map[string]bool{},
+	},
 }
 
 // activeDialect is selected once in main from the --dialect flag and read
@@ -243,7 +261,7 @@ type endpoint struct {
 func main() {
 	specPath := flag.String("spec", "_data/apidoc.json", "Path to apidoc.json")
 	outDir := flag.String("out", "pkg/api", "Root output directory")
-	dialectName := flag.String("dialect", "pve", "Apidoc dialect: pve or pbs")
+	dialectName := flag.String("dialect", "pve", "Apidoc dialect: pve, pbs, or pdm")
 
 	var nsList stringSlice
 	flag.Var(&nsList, "namespace", "Namespace to emit (repeatable). Defaults to every namespace in the spec.")
@@ -251,7 +269,7 @@ func main() {
 
 	cfg, ok := dialects[*dialectName]
 	if !ok {
-		fmt.Fprintf(os.Stderr, "pvegen: unknown dialect %q (want pve or pbs)\n", *dialectName)
+		fmt.Fprintf(os.Stderr, "pvegen: unknown dialect %q (want pve, pbs, or pdm)\n", *dialectName)
 		os.Exit(1)
 	}
 
