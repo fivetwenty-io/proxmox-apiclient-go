@@ -302,6 +302,35 @@ var taskLogLinesSchema = &schema{
 	},
 }
 
+// remoteUpdateSummarySchema mirrors PDM's RemoteUpdateSummary
+// (lib/pdm-api-types/src/remote_updates.rs) — the real return type of
+// GET /pve/remotes/{remote}/updates (server/src/api/pve/mod.rs, handler
+// get_updates). The apidoc entry declares "returns": {"type": "null"}
+// because the handler's #[api(...)] block omits its "returns:" key
+// entirely, so the macro emits a null schema even though get_updates
+// returns real data. "nodes" is left as a bare object with no declared
+// properties — it is a map of node name to that node's update summary
+// (number-of-updates, last-refresh, status, optional status-message,
+// optional versions, repository-status) — and goTypeFor collapses
+// undeclared object shapes to json.RawMessage regardless of how much
+// nested detail is supplied, the same treatment GET /remotes/updates/
+// summary's own "remotes" field already gets from its own (correct)
+// apidoc entry.
+//
+//nolint:gochecknoglobals // hand-authored override schema, read-only after init
+var remoteUpdateSummarySchema = &schema{
+	Type: schemaTypeObject,
+	Properties: map[string]*schema{
+		"nodes": {
+			Type:        schemaTypeObject,
+			Description: "Map of node name to that node's update summary (number-of-updates, last-refresh, status, optional status-message, optional versions, repository-status).",
+		},
+		"remote-type":    {Type: schemaTypeString},
+		"status":         {Type: schemaTypeString},
+		"status-message": {Type: schemaTypeString, Optional: schemaOptional},
+	},
+}
+
 // pdmReturnsOverrides supplies the correct "returns" schema for PDM
 // endpoints whose vendored _data/pdm-apidoc.json entry is wrong: either
 // "returns": {"type": "null"} on an endpoint that genuinely returns data
@@ -335,10 +364,10 @@ var pdmReturnsOverrides = map[string]*schema{
 	"GET /pve/remotes/{remote}/options": {
 		Type: schemaTypeObject,
 	},
-	"GET /pve/remotes/{remote}/updates": {
-		Type:  schemaTypeArray,
-		Items: &schema{Type: schemaTypeObject},
-	},
+	// Corrected from a wrong array-of-objects guess to the real
+	// RemoteUpdateSummary object shape (see remoteUpdateSummarySchema);
+	// the apidoc entry is null because get_updates omits "returns:".
+	"GET /pve/remotes/{remote}/updates": remoteUpdateSummarySchema,
 	"GET /pve/remotes/{remote}/cluster-nextid": {
 		Type: schemaTypeInteger,
 	},

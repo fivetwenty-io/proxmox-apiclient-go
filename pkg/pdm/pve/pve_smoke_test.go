@@ -1923,7 +1923,7 @@ func TestGenerated_Pve_Methods(t *testing.T) {
 		}
 	})
 	t.Run("ListRemotesUpdates", func(t *testing.T) {
-		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
 
 		resp, err := svc.ListRemotesUpdates(ctx, "sample-remote")
 		if err != nil {

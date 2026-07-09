@@ -7360,7 +7360,13 @@ func (s *service) ListRemotesTasksStatus(ctx context.Context, remote string, upi
 }
 
 // ListRemotesUpdatesResponse mirrors the shape returned by GET /pve/remotes/{remote}/updates.
-type ListRemotesUpdatesResponse []json.RawMessage
+type ListRemotesUpdatesResponse struct {
+	// Nodes Map of node name to that node's update summary (number-of-updates, last-refresh, status, optional status-message, optional versions, repository-status).
+	Nodes         json.RawMessage `json:"nodes"`
+	RemoteType    string          `json:"remote-type"`
+	Status        string          `json:"status"`
+	StatusMessage *string         `json:"status-message,omitempty"`
+}
 
 // ListRemotesUpdates implements Service.ListRemotesUpdates. GET /pve/remotes/{remote}/updates.
 func (s *service) ListRemotesUpdates(ctx context.Context, remote string) (*ListRemotesUpdatesResponse, error) {
@@ -7377,8 +7383,7 @@ func (s *service) ListRemotesUpdates(ctx context.Context, remote string) (*ListR
 		return nil, fmt.Errorf("pve.ListRemotesUpdates: nil response from client")
 	}
 	if resp.Data == nil {
-		out := ListRemotesUpdatesResponse{}
-		return &out, nil
+		return nil, fmt.Errorf("pve.ListRemotesUpdates: empty data in response (code=%d)", resp.Code)
 	}
 	raw, err := json.Marshal(resp.Data)
 	if err != nil {
