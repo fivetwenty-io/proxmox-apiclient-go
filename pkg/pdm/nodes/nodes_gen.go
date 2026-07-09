@@ -2028,7 +2028,8 @@ func (s *service) ListTasksLog(ctx context.Context, node string, upid string, pa
 		return nil, fmt.Errorf("nodes.ListTasksLog: nil response from client")
 	}
 	if resp.Data == nil {
-		return nil, fmt.Errorf("nodes.ListTasksLog: empty data in response (code=%d)", resp.Code)
+		out := ListTasksLogResponse{}
+		return &out, nil
 	}
 	raw, err := json.Marshal(resp.Data)
 	if err != nil {

@@ -1693,7 +1693,8 @@ func (s *service) ListAccessTfaWebauthn(ctx context.Context) (*ListAccessTfaWeba
 		return nil, fmt.Errorf("config.ListAccessTfaWebauthn: nil response from client")
 	}
 	if resp.Data == nil {
-		return nil, fmt.Errorf("config.ListAccessTfaWebauthn: empty data in response (code=%d)", resp.Code)
+		out := ListAccessTfaWebauthnResponse{}
+		return &out, nil
 	}
 	raw, err := json.Marshal(resp.Data)
 	if err != nil {

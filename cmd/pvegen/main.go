@@ -91,6 +91,11 @@ const (
 	goTypeBool    = "bool"
 )
 
+// fieldValue is the "value" property name shared by several hand-authored
+// returnsOverrides schema literals below (UpdateUsersToken's secret,
+// pending-change items' current value) and by the tests that exercise them.
+const fieldValue = "value"
+
 // Sentinel errors for well-defined failure modes within the generator.
 var (
 	errEmptySpec       = errors.New("spec is empty")
@@ -135,6 +140,16 @@ type dialectConfig struct {
 	// skipSmokeTests lists namespaces whose smoke test emission is
 	// suppressed because hand-written tests already own the package.
 	skipSmokeTests map[string]bool
+
+	// returnsOverrides replaces a broken or copy-pasted "returns" schema
+	// for specific "VERB /path" tuples where the upstream spec is wrong
+	// (null, missing, or copied from an unrelated endpoint). The
+	// override schema is hand-authored to match the documented real
+	// response shape and is substituted in at collectEndpoints, the
+	// single choke point every downstream consumer (responseGoType,
+	// renderObjectFields, isResponseEmptyOk, ...) reads endpt.Info.Returns
+	// from.
+	returnsOverrides map[string]*schema
 }
 
 //nolint:gochecknoglobals // intentional package-level lookup table; consulted throughout emission
@@ -157,7 +172,8 @@ var dialects = map[string]*dialectConfig{
 		skipNamespaces: map[string]bool{},
 		// The version package has hand-written tests already and the
 		// generated smoke test must not stomp on them.
-		skipSmokeTests: map[string]bool{namespaceVersion: true},
+		skipSmokeTests:   map[string]bool{namespaceVersion: true},
+		returnsOverrides: map[string]*schema{},
 	},
 	"pbs": {
 		pkgImportRoot: "pkg/pbs",
@@ -177,7 +193,8 @@ var dialects = map[string]*dialectConfig{
 			"backup": true,
 			"reader": true,
 		},
-		skipSmokeTests: map[string]bool{},
+		skipSmokeTests:   map[string]bool{},
+		returnsOverrides: map[string]*schema{},
 	},
 	"pdm": {
 		pkgImportRoot: "pkg/pdm",
@@ -194,7 +211,8 @@ var dialects = map[string]*dialectConfig{
 			// "root" is the GET / directory index — not a usable API.
 			namespaceRoot: true,
 		},
-		skipSmokeTests: map[string]bool{},
+		skipSmokeTests:   map[string]bool{},
+		returnsOverrides: map[string]*schema{},
 	},
 }
 
@@ -406,6 +424,10 @@ func collectEndpoints(tree []*node) []endpoint {
 
 		for _, verb := range verbs {
 			info := treeNode.Info[verb]
+			if override, ok := activeDialect.returnsOverrides[verb+" "+treeNode.Path]; ok {
+				info.Returns = override
+			}
+
 			out = append(out, endpoint{
 				Path:        treeNode.Path,
 				Verb:        verb,
@@ -1506,6 +1528,15 @@ func renderMethodBody(builder *strings.Builder, pkgName string, endpt endpoint) 
 func isResponseEmptyOk(endpt endpoint) bool {
 	ret := endpt.Info.Returns
 	if ret == nil {
+		return true
+	}
+
+	// The schema's own "optional" flag on the returns object means the
+	// endpoint may legitimately return no data at all (e.g. UpdateUsersToken
+	// only returns a value when regenerate=true) — honor it before the
+	// shape-based checks below, which would otherwise treat a populated
+	// object schema as always-required.
+	if isOptional(ret) {
 		return true
 	}
 

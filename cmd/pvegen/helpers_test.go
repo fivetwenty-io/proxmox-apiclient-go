@@ -499,6 +499,132 @@ func TestEscapeDoc(t *testing.T) {
 	}
 }
 
+func TestIsResponseEmptyOk(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		ret  *schema
+		want bool
+	}{
+		{"nil returns", nil, true},
+		{
+			"optional populated object honors schema flag",
+			&schema{
+				Type:     schemaTypeObject,
+				Optional: json.RawMessage("1"),
+				Properties: map[string]*schema{
+					fieldValue: {Type: schemaTypeString},
+				},
+			},
+			true,
+		},
+		{
+			"required populated object stays strict",
+			&schema{
+				Type: schemaTypeObject,
+				Properties: map[string]*schema{
+					fieldValue: {Type: schemaTypeString},
+				},
+			},
+			false,
+		},
+		{"array", &schema{Type: schemaTypeArray}, true},
+		{"empty object", &schema{Type: schemaTypeObject}, true},
+		{"scalar", &schema{Type: schemaTypeInteger}, true},
+	}
+
+	for _, tc := range cases {
+		endpt := endpoint{Info: endpointInfo{Returns: tc.ret}}
+		if got := isResponseEmptyOk(endpt); got != tc.want {
+			t.Errorf("%s: isResponseEmptyOk() = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+// withDialect swaps activeDialect for the duration of the calling test and
+// restores the original on cleanup. Not safe to use from a t.Parallel()
+// test: activeDialect is a package-level global read by other tests.
+func withDialect(t *testing.T, cfg *dialectConfig) {
+	t.Helper()
+
+	orig := activeDialect
+	activeDialect = cfg
+
+	t.Cleanup(func() { activeDialect = orig })
+}
+
+//nolint:paralleltest // mutates the package-level activeDialect global via withDialect
+func TestCollectEndpointsAppliesReturnsOverride(t *testing.T) {
+	overridden := &schema{Type: schemaTypeArray, Items: &schema{Type: schemaTypeString}}
+
+	withDialect(t, &dialectConfig{
+		returnsOverrides: map[string]*schema{
+			"GET /nodes/{node}/journal": overridden,
+		},
+	})
+
+	tree := []*node{
+		{
+			Path: "/nodes/{node}/journal",
+			Info: map[string]endpointInfo{
+				verbHTTPGet: {Returns: &schema{Type: schemaTypeNull}},
+			},
+		},
+		{
+			Path: pathNodesQemuStatusCurrent,
+			Info: map[string]endpointInfo{
+				verbHTTPGet: {Returns: &schema{Type: schemaTypeObject, Properties: map[string]*schema{
+					fieldHostname: {Type: schemaTypeString},
+				}}},
+			},
+		},
+	}
+
+	eps := collectEndpoints(tree)
+	if len(eps) != 2 {
+		t.Fatalf("collectEndpoints() returned %d endpoints, want 2", len(eps))
+	}
+
+	for _, gotEndpoint := range eps {
+		switch gotEndpoint.Path {
+		case "/nodes/{node}/journal":
+			if gotEndpoint.Info.Returns != overridden {
+				t.Errorf("overridden endpoint: Info.Returns = %+v, want the override schema", gotEndpoint.Info.Returns)
+			}
+		case pathNodesQemuStatusCurrent:
+			if gotEndpoint.Info.Returns.Type != schemaTypeObject || len(gotEndpoint.Info.Returns.Properties) != 1 {
+				t.Errorf("non-overridden endpoint: Info.Returns changed unexpectedly: %+v", gotEndpoint.Info.Returns)
+			}
+		default:
+			t.Errorf("unexpected endpoint path %q", gotEndpoint.Path)
+		}
+	}
+}
+
+//nolint:paralleltest // mutates the package-level activeDialect global via withDialect
+func TestCollectEndpointsNoOverrideTableLeavesReturnsUntouched(t *testing.T) {
+	original := &schema{Type: schemaTypeObject, Properties: map[string]*schema{
+		fieldHostname: {Type: schemaTypeString},
+	}}
+
+	withDialect(t, &dialectConfig{returnsOverrides: map[string]*schema{}})
+
+	tree := []*node{
+		{
+			Path: pathNodesQemuStatusCurrent,
+			Info: map[string]endpointInfo{
+				verbHTTPGet: {Returns: original},
+			},
+		},
+	}
+
+	eps := collectEndpoints(tree)
+	if len(eps) != 1 || eps[0].Info.Returns != original {
+		t.Errorf("collectEndpoints() with empty override table changed Info.Returns: got %+v", eps)
+	}
+}
+
 func stringSlicesEqual(left, right []string) bool {
 	if len(left) != len(right) {
 		return false

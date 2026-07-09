@@ -1348,7 +1348,8 @@ func (s *service) UpdateUsersToken(ctx context.Context, userid string, tokenName
 		return nil, fmt.Errorf("access.UpdateUsersToken: nil response from client")
 	}
 	if resp.Data == nil {
-		return nil, fmt.Errorf("access.UpdateUsersToken: empty data in response (code=%d)", resp.Code)
+		out := UpdateUsersTokenResponse{}
+		return &out, nil
 	}
 	raw, err := json.Marshal(resp.Data)
 	if err != nil {
