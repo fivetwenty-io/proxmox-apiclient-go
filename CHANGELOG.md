@@ -5,6 +5,18 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v3.8.1] — 2026-07-09
+
+### Fixed
+
+- API-token Authorization headers now use the correct separator per
+  product. PBS and PDM servers require `TOKENID:TOKENSECRET` (colon),
+  while PVE uses `TOKENID=SECRET` (equals). The client now keys the
+  separator off the token header name: `PBSAPIToken` and `PDMAPIToken`
+  produce `:` separators, all others default to `=`.
+- `ParseAPIToken` now accepts either separator style (`=` or `:`) when
+  parsing token strings, making it tolerant of varied input formats.
+
 ## [v3.8.0] — 2026-07-09
 
 ### Fixed
