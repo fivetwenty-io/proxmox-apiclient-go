@@ -5,6 +5,26 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v3.8.2] — 2026-07-20
+
+### Fixed
+
+- Failures to establish a connection are now terminal instead of being
+  retried. A failed DNS lookup or a failed TCP dial (refused, timed out,
+  no route) means the request never reached the server, so repeating it
+  can only reproduce the same failure at the same cost. Previously an
+  unreachable host was dialed four times, so a host that silently drops
+  SYNs — a firewall, or a hostname pointing at a reverse proxy that does
+  not serve the API port — took four full request timeouts to report an
+  error. Such failures now surface immediately as a typed
+  `ConnectionError` carrying the host and port that were dialed.
+  Transport errors from later phases (a connection dropped mid-response)
+  are unchanged and still retry.
+- Retry backoff now honors context cancellation. It previously slept with
+  `time.Sleep`, so a canceled request — a `context` deadline, or Ctrl-C in
+  a CLI built on this library — was held open for the remainder of the
+  backoff instead of returning promptly.
+
 ## [v3.8.1] — 2026-07-09
 
 ### Fixed

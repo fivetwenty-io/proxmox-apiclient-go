@@ -51,18 +51,29 @@ func TestRetryMiddleware_NoAutoRetryPOSTOnNetworkError(t *testing.T) {
 
 	var calls int32
 
-	client := clientPointedAt(t, "http://127.0.0.1:1") // unroutable port -> connection refused
-	client.maxRetries = 3
-	client.retryDelay = time.Millisecond
-	// Wrap the chain so we can count next() invocations deterministically.
-	client.middleware = []Middleware{
-		func(r *http.Request, next Handler) (*http.Response, error) {
-			atomic.AddInt32(&calls, 1)
+	// A server that hangs up mid-response produces a POST-CONNECT network error.
+	// A refused dial would not work here: those are terminal for every method
+	// (see isTerminalTransportError), so the test would pass without proving
+	// anything about POST.
+	srv := newTestServer(t, func(writer http.ResponseWriter, _ *http.Request) {
+		hijacker, ok := writer.(http.Hijacker)
+		if !ok {
+			t.Error("test server does not support hijacking")
 
-			return next(r)
-		},
-		client.retryMiddleware,
-	}
+			return
+		}
+
+		conn, _, hijackErr := hijacker.Hijack()
+		if hijackErr != nil {
+			t.Errorf("hijack: %v", hijackErr)
+
+			return
+		}
+
+		_ = conn.Close()
+	})
+
+	client := countingClient(t, srv.URL, &calls)
 
 	_, _ = client.Do("POST", "/nodes/n1/qemu", map[string]interface{}{keyVMID: 100})
 

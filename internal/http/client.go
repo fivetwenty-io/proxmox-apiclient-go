@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -1310,7 +1311,10 @@ func (c *Client) retryMiddleware(req *http.Request, next Handler) (*http.Respons
 
 	for attempt := 0; ; attempt++ {
 		if attempt > 0 {
-			time.Sleep(applyRetryJitter(delay * time.Duration(attempt)))
+			waitErr := waitBackoff(req.Context(), applyRetryJitter(delay*time.Duration(attempt)))
+			if waitErr != nil {
+				return nil, waitErr
+			}
 
 			rewindErr := rewindRequestBody(req, getBody)
 			if rewindErr != nil {
@@ -1320,8 +1324,9 @@ func (c *Client) retryMiddleware(req *http.Request, next Handler) (*http.Respons
 
 		resp, doErr := next(req)
 		if doErr != nil {
-			if attempt >= retries || !retryAllowed {
-				return nil, fmt.Errorf("request failed after %d attempt(s): %w", attempt+1, doErr)
+			failure := classifyTransportError(req, doErr, attempt, retries, retryAllowed)
+			if failure != nil {
+				return nil, failure
 			}
 
 			continue
@@ -1386,6 +1391,89 @@ func applyRetryJitter(delay time.Duration) time.Duration {
 	}
 
 	return time.Duration(adjusted)
+}
+
+// classifyTransportError decides what a transport failure means for the retry
+// loop. It returns the error to surface, or nil when the request should be
+// retried.
+//
+// A failure to establish the connection at all is terminal: no number of
+// retries makes an unreachable host reachable, and each attempt costs a full
+// dial timeout. It is surfaced as a typed ConnectionError so callers can
+// distinguish it from an API error.
+func classifyTransportError(req *http.Request, doErr error, attempt, retries int, retryAllowed bool) error {
+	if isTerminalTransportError(doErr) {
+		return newConnectionError(req, doErr)
+	}
+
+	if attempt >= retries || !retryAllowed {
+		return fmt.Errorf("request failed after %d attempt(s): %w", attempt+1, doErr)
+	}
+
+	return nil
+}
+
+// waitBackoff sleeps for d but returns early if ctx is canceled first, so a
+// canceled request (Ctrl-C, a deadline) is not held open for the remainder of
+// the backoff. It mirrors the cancellable wait in pkg/api/tasks.
+func waitBackoff(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return nil
+	}
+
+	timer := time.NewTimer(d)
+
+	select {
+	case <-ctx.Done():
+		if !timer.Stop() {
+			<-timer.C
+		}
+
+		return fmt.Errorf("request canceled during retry backoff: %w", ctx.Err())
+	case <-timer.C:
+		return nil
+	}
+}
+
+// isTerminalTransportError reports whether err means the connection was never
+// established — a failed DNS lookup or a failed TCP dial (refused, timed out,
+// no route). These are terminal: the request never reached the server, so a
+// retry can only repeat the same failure at the same cost.
+//
+// Errors from later phases are deliberately excluded. A read or write that
+// fails after the connection was established may be a transient blip on a
+// healthy server (a dropped keep-alive, a restarting proxy) and stays
+// retryable.
+func isTerminalTransportError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		return true
+	}
+
+	var opErr *net.OpError
+	if errors.As(err, &opErr) {
+		return opErr.Op == "dial"
+	}
+
+	return false
+}
+
+// newConnectionError wraps a terminal transport failure in the typed
+// ConnectionError the rest of the library uses for unreachable hosts, carrying
+// the host and port the request was aimed at.
+func newConnectionError(req *http.Request, cause error) error {
+	port, _ := strconv.Atoi(req.URL.Port())
+
+	return &apierrors.ConnectionError{
+		Host:    req.URL.Hostname(),
+		Port:    port,
+		Message: "failed to establish a connection",
+		Cause:   cause,
+	}
 }
 
 // resolveRetryPolicy returns the effective retry count, delay, and force-retry
