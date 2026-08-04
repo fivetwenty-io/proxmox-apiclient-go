@@ -1,6 +1,7 @@
 package client_test
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"net/http/httptest"
@@ -600,5 +601,64 @@ func TestCovSetAndRemoveHeader(t *testing.T) {
 
 	if got, _ := lastUA.Load().(string); got == customUA {
 		t.Errorf("User-Agent still %q after RemoveHeader; want it cleared/defaulted", customUA)
+	}
+}
+
+// bytesServer returns an httptest.Server that answers with raw, non-JSON bytes
+// on /api2/json/download and 404s anything else — the shape of the endpoints
+// that hand back a file rather than the API's JSON envelope.
+func bytesServer(t *testing.T, payload []byte) *httptest.Server {
+	t.Helper()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api2/json/download", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		_, _ = w.Write(payload)
+	})
+
+	return httptest.NewServer(mux)
+}
+
+// TestGetBytesCtx_ReturnsUndecodedBody verifies a body that is not JSON reaches
+// the caller verbatim instead of failing a decode it was never meant to pass.
+func TestGetBytesCtx_ReturnsUndecodedBody(t *testing.T) {
+	t.Parallel()
+
+	payload := []byte{0x50, 0x4b, 0x03, 0x04, 0x00, 0xff, 'n', 'o', 't', ' ', 'j', 's', 'o', 'n'}
+
+	srv := bytesServer(t, payload)
+	defer srv.Close()
+
+	cli, err := client.NewClient(optsFromServer(srv.URL))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+
+	got, err := cli.GetBytesCtx(context.Background(), "/download", nil)
+	if err != nil {
+		t.Fatalf("GetBytesCtx error: %v", err)
+	}
+
+	if !bytes.Equal(got, payload) {
+		t.Errorf("body = %v, want %v", got, payload)
+	}
+}
+
+// TestGetBytesCtx_ErrorsOnHTTPFailure verifies a non-2xx status is still an
+// error rather than the error page being handed back as content.
+func TestGetBytesCtx_ErrorsOnHTTPFailure(t *testing.T) {
+	t.Parallel()
+
+	srv := errorServer(t)
+	defer srv.Close()
+
+	cli, err := client.NewClient(optsFromServer(srv.URL))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+
+	_, err = cli.GetBytesCtx(context.Background(), "/test", nil)
+	if err == nil {
+		t.Fatal("GetBytesCtx: expected an error on 500, got nil")
 	}
 }

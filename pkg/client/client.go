@@ -16,6 +16,10 @@ import (
 // ErrAuthNotConfigured is returned when authentication is not configured.
 var ErrAuthNotConfigured = errors.New("authentication not configured")
 
+// ErrUndecodedBodyUnsupported is returned by GetBytesCtx when the configured
+// transport cannot hand back a response body without decoding it.
+var ErrUndecodedBodyUnsupported = errors.New("transport cannot return an undecoded body")
+
 // Client defines the interface for interacting with the PVE API.
 type Client interface {
 	// HTTP Methods
@@ -37,6 +41,11 @@ type Client interface {
 	PutRawCtx(ctx context.Context, path string, params map[string]interface{}) (*Response, error)
 	DeleteCtx(ctx context.Context, path string, params map[string]interface{}) (interface{}, error)
 	DeleteRawCtx(ctx context.Context, path string, params map[string]interface{}) (*Response, error)
+
+	// GetBytesCtx performs a GET and returns the response body verbatim, for the
+	// endpoints that answer with something other than the JSON envelope — a file
+	// downloaded out of a backup snapshot, for instance.
+	GetBytesCtx(ctx context.Context, path string, params map[string]interface{}) ([]byte, error)
 
 	// Upload
 	UploadCtx(ctx context.Context, path string, fields map[string]string, fileField, filename string, file io.Reader) (*Response, error)
@@ -172,6 +181,33 @@ func (c *client) GetRaw(path string, params map[string]interface{}) (*Response, 
 // GetRawCtx performs a GET request with context and returns the raw response.
 func (c *client) GetRawCtx(ctx context.Context, path string, params map[string]interface{}) (*Response, error) {
 	return c.callCtx(ctx, "GET", path, params)
+}
+
+// bytesDoer is the optional transport capability GetBytesCtx needs. It is kept
+// off HTTPClient on purpose: adding a method there would break every transport
+// implemented outside this package.
+type bytesDoer interface {
+	DoBytesCtx(ctx context.Context, method, path string, params map[string]interface{}) ([]byte, error)
+}
+
+// GetBytesCtx performs a GET request and returns the response body verbatim.
+//
+// Every other request path decodes the body as the API's JSON envelope. A few
+// endpoints do not answer with one — `/nodes/{node}/storage/{storage}/file-restore/download`
+// returns the file's own bytes — and decoding those fails before the caller can
+// see them.
+func (c *client) GetBytesCtx(ctx context.Context, path string, params map[string]interface{}) ([]byte, error) {
+	doer, ok := c.httpClient.(bytesDoer)
+	if !ok {
+		return nil, fmt.Errorf("GET %q: %w", path, ErrUndecodedBodyUnsupported)
+	}
+
+	b, err := doer.DoBytesCtx(ctx, "GET", path, params)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute GET request to %q with context: %w", path, err)
+	}
+
+	return b, nil
 }
 
 // GetCtx performs a GET request with context to the specified path.
@@ -479,6 +515,15 @@ func (a *internalHTTPAdapter) DoCtx(ctx context.Context, method, path string, pa
 	}
 
 	return &Response{Data: r.Data, Errors: r.Errors, Code: r.Code}, nil
+}
+
+func (a *internalHTTPAdapter) DoBytesCtx(ctx context.Context, method, path string, params map[string]interface{}) ([]byte, error) {
+	b, err := a.inner.DoBytesWithContext(ctx, method, path, params)
+	if err != nil {
+		return nil, fmt.Errorf("HTTP %s request to %q with context failed: %w", method, path, err)
+	}
+
+	return b, nil
 }
 
 func (a *internalHTTPAdapter) UploadCtx(ctx context.Context, path string, fields map[string]string, fileField, filename string, file io.Reader) (*Response, error) {

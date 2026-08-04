@@ -5,6 +5,23 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v3.8.3] — 2026-08-04
+
+### Added
+
+- `Client.GetBytesCtx` returns a response body verbatim, without decoding
+  it. Every other request path parses the body as the API's JSON envelope,
+  which is right for the whole API bar a handful of endpoints that answer
+  with something else:
+  `/nodes/{node}/storage/{storage}/file-restore/download` returns the
+  bytes of the file being restored. Those bodies previously failed the
+  decode before the caller could see them, so no consumer could download
+  a file out of a backup snapshot at all. A non-2xx status is still an
+  error, and its body is still parsed for the API's complaint, so error
+  reporting is unchanged. Transports implemented outside this package are
+  unaffected: the capability is an optional interface the built-in
+  transport satisfies, not a new method on `HTTPClient`.
+
 ## [v3.8.2] — 2026-07-20
 
 ### Fixed

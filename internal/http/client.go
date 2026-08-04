@@ -498,6 +498,61 @@ func (c *Client) DoWithContext(ctx context.Context, method, path string, params 
 	return r, perr
 }
 
+// DoBytesWithContext performs an HTTP request and returns the response body
+// verbatim, without decoding it.
+//
+// Every other request path parses the body as the JSON envelope the API answers
+// with. A few endpoints do not answer with one: a file downloaded out of a
+// backup snapshot is the file's own bytes, and decoding those fails before the
+// caller ever sees them. This returns them untouched; a non-2xx status is still
+// an error, and its body is still parsed for the API's complaint.
+func (c *Client) DoBytesWithContext(ctx context.Context, method, path string, params map[string]interface{}) ([]byte, error) {
+	req, err := c.buildRequestWithContext(ctx, method, path, params)
+	if err != nil {
+		return nil, err
+	}
+
+	start := time.Now()
+
+	c.recordRequestStart(req)
+
+	resp, err := c.executeWithMiddleware(req)
+	if err != nil {
+		c.recordRequestError(start)
+
+		return nil, err
+	}
+
+	defer func() {
+		closeErr := resp.Body.Close()
+		if closeErr != nil {
+			if c.logger != nil && c.logConfig.Enabled {
+				c.logger.Warn("failed to close response body", map[string]interface{}{
+					logFieldError: closeErr.Error(),
+				})
+			}
+		}
+	}()
+
+	body, readErr := io.ReadAll(resp.Body)
+	if readErr != nil {
+		c.recordRequestComplete(req, resp, nil, start, readErr)
+
+		return nil, fmt.Errorf("failed to read response body: %w", readErr)
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		apiErr := fmt.Errorf("API request failed: %w", apierrors.ParseAPIError(resp.StatusCode, body))
+		c.recordRequestComplete(req, resp, body, start, apiErr)
+
+		return nil, apiErr
+	}
+
+	c.recordRequestComplete(req, resp, body, start, nil)
+
+	return body, nil
+}
+
 // UploadWithContext performs a multipart upload to the given path.
 func (c *Client) UploadWithContext(ctx context.Context, path string, fields map[string]string, fileField, filename string, file io.Reader) (*Response, error) {
 	req, err := c.buildUploadRequest(ctx, path, fields, fileField, filename, file)
