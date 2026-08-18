@@ -1,6 +1,7 @@
 package client_test
 
 import (
+	"context"
 	"crypto/x509"
 	"io"
 	"net/http"
@@ -164,7 +165,9 @@ func TestTLS_ManualVerification_NoCallback_RejectsUnknown(t *testing.T) {
 		t.Fatalf("NewClient() error = %v", err)
 	}
 
-	_, err = cli.Get("/version", nil)
+	// Retries are pointless here: the handshake is rejected deterministically,
+	// and each retry adds backoff delay to the test.
+	_, err = cli.GetCtx(pve.WithRetries(context.Background(), 0), "/version", nil)
 	if err == nil {
 		t.Fatalf("expected TLS connection to be rejected for unknown fingerprint with manual verification")
 	}

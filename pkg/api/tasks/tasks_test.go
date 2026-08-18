@@ -311,9 +311,9 @@ func TestWaitTask_ContextCancellation(t *testing.T) {
 
 	svc := tasks.New(newTestClient(t, srv))
 
-	// Deadline-based cancellation is runtime-enforced; no goroutine scheduling dependency.
-	// Use a 2s deadline so the context fires reliably even under -race -count=20 load.
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	// Deadline-based cancellation is runtime-enforced; no goroutine scheduling
+	// dependency, so a short deadline stays reliable under -race -count=20 load.
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 
 	start := time.Now()

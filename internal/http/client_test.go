@@ -3462,14 +3462,24 @@ func TestCachingMiddleware_POST_NotCached(t *testing.T) {
 func TestUploadWithContext_Cancelled(t *testing.T) {
 	t.Parallel()
 
+	// testDone unblocks the handler at test end. Unlike the GET tests above,
+	// the server is mid-read of a multipart body here, and does not reliably
+	// observe the client's disconnect, so without this the handler (and the
+	// server's Close in cleanup) would sit out the full fallback timer.
+	testDone := make(chan struct{})
+
 	srv := newTestServer(t, func(respWriter http.ResponseWriter, r *http.Request) {
 		select {
 		case <-r.Context().Done():
+		case <-testDone:
 		case <-time.After(5 * time.Second):
 		}
 
 		respWriter.WriteHeader(http.StatusOK)
 	})
+
+	// Registered after newTestServer, so it runs before the server's Close.
+	t.Cleanup(func() { close(testDone) })
 
 	client := clientPointedAt(t, srv.URL)
 	client.maxRetries = 0
