@@ -2,7 +2,7 @@ module github.com/fivetwenty-io/proxmox-apiclient-go/v3
 
 go 1.26.4
 
-toolchain go1.26.5
+toolchain go1.26.6
 
 require (
 	github.com/gorilla/websocket v1.5.3
