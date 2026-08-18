@@ -7,10 +7,20 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   test:
     name: Test
     runs-on: self-hosted
+    timeout-minutes: 15
+    # Fork PRs must not run untrusted code on self-hosted runners.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
 
     steps:
     - name: Checkout code
@@ -23,14 +33,6 @@ jobs:
 
     - name: Verify dependencies
       run: go mod verify
-
-    - name: Run go vet
-      run: go vet ./...
-
-    - name: Run staticcheck
-      run: |
-        go install honnef.co/go/tools/cmd/staticcheck@latest
-        staticcheck ./...
 
     - name: Run tests
       run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
@@ -45,6 +47,8 @@ jobs:
   lint:
     name: Lint
     runs-on: self-hosted
+    timeout-minutes: 15
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
 
     steps:
     - name: Checkout code
@@ -55,21 +59,18 @@ jobs:
       with:
         go-version-file: 'go.mod'
 
+    # The v2 standard default set covers govet and staticcheck; the enable
+    # list in .golangci.yml adds the rest. Bump the pin deliberately.
     - name: Run golangci-lint
       uses: golangci/golangci-lint-action@v9
       with:
-        version: latest
+        version: v2.12.2
 
   build:
     name: Build
     runs-on: self-hosted
-    strategy:
-      matrix:
-        goos: [linux, windows, darwin]
-        goarch: [amd64, arm64]
-        exclude:
-          - goos: windows
-            goarch: arm64
+    timeout-minutes: 15
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
 
     steps:
     - name: Checkout code
@@ -80,9 +81,13 @@ jobs:
       with:
         go-version-file: 'go.mod'
 
-    # Compiles the library, cmd/pvegen, and every example (all one module).
-    - name: Build
-      env:
-        GOOS: ${{ matrix.goos }}
-        GOARCH: ${{ matrix.goarch }}
-      run: go build ./...
+    # Compiles the library, cmd/pvegen, and every example (all one module)
+    # for each supported platform. Pure cross-compiles need no matching
+    # host, so one job covers every pair without burning fleet slots.
+    - name: Build all platforms
+      run: |
+        for pair in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
+          echo "::group::${pair}"
+          GOOS="${pair%/*}" GOARCH="${pair#*/}" go build ./...
+          echo "::endgroup::"
+        done

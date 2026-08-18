@@ -10,7 +10,12 @@ updates:
     commit-message:
       prefix: "deps"
       include: "scope"
-    
+    groups:
+      go-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
@@ -21,3 +26,7 @@ updates:
     commit-message:
       prefix: "ci"
       include: "scope"
+    groups:
+      actions:
+        patterns:
+          - "*"

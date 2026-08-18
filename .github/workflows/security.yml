@@ -9,10 +9,20 @@ on:
     - cron: '30 2 * * 1'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   govulncheck:
     name: govulncheck
     runs-on: self-hosted
+    timeout-minutes: 15
+    # Fork PRs must not run untrusted code on self-hosted runners.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
 
     steps:
     - name: Checkout code
@@ -23,6 +33,7 @@ jobs:
       with:
         go-version-file: 'go.mod'
 
+    # @latest is deliberate: govulncheck should always use the fresh vuln DB.
     - name: Run govulncheck
       run: |
         go install golang.org/x/vuln/cmd/govulncheck@latest
@@ -31,6 +42,8 @@ jobs:
   gosec:
     name: gosec
     runs-on: self-hosted
+    timeout-minutes: 15
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
 
     steps:
     - name: Checkout code
@@ -42,7 +55,7 @@ jobs:
         go-version-file: 'go.mod'
 
     - name: Run gosec
-      uses: securego/gosec@master
+      uses: securego/gosec@v2.28.0
       with:
         # Generated bindings (pkg/api/*_gen.go) are excluded — fix the pvegen
         # generator, not its output. Rule exclusions are domain-inherent to a
@@ -59,6 +72,8 @@ jobs:
   trivy:
     name: Trivy
     runs-on: self-hosted
+    timeout-minutes: 15
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
 
     steps:
     - name: Checkout code

@@ -8,10 +8,15 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   release:
     name: Release
     runs-on: self-hosted
+    timeout-minutes: 20
 
     steps:
     - name: Checkout code
@@ -25,7 +30,7 @@ jobs:
         go-version-file: 'go.mod'
 
     - name: Run tests
-      run: go test ./...
+      run: go test -race ./...
 
     - name: Create Release
       env:
