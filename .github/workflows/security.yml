@@ -54,19 +54,23 @@ jobs:
       with:
         go-version-file: 'go.mod'
 
+    # Installed with the setup-go toolchain rather than the container action:
+    # the container pins its own Go with GOTOOLCHAIN=local, which breaks when
+    # go.mod requires a newer release than the image ships.
+    #
+    # Generated bindings (pkg/api/*_gen.go) are excluded — fix the pvegen
+    # generator, not its output. Rule exclusions are domain-inherent to a
+    # Proxmox API client: G117 (request structs carry credentials), G123
+    # (deliberate certificate pinning), G402 (opt-in InsecureSkipVerify),
+    # G704 (HTTP to a caller-configured host). Keep in sync with Makefile.
     - name: Run gosec
-      uses: securego/gosec@v2.28.0
-      with:
-        # Generated bindings (pkg/api/*_gen.go) are excluded — fix the pvegen
-        # generator, not its output. Rule exclusions are domain-inherent to a
-        # Proxmox API client: G117 (request structs carry credentials), G123
-        # (deliberate certificate pinning), G402 (opt-in InsecureSkipVerify),
-        # G704 (HTTP to a caller-configured host). Keep in sync with Makefile.
-        args: >-
-          -exclude-dir=examples -exclude-dir=cmd
-          -exclude-dir=pkg/api/access -exclude-dir=pkg/api/cluster
-          -exclude-dir=pkg/api/clusterstorage -exclude-dir=pkg/api/nodes
-          -exclude-dir=pkg/api/pools -exclude-dir=pkg/api/version
+      run: |
+        go install github.com/securego/gosec/v2/cmd/gosec@v2.28.0
+        gosec -quiet -fmt text \
+          -exclude-dir=examples -exclude-dir=cmd \
+          -exclude-dir=pkg/api/access -exclude-dir=pkg/api/cluster \
+          -exclude-dir=pkg/api/clusterstorage -exclude-dir=pkg/api/nodes \
+          -exclude-dir=pkg/api/pools -exclude-dir=pkg/api/version \
           -exclude=G117,G123,G402,G704 ./...
 
   trivy:
