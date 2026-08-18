@@ -1,0 +1,74 @@
+name: Security
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    - cron: '30 2 * * 1'
+  workflow_dispatch:
+
+jobs:
+  govulncheck:
+    name: govulncheck
+    runs-on: self-hosted
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+
+    - name: Setup Go
+      uses: actions/setup-go@v7
+      with:
+        go-version-file: 'go.mod'
+
+    - name: Run govulncheck
+      run: |
+        go install golang.org/x/vuln/cmd/govulncheck@latest
+        govulncheck ./...
+
+  gosec:
+    name: gosec
+    runs-on: self-hosted
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+
+    - name: Setup Go
+      uses: actions/setup-go@v7
+      with:
+        go-version-file: 'go.mod'
+
+    - name: Run gosec
+      uses: securego/gosec@master
+      with:
+        # Generated bindings (pkg/api/*_gen.go) are excluded — fix the pvegen
+        # generator, not its output. Rule exclusions are domain-inherent to a
+        # Proxmox API client: G117 (request structs carry credentials), G123
+        # (deliberate certificate pinning), G402 (opt-in InsecureSkipVerify),
+        # G704 (HTTP to a caller-configured host). Keep in sync with Makefile.
+        args: >-
+          -exclude-dir=examples -exclude-dir=cmd
+          -exclude-dir=pkg/api/access -exclude-dir=pkg/api/cluster
+          -exclude-dir=pkg/api/clusterstorage -exclude-dir=pkg/api/nodes
+          -exclude-dir=pkg/api/pools -exclude-dir=pkg/api/version
+          -exclude=G117,G123,G402,G704 ./...
+
+  trivy:
+    name: Trivy
+    runs-on: self-hosted
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+
+    - name: Setup Trivy
+      uses: aquasecurity/setup-trivy@v0.2.3
+      with:
+        cache: true
+
+    # Same scan the Makefile's `make trivy` target runs; keep flags in sync.
+    - name: Run Trivy scan
+      run: trivy fs --scanners vuln,misconfig,secret --severity HIGH,CRITICAL --skip-dirs vendor .
