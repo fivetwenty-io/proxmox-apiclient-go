@@ -63,12 +63,22 @@ func TestRetryMiddleware_DialRefusedNotRetried(t *testing.T) {
 
 // TestRetryMiddleware_DNSFailureNotRetried verifies that an unresolvable host is
 // terminal. Repeating the lookup three more times cannot make the name resolve.
+//
+// The lookup failure is stubbed at the dialer rather than using a real
+// unresolvable name: interposing resolvers (captive portals, wildcard DNS,
+// blackholing filters) can turn NXDOMAIN into a slow timeout, which is a
+// different error class entirely.
 func TestRetryMiddleware_DNSFailureNotRetried(t *testing.T) {
 	t.Parallel()
 
 	var calls int32
 
 	client := countingClient(t, "http://pmx-nonexistent.invalid:8006", &calls)
+	client.httpClient.Transport = &http.Transport{
+		DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+			return nil, &net.DNSError{Err: "no such host", Name: "pmx-nonexistent.invalid", IsNotFound: true}
+		},
+	}
 
 	_, err := client.Do("GET", "/version", nil)
 	if err == nil {
