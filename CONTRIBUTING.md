@@ -1,208 +1,102 @@
 # Contributing to proxmox-apiclient-go
 
-Thank you for your interest in contributing to the Proxmox VE API Go Client!
+Thank you for helping improve the Proxmox VE API client for Go. We welcome bug reports, documentation fixes, and code contributions. This guide explains how to report a problem, set up a development environment, and submit a change.
 
-## Code of Conduct
+## Reporting issues
 
-Please be respectful and constructive in all interactions.
+Open an issue on GitHub when you find a bug or want to propose a feature. A good bug report lets us reproduce the problem without guessing. Please include:
 
-## How to Contribute
+- The module version, or the commit hash if you built from source.
 
-### Reporting Bugs
+- The Go version and the Proxmox VE version you are running against.
 
-1. Check if the issue already exists
-2. Create a new issue with:
-   - Clear title and description
-   - Steps to reproduce
-   - Expected vs actual behavior
-   - Go version and PVE version
-   - Minimal code example
+- A minimal program or test that triggers the problem, as precisely as you can.
 
-### Suggesting Features
+- The expected behavior and what happened instead, with relevant log output. The client redacts credentials from its logs, but please double-check before you paste.
 
-1. Check existing issues and discussions
-2. Open an issue describing:
-   - The use case
-   - Proposed solution
-   - Alternative solutions considered
+If you believe the problem is a security vulnerability, do not open a public issue. Follow the [security policy](SECURITY.md) instead.
 
-### Pull Requests
+For feature requests, describe the problem you want to solve rather than only the change you have in mind. Knowing the goal helps us weigh alternatives.
 
-1. Fork the repository
-2. Create a feature branch from `develop`
-3. Make your changes
-4. Add/update tests
-5. Run tests and linters
-6. Commit with conventional commits
-7. Push and create a PR
+## Before you start a large change
 
-## Development Setup
+For small fixes, a pull request is enough. For anything larger, such as a new client option, a change to the transport, or a change in default behavior, please open an issue first and describe your plan. This avoids wasted work when a design needs discussion, and it gives us a place to record the decision.
+
+## Development
 
 ### Prerequisites
 
-- Go 1.25.0 or later
-- Make
-- Git
+- Go 1.26 or higher. The module pins its toolchain in `go.mod`, so a matching toolchain is fetched automatically.
 
-### Getting Started
+- `golangci-lint` for `make lint`.
+
+- `staticcheck`, `govulncheck`, `gosec`, and `trivy` for the corresponding make targets.
+
+### Layout
+
+- `pkg/client/` holds client construction and options; `internal/` holds the transport (HTTP, auth, encoding).
+
+- `pkg/api/` holds typed per-namespace API bindings. These are generated from `_data/apidoc.json` by the `pvegen` tool in `cmd/`. Do not edit generated files by hand: change the generator or the spec, regenerate, and commit the result. `make verify-generated` confirms the generated files match the spec, and CI runs the same check.
+
+- Code follows a 120-column line limit and uses tabs for indentation.
+
+### Running tests
 
 ```bash
-# Clone the repository
-git clone https://github.com/fivetwenty-io/proxmox-apiclient-go.git
-cd proxmox-apiclient-go
+make test        # all tests
+make test-race   # with race detection
+make coverage    # coverage report
+```
 
-# Install dependencies
-go mod download
+Every code change should come with tests that cover it.
 
-# Run tests
-make test
+### Running the full check suite
 
-# Run linters
-make lint
-
-# Run all checks
+```bash
 make check
 ```
 
-## Testing
+This runs `lint`, `vet`, `staticcheck`, and `test`, stopping at the first failure. CI runs the same checks on every push, so a green `make check` locally means CI should pass too.
 
-### Running Tests
+### Running security scans
 
 ```bash
-# Run all tests
-make test
-
-# Run with coverage
-make coverage
-
-# Run specific package tests
-go test -v ./pkg/client
-
-# Run with race detection
-go test -race ./...
+make security
 ```
 
-### Writing Tests
+This runs `govulncheck`, `gosec`, and `trivy`. We run these scans before every release, and CI runs them as well.
 
-- Write unit tests for all new code
-- Aim for >80% coverage
-- Use table-driven tests
-- Mock external dependencies
-- Test error cases
+## Submitting a pull request
 
-Example test:
+1. Fork the repository and create a branch for your change.
 
-```go
-func TestNewClient(t *testing.T) {
-    tests := []struct {
-        name    string
-        opts    Options
-        wantErr bool
-    }{
-        {
-            name: "valid options",
-            opts: Options{Host: "pve.example.com"},
-            wantErr: false,
-        },
-        // Add more test cases
-    }
-    
-    for _, tt := range tests {
-        t.Run(tt.name, func(t *testing.T) {
-            _, err := NewClient(tt.opts)
-            if (err != nil) != tt.wantErr {
-                t.Errorf("NewClient() error = %v, wantErr %v", err, tt.wantErr)
-            }
-        })
-    }
-}
+2. Make the change, with tests. If you touched the generator or the spec, regenerate and commit the generated files, and confirm with `make verify-generated`.
+
+3. Run `make check` and make sure it passes.
+
+4. If the change is visible to users of the library, add an entry to [CHANGELOG.md](CHANGELOG.md). API surface, behavior, and documentation count; refactors, tests, and CI plumbing usually do not.
+
+5. Open a pull request against `main`. Describe what the change does and why. Link the related issue if one exists.
+
+Keep each pull request focused on one change. A small, focused pull request is easier to review and lands faster than a large one that mixes concerns.
+
+### Commit messages
+
+Write commit messages that describe the code change, not the process that produced it. This repository follows the Conventional Commits style: a type prefix such as `fix:`, `feat:`, `docs:`, or `ci:`, followed by a short summary in the imperative mood. Look at `git log` for examples.
+
+## Releasing (maintainers)
+
+Releases are tag driven. Pushing a tag of the form `vX.Y.Z` runs the release workflow, which runs the test suite with race detection, publishes a GitHub Release with generated notes, and requests the new version from the Go module proxy so it appears on pkg.go.dev.
+
+To cut a release, first add the new version's section to [CHANGELOG.md](CHANGELOG.md) and merge that to `main`. Then tag it:
+
+```bash
+git tag -a v3.9.0 -m "Version 3.9.0"
+git push origin v3.9.0
 ```
 
-## Code Style
-
-### Go Standards
-
-- Follow [Effective Go](https://golang.org/doc/effective_go.html)
-- Use `gofmt` for formatting
-- Use `goimports` for imports
-- Follow [Go Code Review Comments](https://github.com/golang/go/wiki/CodeReviewComments)
-
-### Project Conventions
-
-- Package names: lowercase, no underscores
-- Exported names: CamelCase
-- Unexported names: camelCase
-- Acronyms: All caps (HTTP, URL, ID)
-- Error messages: lowercase, no punctuation
-- Comments: Full sentences with punctuation
-
-### Commit Messages
-
-Use conventional commits:
-
-```
-type(scope): description
-
-[optional body]
-
-[optional footer]
-```
-
-Types:
-- `feat`: New feature
-- `fix`: Bug fix
-- `docs`: Documentation
-- `style`: Formatting
-- `refactor`: Code restructuring
-- `perf`: Performance improvement
-- `test`: Testing
-- `build`: Build system
-- `ci`: CI/CD
-- `chore`: Maintenance
-
-Examples:
-```
-feat(auth): add support for API tokens
-fix(client): handle connection timeouts properly
-docs: update README with examples
-```
-
-## Pull Request Process
-
-1. **Branch naming**: `feature/description` or `fix/description`
-2. **PR title**: Use conventional commit format
-3. **PR description**: 
-   - Describe what changed and why
-   - Link related issues
-   - List breaking changes
-4. **Review process**:
-   - At least one approval required
-   - All CI checks must pass
-   - Resolve all comments
-5. **Merge**: Squash and merge to `develop`
-
-## Release Process
-
-1. Merge `develop` to `main`
-2. Create release tag: `v1.2.3`
-3. GitHub Actions automatically:
-   - Runs tests
-   - Creates GitHub release
-   - Publishes to pkg.go.dev
-
-## Documentation
-
-- Update README for user-facing changes
-- Add godoc comments for all exported items
-- Include examples in documentation
-- Update CHANGELOG.md
-
-## Getting Help
-
-- Open an issue for questions
-- Join community discussions
-- Check existing documentation
+The module path is `github.com/fivetwenty-io/proxmox-apiclient-go/v3`, so tags stay within the v3 major version until a breaking change forces a new major version and a new module path.
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the MIT License.
+This project is licensed under the [Apache License, Version 2.0](LICENSE). By submitting a contribution, you agree that it will be licensed under the same terms.

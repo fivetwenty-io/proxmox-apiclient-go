@@ -5,6 +5,48 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v3.8.6] — 2026-08-20
+
+### Added
+
+- The project now carries its license in the repository: the Apache
+  License, Version 2.0, in `LICENSE`, with the copyright notice in
+  `NOTICE`. The README already pointed at a `LICENSE` file; now it
+  exists.
+- `SECURITY.md` documents how to report a vulnerability privately,
+  the response timelines to expect, and the coordinated disclosure
+  window.
+
+### Changed
+
+- `CONTRIBUTING.md` rewritten to match how the project actually works:
+  pull requests target `main`, generated bindings are regenerated via
+  `pvegen` and verified with `make verify-generated`, and releases are
+  tag driven. It previously described an MIT license and a `develop`
+  branch, neither of which this project uses.
+
+## [v3.8.5] — 2026-08-18
+
+### Changed
+
+- `go.uber.org/multierr` bumped to v1.11.0.
+- A dedicated security workflow now runs `govulncheck`, `gosec`, and
+  `trivy` in CI, so every push gets the same scans that gate a release.
+
+## [v3.8.4] — 2026-08-18
+
+### Changed
+
+- The Go toolchain requirement moved to 1.26.6 to pick up standard
+  library security fixes.
+- Dependency bumps: `go.uber.org/zap` to 1.28.0, `golang.org/x/term`
+  to 0.45.0, `golang.org/x/sys` to 0.47.0.
+
+### Fixed
+
+- The DNS retry test no longer depends on the machine's resolver
+  behavior, so the suite passes in restricted network environments.
+
 ## [v3.8.3] — 2026-08-04
 
 ### Added

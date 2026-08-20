@@ -352,10 +352,11 @@ PVE host.
 
 ## Contributing
 
-PRs and issues welcome. Run `make check` before submitting. Ensure generated
-files are committed if `_data/apidoc.json` was changed (`make verify-generated`
-will flag a mismatch in CI).
+PRs and issues welcome; see [CONTRIBUTING](CONTRIBUTING.md). Run `make check`
+before submitting. Ensure generated files are committed if `_data/apidoc.json`
+was changed (`make verify-generated` will flag a mismatch in CI).
 
 ## License
 
-See the [LICENSE](LICENSE) file.
+Apache License, Version 2.0. See the [LICENSE](LICENSE) and [NOTICE](NOTICE)
+files.
