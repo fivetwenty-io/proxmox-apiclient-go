@@ -7,8 +7,10 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -3744,5 +3746,102 @@ func TestCreateHTTPTransport_Knobs_AllSet(t *testing.T) {
 
 	if tr.DialContext == nil {
 		t.Error("DialContext = nil, want non-nil when DialTimeoutSec and TCPKeepAliveSec > 0")
+	}
+}
+
+// errTestDialed is returned by the stub dial functions below: they only need
+// to record that they ran, never to produce a usable connection.
+var errTestDialed = errors.New("dialed")
+
+// TestCreateHTTPTransport_DialContextIsUsed asserts that a caller-supplied
+// DialContext is the one the transport dials with. This is the hook for a PVE
+// host that is not directly routable — an ssh jump host or a tunnel — where
+// the timeout knobs alone cannot help, because the problem is reachability
+// rather than latency.
+func TestCreateHTTPTransport_DialContextIsUsed(t *testing.T) {
+	t.Parallel()
+
+	called := false
+	opts := &Options{
+		KeepAlive: 5,
+		DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+			called = true
+
+			return nil, errTestDialed
+		},
+	}
+
+	tr := createHTTPTransport(opts)
+
+	if tr.DialContext == nil {
+		t.Fatal("DialContext = nil, want the supplied dial function")
+	}
+
+	_, _ = tr.DialContext(context.Background(), "tcp", "10.0.0.1:8006")
+
+	if !called {
+		t.Error("the transport did not dial through the supplied DialContext")
+	}
+}
+
+// TestCreateHTTPTransport_DialContextWinsOverTimeoutKnobs pins the precedence:
+// DialTimeoutSec and TCPKeepAliveSec exist only to configure the dialer a
+// caller-supplied DialContext replaces, so a caller that brings its own dial
+// function owns its own timeouts rather than having them silently dropped or
+// silently applied.
+func TestCreateHTTPTransport_DialContextWinsOverTimeoutKnobs(t *testing.T) {
+	t.Parallel()
+
+	called := false
+	opts := &Options{
+		DialTimeoutSec:  10,
+		TCPKeepAliveSec: 30,
+		DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+			called = true
+
+			return nil, errTestDialed
+		},
+	}
+
+	tr := createHTTPTransport(opts)
+	_, _ = tr.DialContext(context.Background(), "tcp", "10.0.0.1:8006")
+
+	if !called {
+		t.Error("the timeout knobs overrode the caller's DialContext")
+	}
+}
+
+// TestCreateHTTPTransport_ProxyDefaultsToDirect pins the behaviour that makes
+// the Proxy field worth having: this transport has never consulted
+// HTTP_PROXY/HTTPS_PROXY, unlike http.DefaultTransport, and adding the field
+// must not change that for callers who do not ask for it.
+func TestCreateHTTPTransport_ProxyDefaultsToDirect(t *testing.T) {
+	t.Parallel()
+
+	if tr := createHTTPTransport(&Options{KeepAlive: 5}); tr.Proxy != nil {
+		t.Error("Proxy = non-nil, want nil (direct) when the caller supplied none")
+	}
+
+	proxyURL, err := url.Parse("http://proxy.example:3128")
+	if err != nil {
+		t.Fatalf("parse proxy URL: %v", err)
+	}
+
+	tr := createHTTPTransport(&Options{
+		KeepAlive: 5,
+		Proxy:     func(*http.Request) (*url.URL, error) { return proxyURL, nil },
+	})
+
+	if tr.Proxy == nil {
+		t.Fatal("Proxy = nil, want the supplied selector")
+	}
+
+	got, err := tr.Proxy(&http.Request{})
+	if err != nil {
+		t.Fatalf("Proxy: %v", err)
+	}
+
+	if got.String() != proxyURL.String() {
+		t.Errorf("Proxy returned %q, want %q", got, proxyURL)
 	}
 }

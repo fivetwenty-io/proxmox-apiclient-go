@@ -148,9 +148,23 @@ func createHTTPTransport(options *Options) *http.Transport {
 		t.TLSHandshakeTimeout = time.Duration(options.TLSHandshakeTimeoutSec) * time.Second
 	}
 
-	// Dial context: set only when at least one dial-level knob is non-zero so that
-	// the zero-knob path leaves DialContext nil (byte-identical to the prior transport).
-	if options.DialTimeoutSec > 0 || options.TCPKeepAliveSec > 0 {
+	// Proxy: nil unless the caller supplied one, preserving this transport's
+	// long-standing direct-connection behaviour. A caller that wants the
+	// standard library's environment-driven proxying passes
+	// http.ProxyFromEnvironment explicitly.
+	if options.Proxy != nil {
+		t.Proxy = options.Proxy
+	}
+
+	// Dial context: a caller-supplied DialContext replaces the dial outright
+	// and wins over the timeout knobs, which only exist to configure the
+	// dialer it is replacing. Otherwise set only when at least one dial-level
+	// knob is non-zero, so that the zero-knob path leaves DialContext nil
+	// (byte-identical to the prior transport).
+	switch {
+	case options.DialContext != nil:
+		t.DialContext = options.DialContext
+	case options.DialTimeoutSec > 0 || options.TCPKeepAliveSec > 0:
 		dialer := &net.Dialer{}
 		if options.DialTimeoutSec > 0 {
 			dialer.Timeout = time.Duration(options.DialTimeoutSec) * time.Second
