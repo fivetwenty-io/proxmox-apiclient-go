@@ -1505,7 +1505,7 @@ func TestRequestBuilder_BuildBody_FormEncoded(t *testing.T) {
 	rb.AddFormParam(testFormKeyUsername, testUsername)
 	rb.AddFormParam(testFormKeyPassword, testPassword)
 
-	body, contentType, err := rb.BuildBody()
+	body, contentType, contentLength, err := rb.BuildBody()
 	if err != nil {
 		t.Fatalf("BuildBody: %v", err)
 	}
@@ -1518,6 +1518,10 @@ func TestRequestBuilder_BuildBody_FormEncoded(t *testing.T) {
 	if !strings.Contains(string(b), "username=root") {
 		t.Errorf("body missing username, got: %q", string(b))
 	}
+
+	if contentLength != int64(len(b)) {
+		t.Errorf("contentLength = %d, want %d", contentLength, len(b))
+	}
 }
 
 func TestRequestBuilder_BuildBody_JSON(t *testing.T) {
@@ -1526,7 +1530,7 @@ func TestRequestBuilder_BuildBody_JSON(t *testing.T) {
 	rb := NewRequestBuilder("POST", "https://pve.example.com:8006/api2/json", "/nodes")
 	rb.SetJSONBody(map[string]string{"key": "value"})
 
-	body, contentType, err := rb.BuildBody()
+	body, contentType, contentLength, err := rb.BuildBody()
 	if err != nil {
 		t.Fatalf("BuildBody: %v", err)
 	}
@@ -1539,6 +1543,10 @@ func TestRequestBuilder_BuildBody_JSON(t *testing.T) {
 	if !strings.Contains(string(b), `"key"`) {
 		t.Errorf("body missing JSON key, got: %q", string(b))
 	}
+
+	if contentLength != int64(len(b)) {
+		t.Errorf("contentLength = %d, want %d", contentLength, len(b))
+	}
 }
 
 func TestRequestBuilder_BuildBody_GET_ReturnsNil(t *testing.T) {
@@ -1546,7 +1554,7 @@ func TestRequestBuilder_BuildBody_GET_ReturnsNil(t *testing.T) {
 
 	rb := NewRequestBuilder("GET", "https://pve.example.com:8006/api2/json", "/nodes")
 
-	body, ct, err := rb.BuildBody()
+	body, ct, _, err := rb.BuildBody()
 	if err != nil {
 		t.Fatalf("BuildBody GET: %v", err)
 	}
@@ -1561,9 +1569,13 @@ func TestRequestBuilder_BuildBody_UnsupportedMethod(t *testing.T) {
 
 	rb := NewRequestBuilder("TRACE", "https://pve.example.com:8006/api2/json", "/nodes")
 
-	_, _, err := rb.BuildBody()
+	body, _, _, err := rb.BuildBody()
 	if err == nil {
 		t.Fatal("expected error for unsupported method")
+	}
+
+	if body != nil {
+		t.Error("no body expected alongside the error")
 	}
 }
 
@@ -1574,7 +1586,7 @@ func TestRequestBuilder_AddFile_Multipart(t *testing.T) {
 	rb.AddFormParam("storage", "local")
 	rb.AddFile("file", "test.iso", bytes.NewReader([]byte("ISO content")))
 
-	body, contentType, err := rb.BuildBody()
+	body, contentType, contentLength, err := rb.BuildBody()
 	if err != nil {
 		t.Fatalf("BuildBody multipart: %v", err)
 	}
@@ -1586,6 +1598,10 @@ func TestRequestBuilder_AddFile_Multipart(t *testing.T) {
 	b, _ := io.ReadAll(body)
 	if !strings.Contains(string(b), "ISO content") {
 		t.Errorf("multipart body missing file content")
+	}
+
+	if contentLength != int64(len(b)) {
+		t.Errorf("contentLength = %d, want %d", contentLength, len(b))
 	}
 }
 
@@ -3158,7 +3174,7 @@ func TestRequestBuilder_BuildBody_Multipart_LargeFile(t *testing.T) {
 	reqBuilder.AddFile("file1", "a.iso", strings.NewReader("content-a"))
 	reqBuilder.AddFile("file2", "b.iso", strings.NewReader("content-b"))
 
-	body, contentType, err := reqBuilder.BuildBody()
+	body, contentType, contentLength, err := reqBuilder.BuildBody()
 	if err != nil {
 		t.Fatalf("BuildBody multipart multi-file: %v", err)
 	}
@@ -3170,6 +3186,10 @@ func TestRequestBuilder_BuildBody_Multipart_LargeFile(t *testing.T) {
 	bodyBytes, _ := io.ReadAll(body)
 	if !strings.Contains(string(bodyBytes), "content-a") || !strings.Contains(string(bodyBytes), "content-b") {
 		t.Errorf("multipart body missing file contents: %q", string(bodyBytes))
+	}
+
+	if contentLength != int64(len(bodyBytes)) {
+		t.Errorf("contentLength = %d, want %d", contentLength, len(bodyBytes))
 	}
 }
 
