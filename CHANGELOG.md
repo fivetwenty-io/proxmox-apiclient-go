@@ -5,6 +5,56 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v3.9.1] — 2026-08-23
+
+### Fixed
+
+- Ticket-based login failures now preserve the full cause chain. A 5xx
+  from `POST /access/ticket` previously surfaced as the bare
+  `ErrAuthenticationFailedNoTicket` sentinel: `Authenticate`,
+  `RefreshForce`, and the TFA completion consumer discarded the real
+  error carried in `AuthResult.Error`, so callers could not see the HTTP
+  status or match `errors.Is(err, ErrServer)`. The sentinel still
+  matches; the chain now survives behind it.
+- A failed auto-login no longer disables auto-login for the life of the
+  client. The attempt marker was set before authenticating and never
+  cleared on failure, so every later request skipped the login, went out
+  unauthenticated, and surfaced a differently shaped error from the
+  401-retry path. Each request now retries the login and surfaces the
+  same `auto-login failed` prefix.
+- Two connection-lifecycle races that the standard library reports as
+  bare, chainless sentinels now surface as the typed `ConnectionError`:
+  the server closing an idle keep-alive connection between pickup and
+  write (`http: server closed idle connection`), and the pool handing
+  out an already-closed connection (`net.ErrClosed`). Both previously
+  escaped as anonymous string wraps that no `errors.As` or `errors.Is`
+  check could classify. Retry behavior is unchanged: idempotent requests
+  still ride the retry loop; only what surfaces on exhaustion changed.
+
+## [v3.9.0] — 2026-08-21
+
+### Added
+
+- Size-aware multipart file uploads stream through an `io.Pipe` with the
+  exact body length precomputed, so a large image upload no longer
+  buffers the whole file in memory and the request always carries an
+  explicit `Content-Length` (PVE's proxy rejects chunked
+  transfer-encoding with a 501). New public API: `client.NewSizedReader`,
+  `client.WithHost`, `client.ErrHostOverrideFingerprint`.
+- `Options.DialContext` and `Options.Proxy` open a seam for reaching a
+  PVE host through a jump host, bastion, or tunnel. Both are opt-in and
+  nil by default; a client that sets neither builds byte-identical
+  transport behavior to before.
+
+### Fixed
+
+- The retry middleware captures a request body only when the request is
+  actually retry eligible with a nonzero retry budget, instead of
+  re-buffering (and overwriting `Content-Length` on) streamed bodies.
+- The 401 re-auth path no longer replays a request whose drained body
+  cannot be rewound; it surfaces the original 401 instead of sending
+  zero bytes against a declared `Content-Length`.
+
 ## [v3.8.6] — 2026-08-20
 
 ### Added
