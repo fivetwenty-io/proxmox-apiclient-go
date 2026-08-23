@@ -9,6 +9,14 @@ RESET  := \033[0m
 # Default target - show help
 .DEFAULT_GOAL := help
 
+# Resolve dependencies through the module cache, never a vendor directory.
+# Go turns on vendor mode automatically whenever vendor/modules.txt exists,
+# so a stray `go mod vendor` would silently make local builds resolve against
+# vendored copies while CI, which never has that directory, resolves through
+# the proxy. Naming -mod explicitly pins both to the same path. readonly, not
+# mod, so a build can never quietly rewrite go.mod or go.sum.
+export GOFLAGS := -mod=readonly
+
 # Variables
 # Git version information
 GIT_BRANCH := $(shell git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
