@@ -26,7 +26,7 @@ For small fixes, a pull request is enough. For anything larger, such as a new cl
 
 ### Prerequisites
 
-- Go 1.26 or higher. The module pins its toolchain in `go.mod`, so a matching toolchain is fetched automatically.
+- Go 1.27 or higher. The module pins its toolchain in `go.mod`, so a matching toolchain is fetched automatically.
 
 - `golangci-lint` for `make lint`.
 

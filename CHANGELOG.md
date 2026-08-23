@@ -5,6 +5,24 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v3.9.2] — 2026-08-23
+
+### Changed
+
+- The Go requirement moved to 1.27.0. The separate `toolchain` directive
+  is gone: the `go` line now carries both the minimum and the toolchain.
+- Deprecated zero-valued fields dropped from the `tls.Config` and
+  `http.Transport` literals: `Rand`, `NameToCertificate`,
+  `PreferServerCipherSuites`, and `SessionTicketKey` on the former,
+  `Dial` and `DialTLS` on the latter. Every one was set to its zero value
+  or, in the case of `PreferServerCipherSuites`, to a value the standard
+  library has ignored since Go 1.18, so behavior is unchanged. They were
+  left over from a period when `exhaustruct` required naming every field,
+  and `tls.Config.Rand`'s deprecation in Go 1.27 turned them into build
+  noise.
+- golangci-lint in CI moved to v2.13.1; v2.12.2 is built with go1.26 and
+  refuses to load a config targeting Go 1.27.
+
 ## [v3.9.1] — 2026-08-23
 
 ### Fixed
