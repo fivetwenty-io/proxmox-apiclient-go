@@ -164,6 +164,13 @@ Indexed parameter families (e.g. `net[n]`, `scsi[n]`) are modeled as
 `map[int]string` fields and expanded correctly during form encoding.
 Path parameters are URL-escaped via `url.PathEscape`.
 
+An array-of-objects response is emitted as `[]json.RawMessage`, so decoding one
+means writing the item struct yourself. Do not take the spec's scalar types at
+face value when you do: PVE sends numbers as strings and strings as numbers
+depending on the endpoint. See [docs/scalars.md](docs/scalars.md) for the
+tolerant `client.PVEBool`/`PVEInt`/`PVEFloat` types and the catalogue of fields
+whose declared type is wrong.
+
 To regenerate after updating `_data/apidoc.json`:
 
 ```bash
