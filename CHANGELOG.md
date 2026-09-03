@@ -5,6 +5,18 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v3.9.3] — 2026-09-03
+
+### Added
+
+- `docs/scalars.md` documents the tolerant scalar types `PVEBool`, `PVEInt`, and `PVEFloat`, when a pointer form is needed, and the response fields whose declared type in `_data/apidoc.json` does not match the payload. The sharpest case is `osdid` in `GET /nodes/{node}/disks/list`, which arrives as the number `-1` for a disk backing no OSD and as the string `"0"` when it does, both in one response. The README now points to the guide.
+
+### Changed
+
+- The Makefile exports `GOFLAGS=-mod=readonly` for every Go command it runs. Go switches to vendor mode on its own whenever `vendor/modules.txt` exists, so a machine that had run `go mod vendor` resolved against vendored copies while CI used the module proxy, and `go list -m -u` stopped reporting available upgrades. Naming the mode pins both to the same resolution path and keeps a build from rewriting `go.mod` or `go.sum`.
+- golangci-lint in CI moved to v2.13.2, matching the pin in the CPI release.
+- Dependencies audited on 2026-09-03: every direct and indirect module is at its latest release and none is deprecated or archived. No version changed.
+
 ## [v3.9.2] — 2026-08-23
 
 ### Changed
