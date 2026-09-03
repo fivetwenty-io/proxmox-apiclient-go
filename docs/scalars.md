@@ -47,16 +47,20 @@ word.
 | `GET /nodes/{node}/disks/list` | `osdid-list[]` | `integer` | array of **strings** (`["0"]`) |
 | `GET /cluster/firewall/groups/{group}/{pos}` | rule position | `integer` | a **string** |
 | `GET /nodes/{node}/{lxc,qemu}/{vmid}/status/current` | pressure-stall (PSI) metrics | `number` | **strings** |
+| `GET /cluster/options` | `crs`, `ha`, `migration`, `next-id`, `notify`, `replication`, `tag-style`, `u2f`, `user-tag-access`, `webauthn` | `string` | **objects**: PVE returns the parsed `datacenter.cfg`, so each property string arrives split into its sub-options |
+| `GET /cluster/options` | `registered-tags` | `string` | **array of strings** |
 
 Both forms arrive in the same response, from the same PVE 9 node, so neither
 `int64` nor `string` decodes the field on its own. `client.PVEInt` decodes both.
 
-`cmd/pvegen`'s `returnsOverrides` table cannot fix these: it replaces a broken
-`returns` schema wholesale, and `goTypeFor` collapses array-of-object items to
-`json.RawMessage` regardless of what the item schema says, so an override for
-these endpoints would change nothing in the emitted code. Editing
+`cmd/pvegen`'s `returnsOverrides` table cannot fix the array cases: it replaces
+a broken `returns` schema wholesale, and `goTypeFor` collapses array-of-object
+items to `json.RawMessage` regardless of what the item schema says, so an
+override for those endpoints would change nothing in the emitted code. Editing
 `_data/apidoc.json` is not an option either: it is PVE's own dump, replaced
 whole on the next refresh. Documenting the field here is what survives both.
+
+A wrong type on a top-level property of an object response is fixable in the generator: the dialect's `returnsPropertyOverrides` table patches that one property, which is how `ListOptionsResponse` carries `json.RawMessage` for the parsed options and `[]string` for `registered-tags`. Add the row here as well, so the live shape stays documented next to the others.
 
 Add a row when you find another one, and say what the live payload contained
 rather than what you inferred.

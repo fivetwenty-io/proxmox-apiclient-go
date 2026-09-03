@@ -5,6 +5,25 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v3.10.0] — 2026-09-03
+
+### Added
+
+- Bindings refreshed to the current upstream API specifications, fetched 2026-09-03: Proxmox VE 9.2 (pve-docs 9.2.4, pve-manager 9.2.11), Proxmox Backup Server 4.2.5, and Proxmox Datacenter Manager 1.1.7. PVE now covers 678 method-operations (was 675); PBS and PDM counts are unchanged.
+- Ceph rolling restarts: `Cluster().CreateCephRestartBulk` (`POST /cluster/ceph/restart-bulk`) restarts every MON, MGR, MDS, or OSD daemon in the cluster one at a time, and `Nodes().CreateCephRestartBulk` (`POST /nodes/{node}/ceph/restart-bulk`) does the same for one node's OSDs with per-OSD `noout` handling and checkpointed `Resume`. Both take `DryRun`, `OnlyOutdated`, `Force`, and `Timeout`, and both return the task UPID.
+- `Nodes().ListCephReleases` (`GET /nodes/{node}/ceph/releases`) lists the known Ceph releases with `available`, `is-default`, and `unsupported` flags for the node.
+- Journal filters on `Nodes().ListJournal` for both PVE and PBS: `Priority` (a level or `LOW..HIGH` range), `Service` (syslog identifier glob), `Unit`, `Kernel`, `Structured`, and, with `Structured`, `Identifiers` and `Units` to also return the distinct identifiers and units present. The response stays `[]string`; a structured request returns one object per entry, which callers decode from `GetRawCtx` on the same path.
+- PBS S3 endpoint configuration gains `LimitActiveRequests`, `LimitPassiveRequests`, and `UseNodeProxy` on the create, update, and read shapes. The older `put-rate-limit` family is now documented as deprecated upstream.
+- QEMU `net[n]` accepts `host-tunnel`; firewall `comment` parameters carry the `pve-fw-comment-spec` format; the subscription key pattern accepts `arm-` keys.
+
+### Changed
+
+- `Cluster().ListOptions` returns a typed `ListOptionsResponse` struct instead of a `json.RawMessage` alias, now that the spec declares the shape of `GET /cluster/options`. The declared shape is wrong for eleven fields, which the generator corrects: PVE returns the parsed `datacenter.cfg`, so `crs`, `ha`, `migration`, `next-id`, `notify`, `replication`, `tag-style`, `u2f`, `user-tag-access`, and `webauthn` are `json.RawMessage` objects keyed by sub-option and `registered-tags` is `[]string`. A caller that decoded the old raw message by hand can drop that step; one that passed it on untouched decodes the struct's fields instead. `docs/scalars.md` records the live shapes.
+- `cmd/pvegen` flattens `allOf`/`oneOf` parameter and response schemas. PVE 9.2 (pve-ha-manager 5.2) declares `POST /cluster/ha/rules` and `PUT /cluster/ha/rules/{rule}` this way, one variant per rule type discriminated by `type`; without the change both params structs would have lost every field. The flattened structs are field-for-field identical to before. Where variants describe one field differently, the doc comment now carries every description labelled by rule type, so `Affinity` explains both the node-affinity and the resource-affinity meaning.
+- `cmd/pvegen` gains a per-dialect `returnsPropertyOverrides` table for correcting a single property of an otherwise sound response schema, alongside the existing whole-schema `returnsOverrides`. PBS gains its first `returnsOverrides` entry: the 4.2 spec marks `GET /nodes/{node}/journal` as a streaming `DOWNLOAD` with a null return, but the body is still the standard envelope around an array of lines, so `ListJournalResponse` stays `[]string` rather than disappearing.
+- `cmd/pvegen` now fails when an override table entry matches no endpoint in the spec, or when a property override names a property the spec no longer declares, instead of leaving the override silently dead after an upstream rename.
+- Generated response types carry the spec's own description of the response as a second doc line. The journal response on PVE, PBS, and PDM uses it to state that a `Structured` request returns objects the `[]string` type cannot decode, and to point at `GetRawCtx`.
+
 ## [v3.9.3] — 2026-09-03
 
 ### Added
