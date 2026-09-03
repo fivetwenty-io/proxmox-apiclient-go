@@ -67,6 +67,7 @@ func (s *service) ListStatus(ctx context.Context) error {
 }
 
 // ListDatastoreUsageResponse mirrors the shape returned by GET /status/datastore-usage.
+// Lists the Status of the Datastores.
 type ListDatastoreUsageResponse []json.RawMessage
 
 // ListDatastoreUsage implements Service.ListDatastoreUsage. GET /status/datastore-usage.

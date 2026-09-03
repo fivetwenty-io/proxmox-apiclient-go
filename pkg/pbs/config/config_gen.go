@@ -526,6 +526,7 @@ func (s *service) ListAccess(ctx context.Context) error {
 }
 
 // ListAccessAdResponse mirrors the shape returned by GET /config/access/ad.
+// List of configured AD realms.
 type ListAccessAdResponse []json.RawMessage
 
 // ListAccessAd implements Service.ListAccessAd. GET /config/access/ad.
@@ -661,6 +662,7 @@ func (s *service) DeleteAccessAd(ctx context.Context, realm string, params *Dele
 }
 
 // GetAccessAdResponse mirrors the shape returned by GET /config/access/ad/{realm}.
+// AD realm configuration properties.
 type GetAccessAdResponse struct {
 	// BaseDn LDAP Domain
 	BaseDn *string `json:"base-dn,omitempty"`
@@ -762,6 +764,7 @@ type UpdateAccessAdParams struct {
 }
 
 // UpdateAccessAdResponse mirrors the shape returned by PUT /config/access/ad/{realm}.
+// AD realm configuration properties.
 type UpdateAccessAdResponse struct {
 	// BaseDn LDAP Domain
 	BaseDn *string `json:"base-dn,omitempty"`
@@ -837,6 +840,7 @@ func (s *service) UpdateAccessAd(ctx context.Context, realm string, params *Upda
 }
 
 // ListAccessLdapResponse mirrors the shape returned by GET /config/access/ldap.
+// List of configured LDAP realms.
 type ListAccessLdapResponse []json.RawMessage
 
 // ListAccessLdap implements Service.ListAccessLdap. GET /config/access/ldap.
@@ -974,6 +978,7 @@ func (s *service) DeleteAccessLdap(ctx context.Context, realm string, params *De
 }
 
 // GetAccessLdapResponse mirrors the shape returned by GET /config/access/ldap/{realm}.
+// LDAP configuration properties.
 type GetAccessLdapResponse struct {
 	// BaseDn LDAP Domain
 	BaseDn string `json:"base-dn"`
@@ -1079,6 +1084,7 @@ type UpdateAccessLdapParams struct {
 }
 
 // UpdateAccessLdapResponse mirrors the shape returned by PUT /config/access/ldap/{realm}.
+// LDAP configuration properties.
 type UpdateAccessLdapResponse struct {
 	// BaseDn LDAP Domain
 	BaseDn string `json:"base-dn"`
@@ -1156,6 +1162,7 @@ func (s *service) UpdateAccessLdap(ctx context.Context, realm string, params *Up
 }
 
 // ListAccessOpenidResponse mirrors the shape returned by GET /config/access/openid.
+// List of configured OpenId realms.
 type ListAccessOpenidResponse []json.RawMessage
 
 // ListAccessOpenid implements Service.ListAccessOpenid. GET /config/access/openid.
@@ -1283,6 +1290,7 @@ func (s *service) DeleteAccessOpenid(ctx context.Context, realm string, params *
 }
 
 // GetAccessOpenidResponse mirrors the shape returned by GET /config/access/openid/{realm}.
+// OpenID configuration properties.
 type GetAccessOpenidResponse struct {
 	// AcrValues OpenID ACR List
 	AcrValues *string `json:"acr-values,omitempty"`
@@ -1368,6 +1376,7 @@ type UpdateAccessOpenidParams struct {
 }
 
 // UpdateAccessOpenidResponse mirrors the shape returned by PUT /config/access/openid/{realm}.
+// OpenID configuration properties.
 type UpdateAccessOpenidResponse struct {
 	// AcrValues OpenID ACR List
 	AcrValues *string `json:"acr-values,omitempty"`
@@ -1437,6 +1446,7 @@ func (s *service) UpdateAccessOpenid(ctx context.Context, realm string, params *
 }
 
 // ListAccessPamResponse mirrors the shape returned by GET /config/access/pam.
+// Built-in PAM realm configuration properties.
 type ListAccessPamResponse struct {
 	// Comment Comment.
 	Comment *string `json:"comment,omitempty"`
@@ -1490,6 +1500,7 @@ type UpdateAccessPamParams struct {
 }
 
 // UpdateAccessPamResponse mirrors the shape returned by PUT /config/access/pam.
+// Built-in PAM realm configuration properties.
 type UpdateAccessPamResponse struct {
 	// Comment Comment.
 	Comment *string `json:"comment,omitempty"`
@@ -1543,6 +1554,7 @@ func (s *service) UpdateAccessPam(ctx context.Context, params *UpdateAccessPamPa
 }
 
 // ListAccessPbsResponse mirrors the shape returned by GET /config/access/pbs.
+// Built-in Proxmox Backup Server realm configuration properties.
 type ListAccessPbsResponse struct {
 	// Comment Comment.
 	Comment *string `json:"comment,omitempty"`
@@ -1596,6 +1608,7 @@ type UpdateAccessPbsParams struct {
 }
 
 // UpdateAccessPbsResponse mirrors the shape returned by PUT /config/access/pbs.
+// Built-in Proxmox Backup Server realm configuration properties.
 type UpdateAccessPbsResponse struct {
 	// Comment Comment.
 	Comment *string `json:"comment,omitempty"`
@@ -1667,6 +1680,7 @@ func (s *service) ListAccessTfa(ctx context.Context) error {
 }
 
 // ListAccessTfaWebauthnResponse mirrors the shape returned by GET /config/access/tfa/webauthn.
+// Server side webauthn server configuration.
 type ListAccessTfaWebauthnResponse struct {
 	// AllowSubdomains If an `origin` is specified, this specifies whether subdomains should be considered valid as well.  May be changed at any time.  Defaults to `true`.
 	AllowSubdomains *client.PVEBool `json:"allow-subdomains,omitempty"`
@@ -1773,6 +1787,7 @@ func (s *service) ListAcme(ctx context.Context) error {
 }
 
 // ListAcmeAccountResponse mirrors the shape returned by GET /config/acme/account.
+// List of ACME accounts.
 type ListAcmeAccountResponse []json.RawMessage
 
 // ListAcmeAccount implements Service.ListAcmeAccount. GET /config/acme/account.
@@ -1888,6 +1903,7 @@ func (s *service) DeleteAcmeAccount(ctx context.Context, name string, params *De
 }
 
 // GetAcmeAccountResponse mirrors the shape returned by GET /config/acme/account/{name}.
+// ACME Account information.  This is what we return via the API.
 type GetAcmeAccountResponse struct {
 	// Account ACME Account data. This is the part of the account returned from and possibly sent to the ACME provider. Some fields may be uptdated by the user via a request to the account location, others may not be changed.
 	Account json.RawMessage `json:"account"`
@@ -1965,6 +1981,7 @@ func (s *service) UpdateAcmeAccount(ctx context.Context, name string, params *Up
 }
 
 // ListAcmeChallengeSchemaResponse mirrors the shape returned by GET /config/acme/challenge-schema.
+// ACME Challenge Plugin Shema.
 type ListAcmeChallengeSchemaResponse []json.RawMessage
 
 // ListAcmeChallengeSchema implements Service.ListAcmeChallengeSchema. GET /config/acme/challenge-schema.
@@ -1998,6 +2015,7 @@ func (s *service) ListAcmeChallengeSchema(ctx context.Context) (*ListAcmeChallen
 }
 
 // ListAcmeDirectoriesResponse mirrors the shape returned by GET /config/acme/directories.
+// List of known ACME directories.
 type ListAcmeDirectoriesResponse []json.RawMessage
 
 // ListAcmeDirectories implements Service.ListAcmeDirectories. GET /config/acme/directories.
@@ -2031,6 +2049,7 @@ func (s *service) ListAcmeDirectories(ctx context.Context) (*ListAcmeDirectories
 }
 
 // ListAcmePluginsResponse mirrors the shape returned by GET /config/acme/plugins.
+// List of ACME plugin configurations.
 type ListAcmePluginsResponse []json.RawMessage
 
 // ListAcmePlugins implements Service.ListAcmePlugins. GET /config/acme/plugins.
@@ -2128,6 +2147,7 @@ func (s *service) DeleteAcmePlugins(ctx context.Context, id string) error {
 }
 
 // GetAcmePluginsResponse mirrors the shape returned by GET /config/acme/plugins/{id}.
+// ACME plugin config. The API's format is inherited from PVE/PMG:
 type GetAcmePluginsResponse struct {
 	// Api DNS Api name.
 	Api *string `json:"api,omitempty"`
@@ -2225,6 +2245,7 @@ type ListAcmeTosParams struct {
 }
 
 // ListAcmeTosResponse is the raw JSON returned by GET /config/acme/tos.
+// The ACME Directory's ToS URL, if any.
 type ListAcmeTosResponse = json.RawMessage
 
 // ListAcmeTos implements Service.ListAcmeTos. GET /config/acme/tos.
@@ -2270,6 +2291,7 @@ func (s *service) ListAcmeTos(ctx context.Context, params *ListAcmeTosParams) (*
 }
 
 // ListChangerResponse mirrors the shape returned by GET /config/changer.
+// The list of configured changers (with config digest).
 type ListChangerResponse []json.RawMessage
 
 // ListChanger implements Service.ListChanger. GET /config/changer.
@@ -2363,6 +2385,7 @@ func (s *service) DeleteChanger(ctx context.Context, name string) error {
 }
 
 // GetChangerResponse mirrors the shape returned by GET /config/changer/{name}.
+// SCSI tape changer
 type GetChangerResponse struct {
 	// EjectBeforeUnload if set to true, tapes are ejected manually before unloading
 	EjectBeforeUnload *client.PVEBool `json:"eject-before-unload,omitempty"`
@@ -2448,6 +2471,7 @@ func (s *service) UpdateChanger(ctx context.Context, name string, params *Update
 }
 
 // ListDatastoreResponse mirrors the shape returned by GET /config/datastore.
+// List the configured datastores (with config digest).
 type ListDatastoreResponse []json.RawMessage
 
 // ListDatastore implements Service.ListDatastore. GET /config/datastore.
@@ -2573,6 +2597,7 @@ type DeleteDatastoreParams struct {
 }
 
 // DeleteDatastoreResponse is the raw JSON returned by DELETE /config/datastore/{name}.
+// Unique Process/Task Identifier
 type DeleteDatastoreResponse = json.RawMessage
 
 // DeleteDatastore implements Service.DeleteDatastore. DELETE /config/datastore/{name}.
@@ -2618,6 +2643,7 @@ func (s *service) DeleteDatastore(ctx context.Context, name string, params *Dele
 }
 
 // GetDatastoreResponse mirrors the shape returned by GET /config/datastore/{name}.
+// Datastore configuration properties.
 type GetDatastoreResponse struct {
 	// Backend Datastore backend config
 	Backend *string `json:"backend,omitempty"`
@@ -2769,6 +2795,7 @@ func (s *service) UpdateDatastore(ctx context.Context, name string, params *Upda
 }
 
 // ListDriveResponse mirrors the shape returned by GET /config/drive.
+// The list of configured drives (with config digest).
 type ListDriveResponse []json.RawMessage
 
 // ListDrive implements Service.ListDrive. GET /config/drive.
@@ -2862,6 +2889,7 @@ func (s *service) DeleteDrive(ctx context.Context, name string) error {
 }
 
 // GetDriveResponse mirrors the shape returned by GET /config/drive/{name}.
+// Lto SCSI tape driver
 type GetDriveResponse struct {
 	// Changer Tape Changer Identifier.
 	Changer *string `json:"changer,omitempty"`
@@ -2953,6 +2981,7 @@ type ListEncryptionKeysParams struct {
 }
 
 // ListEncryptionKeysResponse mirrors the shape returned by GET /config/encryption-keys.
+// List of configured encryption keys.
 type ListEncryptionKeysResponse []json.RawMessage
 
 // ListEncryptionKeys implements Service.ListEncryptionKeys. GET /config/encryption-keys.
@@ -3108,6 +3137,7 @@ func (s *service) CreateEncryptionKeys2(ctx context.Context, id string, params *
 }
 
 // ListMediaPoolResponse mirrors the shape returned by GET /config/media-pool.
+// The list of configured media pools (with config digest).
 type ListMediaPoolResponse []json.RawMessage
 
 // ListMediaPool implements Service.ListMediaPool. GET /config/media-pool.
@@ -3205,6 +3235,7 @@ func (s *service) DeleteMediaPool(ctx context.Context, name string) error {
 }
 
 // GetMediaPoolResponse mirrors the shape returned by GET /config/media-pool/{name}.
+// Media pool configuration
 type GetMediaPoolResponse struct {
 	// Allocation Media set allocation policy ('continue', 'always', or a calendar event).
 	Allocation *string `json:"allocation,omitempty"`
@@ -3314,6 +3345,7 @@ func (s *service) ListMetrics(ctx context.Context) error {
 }
 
 // ListMetricsInfluxdbHttpResponse mirrors the shape returned by GET /config/metrics/influxdb-http.
+// List of configured InfluxDB http metric servers.
 type ListMetricsInfluxdbHttpResponse []json.RawMessage
 
 // ListMetricsInfluxdbHttp implements Service.ListMetricsInfluxdbHttp. GET /config/metrics/influxdb-http.
@@ -3435,6 +3467,7 @@ func (s *service) DeleteMetricsInfluxdbHttp(ctx context.Context, name string, pa
 }
 
 // GetMetricsInfluxdbHttpResponse mirrors the shape returned by GET /config/metrics/influxdb-http/{name}.
+// InfluxDB Server (HTTP(s))
 type GetMetricsInfluxdbHttpResponse struct {
 	// Bucket InfluxDB Bucket.
 	Bucket *string `json:"bucket,omitempty"`
@@ -3540,6 +3573,7 @@ func (s *service) UpdateMetricsInfluxdbHttp(ctx context.Context, name string, pa
 }
 
 // ListMetricsInfluxdbUdpResponse mirrors the shape returned by GET /config/metrics/influxdb-udp.
+// List of configured InfluxDB udp metric servers.
 type ListMetricsInfluxdbUdpResponse []json.RawMessage
 
 // ListMetricsInfluxdbUdp implements Service.ListMetricsInfluxdbUdp. GET /config/metrics/influxdb-udp.
@@ -3653,6 +3687,7 @@ func (s *service) DeleteMetricsInfluxdbUdp(ctx context.Context, name string, par
 }
 
 // GetMetricsInfluxdbUdpResponse mirrors the shape returned by GET /config/metrics/influxdb-udp/{name}.
+// InfluxDB Server (UDP)
 type GetMetricsInfluxdbUdpResponse struct {
 	// Comment Comment.
 	Comment *string `json:"comment,omitempty"`
@@ -3778,6 +3813,7 @@ func (s *service) ListNotificationsEndpoints(ctx context.Context) error {
 }
 
 // ListNotificationsEndpointsGotifyResponse mirrors the shape returned by GET /config/notifications/endpoints/gotify.
+// List of gotify endpoints.
 type ListNotificationsEndpointsGotifyResponse []json.RawMessage
 
 // ListNotificationsEndpointsGotify implements Service.ListNotificationsEndpointsGotify. GET /config/notifications/endpoints/gotify.
@@ -3877,6 +3913,7 @@ func (s *service) DeleteNotificationsEndpointsGotify(ctx context.Context, name s
 }
 
 // GetNotificationsEndpointsGotifyResponse mirrors the shape returned by GET /config/notifications/endpoints/gotify/{name}.
+// Config for  Gotify notification endpoints
 type GetNotificationsEndpointsGotifyResponse struct {
 	// Comment Comment.
 	Comment *string `json:"comment,omitempty"`
@@ -3968,6 +4005,7 @@ func (s *service) UpdateNotificationsEndpointsGotify(ctx context.Context, name s
 }
 
 // ListNotificationsEndpointsSendmailResponse mirrors the shape returned by GET /config/notifications/endpoints/sendmail.
+// List of sendmail endpoints.
 type ListNotificationsEndpointsSendmailResponse []json.RawMessage
 
 // ListNotificationsEndpointsSendmail implements Service.ListNotificationsEndpointsSendmail. GET /config/notifications/endpoints/sendmail.
@@ -4071,6 +4109,7 @@ func (s *service) DeleteNotificationsEndpointsSendmail(ctx context.Context, name
 }
 
 // GetNotificationsEndpointsSendmailResponse mirrors the shape returned by GET /config/notifications/endpoints/sendmail/{name}.
+// Config for Sendmail notification endpoints
 type GetNotificationsEndpointsSendmailResponse struct {
 	// Author Author of the mail. Defaults to 'Proxmox Backup Server ($hostname)'
 	Author *string `json:"author,omitempty"`
@@ -4172,6 +4211,7 @@ func (s *service) UpdateNotificationsEndpointsSendmail(ctx context.Context, name
 }
 
 // ListNotificationsEndpointsSmtpResponse mirrors the shape returned by GET /config/notifications/endpoints/smtp.
+// List of smtp endpoints.
 type ListNotificationsEndpointsSmtpResponse []json.RawMessage
 
 // ListNotificationsEndpointsSmtp implements Service.ListNotificationsEndpointsSmtp. GET /config/notifications/endpoints/smtp.
@@ -4283,6 +4323,7 @@ func (s *service) DeleteNotificationsEndpointsSmtp(ctx context.Context, name str
 }
 
 // GetNotificationsEndpointsSmtpResponse mirrors the shape returned by GET /config/notifications/endpoints/smtp/{name}.
+// Config for Sendmail notification endpoints
 type GetNotificationsEndpointsSmtpResponse struct {
 	// Author Author of the mail. Defaults to 'Proxmox Backup Server ($hostname)'
 	Author *string `json:"author,omitempty"`
@@ -4400,6 +4441,7 @@ func (s *service) UpdateNotificationsEndpointsSmtp(ctx context.Context, name str
 }
 
 // ListNotificationsEndpointsWebhookResponse mirrors the shape returned by GET /config/notifications/endpoints/webhook.
+// List of webhook endpoints.
 type ListNotificationsEndpointsWebhookResponse []json.RawMessage
 
 // ListNotificationsEndpointsWebhook implements Service.ListNotificationsEndpointsWebhook. GET /config/notifications/endpoints/webhook.
@@ -4503,6 +4545,7 @@ func (s *service) DeleteNotificationsEndpointsWebhook(ctx context.Context, name 
 }
 
 // GetNotificationsEndpointsWebhookResponse mirrors the shape returned by GET /config/notifications/endpoints/webhook/{name}.
+// Config for  Webhook notification endpoints
 type GetNotificationsEndpointsWebhookResponse struct {
 	// Body The HTTP body to send. Supports templating.
 	Body *string `json:"body,omitempty"`
@@ -4606,6 +4649,7 @@ func (s *service) UpdateNotificationsEndpointsWebhook(ctx context.Context, name 
 }
 
 // ListNotificationsMatcherFieldValuesResponse mirrors the shape returned by GET /config/notifications/matcher-field-values.
+// List of known metadata field values.
 type ListNotificationsMatcherFieldValuesResponse []json.RawMessage
 
 // ListNotificationsMatcherFieldValues implements Service.ListNotificationsMatcherFieldValues. GET /config/notifications/matcher-field-values.
@@ -4639,6 +4683,7 @@ func (s *service) ListNotificationsMatcherFieldValues(ctx context.Context) (*Lis
 }
 
 // ListNotificationsMatcherFieldsResponse mirrors the shape returned by GET /config/notifications/matcher-fields.
+// List of known metadata fields.
 type ListNotificationsMatcherFieldsResponse []json.RawMessage
 
 // ListNotificationsMatcherFields implements Service.ListNotificationsMatcherFields. GET /config/notifications/matcher-fields.
@@ -4672,6 +4717,7 @@ func (s *service) ListNotificationsMatcherFields(ctx context.Context) (*ListNoti
 }
 
 // ListNotificationsMatchersResponse mirrors the shape returned by GET /config/notifications/matchers.
+// List of matchers.
 type ListNotificationsMatchersResponse []json.RawMessage
 
 // ListNotificationsMatchers implements Service.ListNotificationsMatchers. GET /config/notifications/matchers.
@@ -4777,6 +4823,7 @@ func (s *service) DeleteNotificationsMatchers(ctx context.Context, name string) 
 }
 
 // GetNotificationsMatchersResponse mirrors the shape returned by GET /config/notifications/matchers/{name}.
+// Config for Sendmail notification endpoints
 type GetNotificationsMatchersResponse struct {
 	// Comment Comment.
 	Comment *string `json:"comment,omitempty"`
@@ -4884,6 +4931,7 @@ func (s *service) UpdateNotificationsMatchers(ctx context.Context, name string, 
 }
 
 // ListNotificationsTargetsResponse mirrors the shape returned by GET /config/notifications/targets.
+// List of all entities which can be used as notification targets.
 type ListNotificationsTargetsResponse []json.RawMessage
 
 // ListNotificationsTargets implements Service.ListNotificationsTargets. GET /config/notifications/targets.
@@ -4953,6 +5001,7 @@ func (s *service) CreateNotificationsTargetsTest(ctx context.Context, name strin
 }
 
 // ListPruneResponse mirrors the shape returned by GET /config/prune.
+// List configured prune schedules.
 type ListPruneResponse []json.RawMessage
 
 // ListPrune implements Service.ListPrune. GET /config/prune.
@@ -5082,6 +5131,7 @@ func (s *service) DeletePrune(ctx context.Context, id string, params *DeletePrun
 }
 
 // GetPruneResponse mirrors the shape returned by GET /config/prune/{id}.
+// Prune configuration.
 type GetPruneResponse struct {
 	// Comment Comment.
 	Comment *string `json:"comment,omitempty"`
@@ -5203,6 +5253,7 @@ func (s *service) UpdatePrune(ctx context.Context, id string, params *UpdatePrun
 }
 
 // ListRemoteResponse mirrors the shape returned by GET /config/remote.
+// The list of configured remotes (with config digest).
 type ListRemoteResponse []json.RawMessage
 
 // ListRemote implements Service.ListRemote. GET /config/remote.
@@ -5322,6 +5373,7 @@ func (s *service) DeleteRemote(ctx context.Context, name string, params *DeleteR
 }
 
 // GetRemoteResponse mirrors the shape returned by GET /config/remote/{name}.
+// Remote properties.
 type GetRemoteResponse struct {
 	// AuthId Authentication ID
 	AuthId string `json:"auth-id"`
@@ -5421,6 +5473,7 @@ func (s *service) UpdateRemote(ctx context.Context, name string, params *UpdateR
 }
 
 // ListRemoteScanResponse mirrors the shape returned by GET /config/remote/{name}/scan.
+// List the accessible datastores.
 type ListRemoteScanResponse []json.RawMessage
 
 // ListRemoteScan implements Service.ListRemoteScan. GET /config/remote/{name}/scan.
@@ -5478,6 +5531,7 @@ type ListRemoteScanGroupsParams struct {
 }
 
 // ListRemoteScanGroupsResponse mirrors the shape returned by GET /config/remote/{name}/scan/{store}/groups.
+// Lists the accessible backup groups in a remote datastore.
 type ListRemoteScanGroupsResponse []json.RawMessage
 
 // ListRemoteScanGroups implements Service.ListRemoteScanGroups. GET /config/remote/{name}/scan/{store}/groups.
@@ -5523,6 +5577,7 @@ func (s *service) ListRemoteScanGroups(ctx context.Context, name string, store s
 }
 
 // ListRemoteScanNamespacesResponse mirrors the shape returned by GET /config/remote/{name}/scan/{store}/namespaces.
+// List the accessible namespaces of a remote datastore.
 type ListRemoteScanNamespacesResponse []json.RawMessage
 
 // ListRemoteScanNamespaces implements Service.ListRemoteScanNamespaces. GET /config/remote/{name}/scan/{store}/namespaces.
@@ -5556,6 +5611,7 @@ func (s *service) ListRemoteScanNamespaces(ctx context.Context, name string, sto
 }
 
 // ListS3Response mirrors the shape returned by GET /config/s3.
+// List configured s3 clients.
 type ListS3Response []json.RawMessage
 
 // ListS3 implements Service.ListS3. GET /config/s3.
@@ -5602,13 +5658,17 @@ type CreateS3Params struct {
 	Fingerprint *string `json:"fingerprint,omitempty"`
 	// Id ID to uniquely identify s3 client config.
 	Id string `json:"id"`
+	// LimitActiveRequests Combined rate limit for PUT, POST and DELETE requests given as #request/s.
+	LimitActiveRequests *int64 `json:"limit-active-requests,omitempty"`
+	// LimitPassiveRequests Combined rate limit for GET and HEAD requests given as #request/s.
+	LimitPassiveRequests *int64 `json:"limit-passive-requests,omitempty"`
 	// PathStyle Use path style bucket addressing over vhost style.
 	PathStyle *bool `json:"path-style,omitempty"`
 	// Port Port to access S3 object store.
 	Port *int64 `json:"port,omitempty"`
 	// ProviderQuirks List of provider specific feature implementation quirks.
 	ProviderQuirks []string `json:"provider-quirks,omitempty"`
-	// PutRateLimit Rate limit for put requests given as #request/s.
+	// PutRateLimit Rate limit for put requests given as #request/s (deprecated: use active-rate-limit instead).
 	PutRateLimit *int64 `json:"put-rate-limit,omitempty"`
 	// RateIn Byte size with optional unit (B, KB (base 10), MB, GB, ..., KiB (base 2), MiB, Gib, ...).
 	RateIn *string `json:"rate-in,omitempty"`
@@ -5618,6 +5678,8 @@ type CreateS3Params struct {
 	Region *string `json:"region,omitempty"`
 	// SecretKey S3 secret key
 	SecretKey string `json:"secret-key"`
+	// UseNodeProxy Use node proxy for client connections
+	UseNodeProxy *bool `json:"use-node-proxy,omitempty"`
 }
 
 // CreateS3 implements Service.CreateS3. POST /config/s3.
@@ -5687,6 +5749,7 @@ func (s *service) DeleteS3(ctx context.Context, id string, params *DeleteS3Param
 }
 
 // GetS3Response mirrors the shape returned by GET /config/s3/{id}.
+// S3 client configuration properties without secret.
 type GetS3Response struct {
 	// AccessKey Access key for S3 object store.
 	AccessKey string `json:"access-key"`
@@ -5700,13 +5763,17 @@ type GetS3Response struct {
 	Fingerprint *string `json:"fingerprint,omitempty"`
 	// Id ID to uniquely identify s3 client config.
 	Id string `json:"id"`
+	// LimitActiveRequests Combined rate limit for PUT, POST and DELETE requests given as #request/s.
+	LimitActiveRequests *client.PVEInt `json:"limit-active-requests,omitempty"`
+	// LimitPassiveRequests Combined rate limit for GET and HEAD requests given as #request/s.
+	LimitPassiveRequests *client.PVEInt `json:"limit-passive-requests,omitempty"`
 	// PathStyle Use path style bucket addressing over vhost style.
 	PathStyle *client.PVEBool `json:"path-style,omitempty"`
 	// Port Port to access S3 object store.
 	Port *client.PVEInt `json:"port,omitempty"`
 	// ProviderQuirks List of provider specific feature implementation quirks.
 	ProviderQuirks []string `json:"provider-quirks,omitempty"`
-	// PutRateLimit Rate limit for put requests given as #request/s.
+	// PutRateLimit Rate limit for put requests given as #request/s (deprecated: use active-rate-limit instead).
 	PutRateLimit *client.PVEInt `json:"put-rate-limit,omitempty"`
 	// RateIn Byte size with optional unit (B, KB (base 10), MB, GB, ..., KiB (base 2), MiB, Gib, ...).
 	RateIn *string `json:"rate-in,omitempty"`
@@ -5714,6 +5781,8 @@ type GetS3Response struct {
 	RateOut *string `json:"rate-out,omitempty"`
 	// Region Region to access S3 object store.
 	Region *string `json:"region,omitempty"`
+	// UseNodeProxy Use node proxy for client connections
+	UseNodeProxy *client.PVEBool `json:"use-node-proxy,omitempty"`
 }
 
 // GetS3 implements Service.GetS3. GET /config/s3/{id}.
@@ -5761,13 +5830,17 @@ type UpdateS3Params struct {
 	Endpoint *string `json:"endpoint,omitempty"`
 	// Fingerprint X509 certificate fingerprint (sha256).
 	Fingerprint *string `json:"fingerprint,omitempty"`
+	// LimitActiveRequests Combined rate limit for PUT, POST and DELETE requests given as #request/s.
+	LimitActiveRequests *int64 `json:"limit-active-requests,omitempty"`
+	// LimitPassiveRequests Combined rate limit for GET and HEAD requests given as #request/s.
+	LimitPassiveRequests *int64 `json:"limit-passive-requests,omitempty"`
 	// PathStyle Use path style bucket addressing over vhost style.
 	PathStyle *bool `json:"path-style,omitempty"`
 	// Port Port to access S3 object store.
 	Port *int64 `json:"port,omitempty"`
 	// ProviderQuirks List of provider specific feature implementation quirks.
 	ProviderQuirks []string `json:"provider-quirks,omitempty"`
-	// PutRateLimit Rate limit for put requests given as #request/s.
+	// PutRateLimit Rate limit for put requests given as #request/s (deprecated: use active-rate-limit instead).
 	PutRateLimit *int64 `json:"put-rate-limit,omitempty"`
 	// RateIn Byte size with optional unit (B, KB (base 10), MB, GB, ..., KiB (base 2), MiB, Gib, ...).
 	RateIn *string `json:"rate-in,omitempty"`
@@ -5777,6 +5850,8 @@ type UpdateS3Params struct {
 	Region *string `json:"region,omitempty"`
 	// SecretKey S3 client secret key.
 	SecretKey *string `json:"secret-key,omitempty"`
+	// UseNodeProxy Use node proxy for client connections
+	UseNodeProxy *bool `json:"use-node-proxy,omitempty"`
 }
 
 // UpdateS3 implements Service.UpdateS3. PUT /config/s3/{id}.
@@ -5834,6 +5909,7 @@ type ListSyncParams struct {
 }
 
 // ListSyncResponse mirrors the shape returned by GET /config/sync.
+// List configured jobs.
 type ListSyncResponse []json.RawMessage
 
 // ListSync implements Service.ListSync. GET /config/sync.
@@ -6001,6 +6077,7 @@ func (s *service) DeleteSync(ctx context.Context, id string, params *DeleteSyncP
 }
 
 // GetSyncResponse mirrors the shape returned by GET /config/sync/{id}.
+// Sync Job
 type GetSyncResponse struct {
 	// ActiveEncryptionKey ID to uniquely identify encryption/decription key
 	ActiveEncryptionKey *string `json:"active-encryption-key,omitempty"`
@@ -6174,6 +6251,7 @@ func (s *service) UpdateSync(ctx context.Context, id string, params *UpdateSyncP
 }
 
 // ListTapeBackupJobResponse mirrors the shape returned by GET /config/tape-backup-job.
+// List configured jobs.
 type ListTapeBackupJobResponse []json.RawMessage
 
 // ListTapeBackupJob implements Service.ListTapeBackupJob. GET /config/tape-backup-job.
@@ -6307,6 +6385,7 @@ func (s *service) DeleteTapeBackupJob(ctx context.Context, id string, params *De
 }
 
 // GetTapeBackupJobResponse mirrors the shape returned by GET /config/tape-backup-job/{id}.
+// Tape Backup Job
 type GetTapeBackupJobResponse struct {
 	// Comment Comment.
 	Comment *string `json:"comment,omitempty"`
@@ -6436,6 +6515,7 @@ func (s *service) UpdateTapeBackupJob(ctx context.Context, id string, params *Up
 }
 
 // ListTapeEncryptionKeysResponse mirrors the shape returned by GET /config/tape-encryption-keys.
+// The list of tape encryption keys (with config digest).
 type ListTapeEncryptionKeysResponse []json.RawMessage
 
 // ListTapeEncryptionKeys implements Service.ListTapeEncryptionKeys. GET /config/tape-encryption-keys.
@@ -6481,6 +6561,7 @@ type CreateTapeEncryptionKeysParams struct {
 }
 
 // CreateTapeEncryptionKeysResponse is the raw JSON returned by POST /config/tape-encryption-keys.
+// Tape encryption key fingerprint (sha256).
 type CreateTapeEncryptionKeysResponse = json.RawMessage
 
 // CreateTapeEncryptionKeys implements Service.CreateTapeEncryptionKeys. POST /config/tape-encryption-keys.
@@ -6562,6 +6643,7 @@ func (s *service) DeleteTapeEncryptionKeys(ctx context.Context, fingerprint stri
 }
 
 // GetTapeEncryptionKeysResponse mirrors the shape returned by GET /config/tape-encryption-keys/{fingerprint}.
+// Encryption Key Information
 type GetTapeEncryptionKeysResponse struct {
 	// Created Key creation time
 	Created client.PVEInt `json:"created"`
@@ -6653,6 +6735,7 @@ func (s *service) UpdateTapeEncryptionKeys(ctx context.Context, fingerprint stri
 }
 
 // ListTrafficControlResponse mirrors the shape returned by GET /config/traffic-control.
+// The list of configured traffic control rules (with config digest).
 type ListTrafficControlResponse []json.RawMessage
 
 // ListTrafficControl implements Service.ListTrafficControl. GET /config/traffic-control.
@@ -6774,6 +6857,7 @@ func (s *service) DeleteTrafficControl(ctx context.Context, name string, params 
 }
 
 // GetTrafficControlResponse mirrors the shape returned by GET /config/traffic-control/{name}.
+// Traffic control rule
 type GetTrafficControlResponse struct {
 	// BurstIn Byte size with optional unit (B, KB (base 10), MB, GB, ..., KiB (base 2), MiB, Gib, ...).
 	BurstIn *string `json:"burst-in,omitempty"`
@@ -6879,6 +6963,7 @@ func (s *service) UpdateTrafficControl(ctx context.Context, name string, params 
 }
 
 // ListVerifyResponse mirrors the shape returned by GET /config/verify.
+// List configured jobs.
 type ListVerifyResponse []json.RawMessage
 
 // ListVerify implements Service.ListVerify. GET /config/verify.
@@ -7002,6 +7087,7 @@ func (s *service) DeleteVerify(ctx context.Context, id string, params *DeleteVer
 }
 
 // GetVerifyResponse mirrors the shape returned by GET /config/verify/{id}.
+// Verification Job
 type GetVerifyResponse struct {
 	// Comment Comment.
 	Comment *string `json:"comment,omitempty"`

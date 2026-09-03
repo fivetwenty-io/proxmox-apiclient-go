@@ -22,7 +22,7 @@ generator emits typed bindings for all six top-level namespaces:
   each node has `path`, `text`, `leaf`, `info` (map of HTTP method to
   endpoint definition), and optional `children`.
 
-  **Current pin: PVE 9.2 — 444 endpoints / 675 method-operations.**
+  **Current pin: fetched 2026-09-03 — PVE 9.2 (pve-docs 9.2.4, pve-manager 9.2.11) — 447 endpoints / 678 method-operations.**
 
 ## Provenance
 
@@ -87,6 +87,14 @@ To refresh against a newer PVE release:
    make check
    ```
 
+## Schema shapes the generator normalises
+
+- Composite parameters
+  Since PVE 9.2 (pve-ha-manager 5.2) the HA rule endpoints declare their parameters as an `allOf` of common properties plus a `oneOf` with one variant per rule type, discriminated by `type-property`. `cmd/pvegen` flattens these into a single property map before emission (`flattenComposite`): plain properties beside the composition are kept, a property is required only when every variant requires it, the discriminator comes from `type-property-schema` and is forced required, and a property the variants describe differently gets every description in its doc comment, each labelled with the variant's `instance-type`. Parameters and returns both pass through the same flattening, so any future endpoint using this encoding is handled the same way.
+
+- Wrong declared response types
+  Where the spec documents a response property as one type and the server sends another, the dialect's `returnsPropertyOverrides` table patches that property alone, keeping the spec's description and optionality. `GET /cluster/options` is the current entry: PVE returns the parsed `datacenter.cfg`, so its property-string options (`ha`, `migration`, `notify`, ...) arrive as objects and `registered-tags` as an array. The generator refuses to run when an entry in either override table matches no endpoint, or when a property override names a property the spec does not declare, so a refresh that renames or drops the target surfaces at once instead of leaving the override dead.
+
 ## PBS specification (`pbs-apidoc.json`)
 
 The same tree format published by the Proxmox Backup Server API viewer.
@@ -95,8 +103,8 @@ ten namespaces (`access`, `admin`, `config`, `nodes`, `ping`, `pull`,
 `push`, `status`, `tape`, `version`), skipping the `/backup` and `/reader`
 HTTP/2 chunk-protocol endpoints and the `GET /` directory index.
 
-**Current pin: fetched 2026-07-07 — 232 paths / 349 method-operations in
-the API tree (346 generated).**
+**Current pin: fetched 2026-09-03 — PBS 4.2.5 — 246 paths / 367 method-operations in
+the API tree (346 generated once the skips above are applied).**
 
 Dialect differences from the PVE spec (all tolerated by the generator):
 `additionalProperties` is a JSON boolean rather than 0/1, `format` is a
@@ -125,9 +133,9 @@ bindings for all thirteen namespaces (`access`, `auto-install` → package
 directory index. The `/pve` and `/pbs` trees are PDM's proxied per-remote
 operations against managed PVE/PBS instances.
 
-**Current pin: fetched 2026-07-08 from
-`https://pdm.proxmox.com/docs/api-viewer/apidoc.js` — PDM 1.1.6, 327
-method-operations.**
+**Current pin: fetched 2026-09-03 from
+`https://pdm.proxmox.com/docs/api-viewer/apidoc.js` — PDM 1.1.7, 327
+method-operations in the API tree (326 generated; only `GET /` is skipped).**
 
 Dialect notes: the PDM spec shares the PBS encoding conventions (boolean
 `additionalProperties`, nested `format` schemas) and adds an `unstable`

@@ -214,6 +214,7 @@ func (s *service) ListAdmin(ctx context.Context) error {
 }
 
 // ListDatastoreResponse mirrors the shape returned by GET /admin/datastore.
+// List the accessible datastores.
 type ListDatastoreResponse []json.RawMessage
 
 // ListDatastore implements Service.ListDatastore. GET /admin/datastore.
@@ -471,6 +472,7 @@ type ListDatastoreFilesParams struct {
 }
 
 // ListDatastoreFilesResponse mirrors the shape returned by GET /admin/datastore/{store}/files.
+// Returns the list of archive files inside a backup snapshots.
 type ListDatastoreFilesResponse []json.RawMessage
 
 // ListDatastoreFiles implements Service.ListDatastoreFiles. GET /admin/datastore/{store}/files.
@@ -516,6 +518,7 @@ func (s *service) ListDatastoreFiles(ctx context.Context, store string, params *
 }
 
 // ListDatastoreGcResponse mirrors the shape returned by GET /admin/datastore/{store}/gc.
+// Garbage Collection general info
 type ListDatastoreGcResponse struct {
 	// CacheStats Garbage collection cache statistics
 	CacheStats json.RawMessage `json:"cache-stats,omitempty"`
@@ -585,6 +588,7 @@ func (s *service) ListDatastoreGc(ctx context.Context, store string) (*ListDatas
 }
 
 // CreateDatastoreGcResponse is the raw JSON returned by POST /admin/datastore/{store}/gc.
+// Unique Process/Task Identifier
 type CreateDatastoreGcResponse = json.RawMessage
 
 // CreateDatastoreGc implements Service.CreateDatastoreGc. POST /admin/datastore/{store}/gc.
@@ -712,6 +716,7 @@ type DeleteDatastoreGroupsParams struct {
 }
 
 // DeleteDatastoreGroupsResponse mirrors the shape returned by DELETE /admin/datastore/{store}/groups.
+// Statistics for removed backup groups
 type DeleteDatastoreGroupsResponse struct {
 	// ProtectedSnapshots Number of entities
 	ProtectedSnapshots client.PVEInt `json:"protected-snapshots"`
@@ -769,6 +774,7 @@ type ListDatastoreGroupsParams struct {
 }
 
 // ListDatastoreGroupsResponse mirrors the shape returned by GET /admin/datastore/{store}/groups.
+// Returns the list of backup groups.
 type ListDatastoreGroupsResponse []json.RawMessage
 
 // ListDatastoreGroups implements Service.ListDatastoreGroups. GET /admin/datastore/{store}/groups.
@@ -814,6 +820,7 @@ func (s *service) ListDatastoreGroups(ctx context.Context, store string, params 
 }
 
 // CreateDatastoreMountResponse is the raw JSON returned by POST /admin/datastore/{store}/mount.
+// Unique Process/Task Identifier
 type CreateDatastoreMountResponse = json.RawMessage
 
 // CreateDatastoreMount implements Service.CreateDatastoreMount. POST /admin/datastore/{store}/mount.
@@ -861,6 +868,7 @@ type CreateDatastoreMoveGroupParams struct {
 }
 
 // CreateDatastoreMoveGroupResponse is the raw JSON returned by POST /admin/datastore/{store}/move-group.
+// Unique Process/Task Identifier
 type CreateDatastoreMoveGroupResponse = json.RawMessage
 
 // CreateDatastoreMoveGroup implements Service.CreateDatastoreMoveGroup. POST /admin/datastore/{store}/move-group.
@@ -920,6 +928,7 @@ type CreateDatastoreMoveNamespaceParams struct {
 }
 
 // CreateDatastoreMoveNamespaceResponse is the raw JSON returned by POST /admin/datastore/{store}/move-namespace.
+// Unique Process/Task Identifier
 type CreateDatastoreMoveNamespaceResponse = json.RawMessage
 
 // CreateDatastoreMoveNamespace implements Service.CreateDatastoreMoveNamespace. POST /admin/datastore/{store}/move-namespace.
@@ -1013,6 +1022,7 @@ type ListDatastoreNamespaceParams struct {
 }
 
 // ListDatastoreNamespaceResponse mirrors the shape returned by GET /admin/datastore/{store}/namespace.
+// Returns the list of backup namespaces.
 type ListDatastoreNamespaceResponse []json.RawMessage
 
 // ListDatastoreNamespace implements Service.ListDatastoreNamespace. GET /admin/datastore/{store}/namespace.
@@ -1066,6 +1076,7 @@ type CreateDatastoreNamespaceParams struct {
 }
 
 // CreateDatastoreNamespaceResponse is the raw JSON returned by POST /admin/datastore/{store}/namespace.
+// Namespace.
 type CreateDatastoreNamespaceResponse = json.RawMessage
 
 // CreateDatastoreNamespace implements Service.CreateDatastoreNamespace. POST /admin/datastore/{store}/namespace.
@@ -1309,6 +1320,7 @@ type CreateDatastorePruneParams struct {
 }
 
 // CreateDatastorePruneResponse mirrors the shape returned by POST /admin/datastore/{store}/prune.
+// Returns the list of snapshots and a flag indicating if there are kept or removed.
 type CreateDatastorePruneResponse []json.RawMessage
 
 // CreateDatastorePrune implements Service.CreateDatastorePrune. POST /admin/datastore/{store}/prune.
@@ -1376,6 +1388,7 @@ type CreateDatastorePruneDatastoreParams struct {
 }
 
 // CreateDatastorePruneDatastoreResponse is the raw JSON returned by POST /admin/datastore/{store}/prune-datastore.
+// Unique Process/Task Identifier
 type CreateDatastorePruneDatastoreResponse = json.RawMessage
 
 // CreateDatastorePruneDatastore implements Service.CreateDatastorePruneDatastore. POST /admin/datastore/{store}/prune-datastore.
@@ -1507,6 +1520,7 @@ func (s *service) ListDatastoreRrd(ctx context.Context, store string, params *Li
 }
 
 // UpdateDatastoreS3RefreshResponse is the raw JSON returned by PUT /admin/datastore/{store}/s3-refresh.
+// Unique Process/Task Identifier
 type UpdateDatastoreS3RefreshResponse = json.RawMessage
 
 // UpdateDatastoreS3Refresh implements Service.UpdateDatastoreS3Refresh. PUT /admin/datastore/{store}/s3-refresh.
@@ -1592,6 +1606,7 @@ type ListDatastoreSnapshotsParams struct {
 }
 
 // ListDatastoreSnapshotsResponse mirrors the shape returned by GET /admin/datastore/{store}/snapshots.
+// Returns the list of snapshots.
 type ListDatastoreSnapshotsResponse []json.RawMessage
 
 // ListDatastoreSnapshots implements Service.ListDatastoreSnapshots. GET /admin/datastore/{store}/snapshots.
@@ -1643,6 +1658,7 @@ type ListDatastoreStatusParams struct {
 }
 
 // ListDatastoreStatusResponse mirrors the shape returned by GET /admin/datastore/{store}/status.
+// Overall Datastore status and useful information.
 type ListDatastoreStatusResponse struct {
 	// Avail Available space (bytes).
 	Avail client.PVEInt `json:"avail"`
@@ -1702,6 +1718,7 @@ func (s *service) ListDatastoreStatus(ctx context.Context, store string, params 
 }
 
 // CreateDatastoreUnmountResponse is the raw JSON returned by POST /admin/datastore/{store}/unmount.
+// Unique Process/Task Identifier
 type CreateDatastoreUnmountResponse = json.RawMessage
 
 // CreateDatastoreUnmount implements Service.CreateDatastoreUnmount. POST /admin/datastore/{store}/unmount.
@@ -1799,6 +1816,7 @@ type CreateDatastoreVerifyParams struct {
 }
 
 // CreateDatastoreVerifyResponse is the raw JSON returned by POST /admin/datastore/{store}/verify.
+// Unique Process/Task Identifier
 type CreateDatastoreVerifyResponse = json.RawMessage
 
 // CreateDatastoreVerify implements Service.CreateDatastoreVerify. POST /admin/datastore/{store}/verify.
@@ -1850,6 +1868,7 @@ type ListGcParams struct {
 }
 
 // ListGcResponse mirrors the shape returned by GET /admin/gc.
+// List configured gc jobs and their status
 type ListGcResponse []json.RawMessage
 
 // ListGc implements Service.ListGc. GET /admin/gc.
@@ -1895,6 +1914,7 @@ func (s *service) ListGc(ctx context.Context, params *ListGcParams) (*ListGcResp
 }
 
 // GetGcResponse mirrors the shape returned by GET /admin/gc/{store}.
+// List configured gc jobs and their status
 type GetGcResponse []json.RawMessage
 
 // GetGc implements Service.GetGc. GET /admin/gc/{store}.
@@ -1928,6 +1948,7 @@ func (s *service) GetGc(ctx context.Context, store string) (*GetGcResponse, erro
 }
 
 // ListMetricsResponse mirrors the shape returned by GET /admin/metrics.
+// List of configured metric servers.
 type ListMetricsResponse []json.RawMessage
 
 // ListMetrics implements Service.ListMetrics. GET /admin/metrics.
@@ -1967,6 +1988,7 @@ type ListPruneParams struct {
 }
 
 // ListPruneResponse mirrors the shape returned by GET /admin/prune.
+// List configured jobs and their status (filtered by access)
 type ListPruneResponse []json.RawMessage
 
 // ListPrune implements Service.ListPrune. GET /admin/prune.
@@ -2150,6 +2172,7 @@ type ListSyncParams struct {
 }
 
 // ListSyncResponse mirrors the shape returned by GET /admin/sync.
+// List configured jobs and their status.
 type ListSyncResponse []json.RawMessage
 
 // ListSync implements Service.ListSync. GET /admin/sync.
@@ -2231,6 +2254,7 @@ func (s *service) CreateSyncRun(ctx context.Context, id string) error {
 }
 
 // ListTrafficControlResponse mirrors the shape returned by GET /admin/traffic-control.
+// Show current traffic control rates.
 type ListTrafficControlResponse []json.RawMessage
 
 // ListTrafficControl implements Service.ListTrafficControl. GET /admin/traffic-control.
@@ -2270,6 +2294,7 @@ type ListVerifyParams struct {
 }
 
 // ListVerifyResponse mirrors the shape returned by GET /admin/verify.
+// List configured jobs and their status (filtered by access)
 type ListVerifyResponse []json.RawMessage
 
 // ListVerify implements Service.ListVerify. GET /admin/verify.

@@ -115,6 +115,7 @@ type CreateAdoptAllParams struct {
 }
 
 // CreateAdoptAllResponse mirrors the shape returned by POST /subscriptions/adopt-all.
+// List of (remote, node, key) tuples that were adopted into the pool.
 type CreateAdoptAllResponse []json.RawMessage
 
 // CreateAdoptAll implements Service.CreateAdoptAll. POST /subscriptions/adopt-all.
@@ -206,6 +207,7 @@ type CreateApplyPendingParams struct {
 }
 
 // CreateApplyPendingResponse is the raw JSON returned by POST /subscriptions/apply-pending.
+// Unique Process/Task Identifier
 type CreateApplyPendingResponse = json.RawMessage
 
 // CreateApplyPending implements Service.CreateApplyPending. POST /subscriptions/apply-pending.
@@ -251,6 +253,7 @@ func (s *service) CreateApplyPending(ctx context.Context, params *CreateApplyPen
 }
 
 // CreateAutoAssignResponse mirrors the shape returned by POST /subscriptions/auto-assign.
+// The full plan returned by auto-assign and accepted by bulk-assign.  `keys_digest` and `node_status_digest` are snapshots taken when the plan was computed. `bulk_assign` rejects the plan with 409 if either has changed in the meantime, so the operator never silently commits a plan that no longer matches the live state.
 type CreateAutoAssignResponse struct {
 	// Assignments Proposed assignments. Empty when nothing matches.
 	Assignments []json.RawMessage `json:"assignments"`
@@ -296,6 +299,7 @@ type CreateBulkAssignParams struct {
 }
 
 // CreateBulkAssignResponse mirrors the shape returned by POST /subscriptions/bulk-assign.
+// Assignments that were actually persisted.
 type CreateBulkAssignResponse []json.RawMessage
 
 // CreateBulkAssign implements Service.CreateBulkAssign. POST /subscriptions/bulk-assign.
@@ -392,6 +396,7 @@ type CreateClearPendingParams struct {
 }
 
 // CreateClearPendingResponse mirrors the shape returned by POST /subscriptions/clear-pending.
+// Result of the bulk clear-pending API endpoint.
 type CreateClearPendingResponse struct {
 	// Cleared Number of pool entries whose pending push or clear was cleared.
 	Cleared client.PVEInt `json:"cleared"`
@@ -439,6 +444,7 @@ func (s *service) CreateClearPending(ctx context.Context, params *CreateClearPen
 }
 
 // ListKeysResponse mirrors the shape returned by GET /subscriptions/keys.
+// List of subscription keys in the pool.
 type ListKeysResponse []json.RawMessage
 
 // ListKeys implements Service.ListKeys. GET /subscriptions/keys.
@@ -480,6 +486,7 @@ type CreateKeysParams struct {
 }
 
 // CreateKeysResponse mirrors the shape returned by POST /subscriptions/keys.
+// Result of the add-keys API endpoint.
 type CreateKeysResponse struct {
 	// Added Number of keys actually added to the pool.
 	Added client.PVEInt `json:"added"`
@@ -565,6 +572,7 @@ func (s *service) DeleteKeys(ctx context.Context, key string, params *DeleteKeys
 }
 
 // GetKeysResponse mirrors the shape returned by GET /subscriptions/keys/{key}.
+// An entry in the subscription key pool.
 type GetKeysResponse struct {
 	// CheckTime Epoch of last import or refresh of this key's data.  Accepts the upstream `checktime` spelling on deserialisation; canonical form is `check-time`.
 	CheckTime *client.PVEInt `json:"check-time,omitempty"`
@@ -704,6 +712,7 @@ type ListNodeStatusParams struct {
 }
 
 // ListNodeStatusResponse mirrors the shape returned by GET /subscriptions/node-status.
+// Subscription status of all remote nodes the user can audit.
 type ListNodeStatusResponse []json.RawMessage
 
 // ListNodeStatus implements Service.ListNodeStatus. GET /subscriptions/node-status.

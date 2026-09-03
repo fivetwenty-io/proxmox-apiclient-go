@@ -43,6 +43,7 @@ type service struct {
 }
 
 // PingResponse mirrors the shape returned by GET /ping.
+// Dummy ping
 type PingResponse struct {
 	// Pong Always true
 	Pong client.PVEBool `json:"pong"`

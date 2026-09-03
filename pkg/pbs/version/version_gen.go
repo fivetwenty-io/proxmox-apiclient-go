@@ -43,6 +43,7 @@ type service struct {
 }
 
 // GetResponse mirrors the shape returned by GET /version.
+// Api version information
 type GetResponse struct {
 	// Release Version release
 	Release string `json:"release"`

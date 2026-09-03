@@ -185,6 +185,7 @@ type ListRealmsParams struct {
 }
 
 // ListRealmsResponse mirrors the shape returned by GET /pbs/realms.
+// A list of realms of a PBS remote.
 type ListRealmsResponse []json.RawMessage
 
 // ListRealms implements Service.ListRealms. GET /pbs/realms.
@@ -230,6 +231,7 @@ func (s *service) ListRealms(ctx context.Context, params *ListRealmsParams) (*Li
 }
 
 // ListRemotesResponse mirrors the shape returned by GET /pbs/remotes.
+// List of PBS remotes
 type ListRemotesResponse []json.RawMessage
 
 // ListRemotes implements Service.ListRemotes. GET /pbs/remotes.
@@ -281,6 +283,7 @@ func (s *service) GetRemotes(ctx context.Context, remote string) error {
 }
 
 // ListRemotesDatastoreResponse mirrors the shape returned by GET /pbs/remotes/{remote}/datastore.
+// List of datastores configurations.
 type ListRemotesDatastoreResponse []json.RawMessage
 
 // ListRemotesDatastore implements Service.ListRemotesDatastore. GET /pbs/remotes/{remote}/datastore.
@@ -340,6 +343,7 @@ type ListRemotesDatastoreNamespacesParams struct {
 }
 
 // ListRemotesDatastoreNamespacesResponse mirrors the shape returned by GET /pbs/remotes/{remote}/datastore/{datastore}/namespaces.
+// A list of namespaces of a PBS remote's datastore.
 type ListRemotesDatastoreNamespacesResponse []json.RawMessage
 
 // ListRemotesDatastoreNamespaces implements Service.ListRemotesDatastoreNamespaces. GET /pbs/remotes/{remote}/datastore/{datastore}/namespaces.
@@ -393,6 +397,7 @@ type ListRemotesDatastoreRrddataParams struct {
 }
 
 // ListRemotesDatastoreRrddataResponse mirrors the shape returned by GET /pbs/remotes/{remote}/datastore/{datastore}/rrddata.
+// A list of PBS datastore data points.
 type ListRemotesDatastoreRrddataResponse []json.RawMessage
 
 // ListRemotesDatastoreRrddata implements Service.ListRemotesDatastoreRrddata. GET /pbs/remotes/{remote}/datastore/{datastore}/rrddata.
@@ -444,6 +449,7 @@ type ListRemotesDatastoreSnapshotsParams struct {
 }
 
 // ListRemotesDatastoreSnapshotsResponse mirrors the shape returned by GET /pbs/remotes/{remote}/datastore/{datastore}/snapshots.
+// Returns the list of snapshots.
 type ListRemotesDatastoreSnapshotsResponse []json.RawMessage
 
 // ListRemotesDatastoreSnapshots implements Service.ListRemotesDatastoreSnapshots. GET /pbs/remotes/{remote}/datastore/{datastore}/snapshots.
@@ -533,6 +539,7 @@ type ListRemotesNodesAptChangelogParams struct {
 }
 
 // ListRemotesNodesAptChangelogResponse is the raw JSON returned by GET /pbs/remotes/{remote}/nodes/{node}/apt/changelog.
+// The Package changelog.
 type ListRemotesNodesAptChangelogResponse = json.RawMessage
 
 // ListRemotesNodesAptChangelog implements Service.ListRemotesNodesAptChangelog. GET /pbs/remotes/{remote}/nodes/{node}/apt/changelog.
@@ -616,6 +623,7 @@ func (s *service) ListRemotesNodesAptRepositories(ctx context.Context, remote st
 }
 
 // ListRemotesNodesAptUpdateResponse mirrors the shape returned by GET /pbs/remotes/{remote}/nodes/{node}/apt/update.
+// A list of packages with available updates.
 type ListRemotesNodesAptUpdateResponse []json.RawMessage
 
 // ListRemotesNodesAptUpdate implements Service.ListRemotesNodesAptUpdate. GET /pbs/remotes/{remote}/nodes/{node}/apt/update.
@@ -649,6 +657,7 @@ func (s *service) ListRemotesNodesAptUpdate(ctx context.Context, remote string, 
 }
 
 // CreateRemotesNodesAptUpdateResponse is the raw JSON returned by POST /pbs/remotes/{remote}/nodes/{node}/apt/update.
+// A remote UPID
 type CreateRemotesNodesAptUpdateResponse = json.RawMessage
 
 // CreateRemotesNodesAptUpdate implements Service.CreateRemotesNodesAptUpdate. POST /pbs/remotes/{remote}/nodes/{node}/apt/update.
@@ -682,6 +691,7 @@ func (s *service) CreateRemotesNodesAptUpdate(ctx context.Context, remote string
 }
 
 // ListRemotesNodesSubscriptionResponse mirrors the shape returned by GET /pbs/remotes/{remote}/nodes/{node}/subscription.
+// Proxmox subscription information
 type ListRemotesNodesSubscriptionResponse struct {
 	// Checktime timestamp of the last check done
 	Checktime *client.PVEInt `json:"checktime,omitempty"`
@@ -735,6 +745,7 @@ func (s *service) ListRemotesNodesSubscription(ctx context.Context, remote strin
 }
 
 // CreateRemotesNodesTermproxyResponse mirrors the shape returned by POST /pbs/remotes/{remote}/nodes/{node}/termproxy.
+// Object with the user and ticket
 type CreateRemotesNodesTermproxyResponse struct {
 	// Port Always '0'.
 	Port client.PVEInt `json:"port"`
@@ -820,6 +831,7 @@ type ListRemotesRrddataParams struct {
 }
 
 // ListRemotesRrddataResponse mirrors the shape returned by GET /pbs/remotes/{remote}/rrddata.
+// A list of PBS node data points.
 type ListRemotesRrddataResponse []json.RawMessage
 
 // ListRemotesRrddata implements Service.ListRemotesRrddata. GET /pbs/remotes/{remote}/rrddata.
@@ -865,6 +877,7 @@ func (s *service) ListRemotesRrddata(ctx context.Context, remote string, params 
 }
 
 // ListRemotesStatusResponse mirrors the shape returned by GET /pbs/remotes/{remote}/status.
+// The Node status
 type ListRemotesStatusResponse struct {
 	// BootInfo Holds the Bootmodes
 	BootInfo json.RawMessage `json:"boot-info"`
@@ -922,6 +935,7 @@ func (s *service) ListRemotesStatus(ctx context.Context, remote string) (*ListRe
 }
 
 // ListRemotesTasksResponse mirrors the shape returned by GET /pbs/remotes/{remote}/tasks.
+// A list of tasks.
 type ListRemotesTasksResponse []json.RawMessage
 
 // ListRemotesTasks implements Service.ListRemotesTasks. GET /pbs/remotes/{remote}/tasks.
@@ -1001,6 +1015,7 @@ type ListRemotesTasksLogParams struct {
 }
 
 // ListRemotesTasksLogResponse mirrors the shape returned by GET /pbs/remotes/{remote}/tasks/{upid}/log.
+// Array of task log lines
 type ListRemotesTasksLogResponse []json.RawMessage
 
 // ListRemotesTasksLog implements Service.ListRemotesTasksLog. GET /pbs/remotes/{remote}/tasks/{upid}/log.
@@ -1052,6 +1067,7 @@ type ListRemotesTasksStatusParams struct {
 }
 
 // ListRemotesTasksStatusResponse mirrors the shape returned by GET /pbs/remotes/{remote}/tasks/{upid}/status.
+// Status if a task.
 type ListRemotesTasksStatusResponse struct {
 	// Exitstatus Exit status, if available.
 	Exitstatus *string `json:"exitstatus,omitempty"`
@@ -1129,6 +1145,7 @@ type CreateScanParams struct {
 }
 
 // CreateScanResponse mirrors the shape returned by POST /pbs/scan.
+// The information required to connect to a remote instance.
 type CreateScanResponse struct {
 	// Authid Authentication ID
 	Authid string `json:"authid"`

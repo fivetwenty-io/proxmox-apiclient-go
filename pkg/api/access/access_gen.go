@@ -627,6 +627,7 @@ type CreateDomainsSyncParams struct {
 }
 
 // CreateDomainsSyncResponse is the raw JSON returned by POST /access/domains/{realm}/sync.
+// Worker Task-UPID
 type CreateDomainsSyncResponse = json.RawMessage
 
 // CreateDomainsSync implements Service.CreateDomainsSync. POST /access/domains/{realm}/sync.
@@ -870,6 +871,7 @@ type CreateOpenidAuthUrlParams struct {
 }
 
 // CreateOpenidAuthUrlResponse is the raw JSON returned by POST /access/openid/auth-url.
+// Redirection URL.
 type CreateOpenidAuthUrlResponse = json.RawMessage
 
 // CreateOpenidAuthUrl implements Service.CreateOpenidAuthUrl. POST /access/openid/auth-url.
@@ -1018,6 +1020,7 @@ type ListPermissionsParams struct {
 }
 
 // ListPermissionsResponse is the raw JSON returned by GET /access/permissions.
+// Map of "path" => (Map of "privilege" => "propagate boolean").
 type ListPermissionsResponse = json.RawMessage
 
 // ListPermissions implements Service.ListPermissions. GET /access/permissions.
@@ -1266,6 +1269,7 @@ func (s *service) UpdateRoles(ctx context.Context, roleid string, params *Update
 }
 
 // ListTfaResponse mirrors the shape returned by GET /access/tfa.
+// The list tuples of user and TFA entries.
 type ListTfaResponse []json.RawMessage
 
 // ListTfa implements Service.ListTfa. GET /access/tfa.
@@ -1299,6 +1303,7 @@ func (s *service) ListTfa(ctx context.Context) (*ListTfaResponse, error) {
 }
 
 // GetTfaResponse mirrors the shape returned by GET /access/tfa/{userid}.
+// A list of the user's TFA entries.
 type GetTfaResponse []json.RawMessage
 
 // GetTfa implements Service.GetTfa. GET /access/tfa/{userid}.
@@ -1435,6 +1440,7 @@ func (s *service) DeleteTfa(ctx context.Context, userid string, id string, param
 }
 
 // GetTfa2Response mirrors the shape returned by GET /access/tfa/{userid}/{id}.
+// TFA Entry.
 type GetTfa2Response struct {
 	// Created Creation time of this entry as unix epoch.
 	Created client.PVEInt `json:"created"`

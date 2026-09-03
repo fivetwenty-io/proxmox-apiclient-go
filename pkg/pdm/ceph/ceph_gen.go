@@ -94,6 +94,7 @@ func (s *service) ListCeph(ctx context.Context) error {
 }
 
 // ListClustersResponse mirrors the shape returned by GET /ceph/clusters.
+// Registered Ceph clusters the caller can access.
 type ListClustersResponse []json.RawMessage
 
 // ListClusters implements Service.ListClusters. GET /ceph/clusters.
@@ -145,6 +146,7 @@ func (s *service) GetClusters(ctx context.Context, cluster string) error {
 }
 
 // ListClustersFlagsResponse mirrors the shape returned by GET /ceph/clusters/{cluster}/flags.
+// Ceph OSD flags and their state.
 type ListClustersFlagsResponse []json.RawMessage
 
 // ListClustersFlags implements Service.ListClustersFlags. GET /ceph/clusters/{cluster}/flags.
@@ -178,6 +180,7 @@ func (s *service) ListClustersFlags(ctx context.Context, cluster string) (*ListC
 }
 
 // ListClustersFsResponse mirrors the shape returned by GET /ceph/clusters/{cluster}/fs.
+// CephFS file systems of the cluster.
 type ListClustersFsResponse []json.RawMessage
 
 // ListClustersFs implements Service.ListClustersFs. GET /ceph/clusters/{cluster}/fs.
@@ -211,6 +214,7 @@ func (s *service) ListClustersFs(ctx context.Context, cluster string) (*ListClus
 }
 
 // ListClustersMdsResponse mirrors the shape returned by GET /ceph/clusters/{cluster}/mds.
+// Ceph metadata servers of the cluster.
 type ListClustersMdsResponse []json.RawMessage
 
 // ListClustersMds implements Service.ListClustersMds. GET /ceph/clusters/{cluster}/mds.
@@ -244,6 +248,7 @@ func (s *service) ListClustersMds(ctx context.Context, cluster string) (*ListClu
 }
 
 // ListClustersMgrResponse mirrors the shape returned by GET /ceph/clusters/{cluster}/mgr.
+// Ceph managers of the cluster.
 type ListClustersMgrResponse []json.RawMessage
 
 // ListClustersMgr implements Service.ListClustersMgr. GET /ceph/clusters/{cluster}/mgr.
@@ -277,6 +282,7 @@ func (s *service) ListClustersMgr(ctx context.Context, cluster string) (*ListClu
 }
 
 // ListClustersMonResponse mirrors the shape returned by GET /ceph/clusters/{cluster}/mon.
+// Ceph monitors of the cluster.
 type ListClustersMonResponse []json.RawMessage
 
 // ListClustersMon implements Service.ListClustersMon. GET /ceph/clusters/{cluster}/mon.
@@ -310,6 +316,7 @@ func (s *service) ListClustersMon(ctx context.Context, cluster string) (*ListClu
 }
 
 // ListClustersOsdTreeResponse is the raw JSON returned by GET /ceph/clusters/{cluster}/osd-tree.
+// Ceph CRUSH/OSD tree.
 type ListClustersOsdTreeResponse = json.RawMessage
 
 // ListClustersOsdTree implements Service.ListClustersOsdTree. GET /ceph/clusters/{cluster}/osd-tree.
@@ -343,6 +350,7 @@ func (s *service) ListClustersOsdTree(ctx context.Context, cluster string) (*Lis
 }
 
 // ListClustersPoolsResponse mirrors the shape returned by GET /ceph/clusters/{cluster}/pools.
+// Ceph pools of the cluster.
 type ListClustersPoolsResponse []json.RawMessage
 
 // ListClustersPools implements Service.ListClustersPools. GET /ceph/clusters/{cluster}/pools.
@@ -382,6 +390,7 @@ type ListClustersStatusParams struct {
 }
 
 // ListClustersStatusResponse is the raw JSON returned by GET /ceph/clusters/{cluster}/status.
+// Raw `ceph status` output.
 type ListClustersStatusResponse = json.RawMessage
 
 // ListClustersStatus implements Service.ListClustersStatus. GET /ceph/clusters/{cluster}/status.
@@ -433,6 +442,7 @@ type ListClustersSummaryParams struct {
 }
 
 // ListClustersSummaryResponse mirrors the shape returned by GET /ceph/clusters/{cluster}/summary.
+// Typed, summarized Ceph cluster status for the dashboard.  Computed server-side from the raw `ceph status` object so the UI binds to typed fields instead of digging through an untyped JSON blob. Returned by `GET /ceph/clusters/{cluster}/summary`.
 type ListClustersSummaryResponse struct {
 	// BytesAvail Available capacity in bytes.
 	BytesAvail client.PVEInt `json:"bytes-avail"`

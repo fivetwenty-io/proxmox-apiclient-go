@@ -42,6 +42,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -63,10 +64,13 @@ const (
 	schemaTypeNull    = "null"
 	goTypeRawMessage  = "json.RawMessage"
 	verbHTTPGet       = "GET"
-	verbHTTPPost      = "POST"
-	verbHTTPPut       = "PUT"
-	verbHTTPDelete    = "DELETE"
-	identifierRoot    = "Root"
+	// keyNodesJournal is the "VERB /path" override key of the journal
+	// endpoint, which every dialect overrides with journalLinesSchema.
+	keyNodesJournal = "GET /nodes/{node}/journal"
+	verbHTTPPost    = "POST"
+	verbHTTPPut     = "PUT"
+	verbHTTPDelete  = "DELETE"
+	identifierRoot  = "Root"
 	// methodPrefixGet is both the emitted Go method prefix for GET requests
 	// on a dynamic-tail path (see goMethodBaseName) and the methodNameOverrides
 	// value for GET /version.
@@ -101,6 +105,9 @@ var (
 	errEmptySpec       = errors.New("spec is empty")
 	errNilSchema       = errors.New("nil schema")
 	errMissingObjProps = errors.New("response schema missing object properties")
+	errUnusedOverride  = errors.New("override matches no endpoint in the spec")
+	errPatchTarget     = errors.New("property override needs an object returns schema")
+	errPatchProperty   = errors.New("property override names a property the spec does not declare")
 )
 
 // indexedParamRe matches PVE spec param names of the form "word[n]" or
@@ -150,6 +157,16 @@ type dialectConfig struct {
 	// renderObjectFields, isResponseEmptyOk, ...) reads endpt.Info.Returns
 	// from.
 	returnsOverrides map[string]*schema
+
+	// returnsPropertyOverrides corrects individual properties of an
+	// otherwise sound "returns" object schema for specific "VERB /path"
+	// tuples where the upstream spec documents a type the server does
+	// not send. The outer key is the endpoint, the inner key the
+	// property name; the patch schema's Type, Items, and Properties
+	// replace the spec's, while an empty Description or Optional is
+	// inherited from the spec so the emitted doc comment and pointer-ness
+	// still follow upstream. Applied after returnsOverrides.
+	returnsPropertyOverrides map[string]map[string]*schema
 }
 
 //nolint:gochecknoglobals // intentional package-level lookup table; consulted throughout emission
@@ -172,8 +189,9 @@ var dialects = map[string]*dialectConfig{
 		skipNamespaces: map[string]bool{},
 		// The version package has hand-written tests already and the
 		// generated smoke test must not stomp on them.
-		skipSmokeTests:   map[string]bool{namespaceVersion: true},
-		returnsOverrides: map[string]*schema{},
+		skipSmokeTests:           map[string]bool{namespaceVersion: true},
+		returnsOverrides:         pveReturnsOverrides,
+		returnsPropertyOverrides: pveReturnsPropertyOverrides,
 	},
 	"pbs": {
 		pkgImportRoot: "pkg/pbs",
@@ -194,7 +212,7 @@ var dialects = map[string]*dialectConfig{
 			"reader": true,
 		},
 		skipSmokeTests:   map[string]bool{},
-		returnsOverrides: map[string]*schema{},
+		returnsOverrides: pbsReturnsOverrides,
 	},
 	"pdm": {
 		pkgImportRoot: "pkg/pdm",
@@ -331,6 +349,72 @@ var remoteUpdateSummarySchema = &schema{
 	},
 }
 
+// pveReturnsPropertyOverrides corrects response properties whose declared
+// type in _data/apidoc.json is not what the PVE server sends. Consulted in
+// collectEndpoints after returnsOverrides; see patchReturnsProperties.
+//
+//nolint:gochecknoglobals // hand-authored override table, mirrors the dialects map above
+var pveReturnsPropertyOverrides = map[string]map[string]*schema{
+	// GET /cluster/options documents every datacenter.cfg option as the
+	// property string a caller writes with PUT, but the handler returns
+	// the parsed configuration (pve-cluster's parse_datacenter_config):
+	// ten property-string options arrive as JSON objects keyed by their
+	// sub-options, and registered-tags arrives split into an array. A
+	// *string field would fail to decode any real cluster's response.
+	"GET /cluster/options": {
+		"crs":             {Type: schemaTypeObject},
+		"ha":              {Type: schemaTypeObject},
+		"migration":       {Type: schemaTypeObject},
+		"next-id":         {Type: schemaTypeObject},
+		"notify":          {Type: schemaTypeObject},
+		"replication":     {Type: schemaTypeObject},
+		"tag-style":       {Type: schemaTypeObject},
+		"u2f":             {Type: schemaTypeObject},
+		"user-tag-access": {Type: schemaTypeObject},
+		"webauthn":        {Type: schemaTypeObject},
+		"registered-tags": {Type: schemaTypeArray, Items: &schema{Type: schemaTypeString}},
+	},
+}
+
+// journalLinesSchema is the response shape of the journal endpoints on
+// every Proxmox product: a JSON array of pre-rendered log lines. Since
+// proxmox-mini-journalreader 1.7 the reader binary writes the whole
+// {"data":[...],"success":1} API envelope itself and the servers stream
+// its stdout straight through as the response body, so the data array is
+// still a list of strings; with structured=1 the entries are objects
+// instead, which callers decode from the raw response.
+//
+//nolint:gochecknoglobals // hand-authored override schema, read-only after init
+var journalLinesSchema = &schema{
+	Type:  schemaTypeArray,
+	Items: &schema{Type: schemaTypeString},
+	Description: "One pre-rendered log line per entry. With Structured set the server returns one object per entry " +
+		"instead, which this type cannot decode; fetch the same path through GetRawCtx and decode the data array yourself.",
+}
+
+// pveReturnsOverrides supplies the correct "returns" schema for PVE
+// endpoints whose vendored _data/apidoc.json entry is incomplete. The
+// journal entry matches the spec's array-of-string shape and only adds
+// the structured-mode caveat to the response doc.
+//
+//nolint:gochecknoglobals // hand-authored override table, read-only after init
+var pveReturnsOverrides = map[string]*schema{
+	keyNodesJournal: journalLinesSchema,
+}
+
+// pbsReturnsOverrides supplies the correct "returns" schema for PBS
+// endpoints whose vendored _data/pbs-apidoc.json entry is wrong. Consulted
+// in collectEndpoints exactly like pdmReturnsOverrides.
+//
+//nolint:gochecknoglobals // hand-authored override table, mirrors the dialects map above
+var pbsReturnsOverrides = map[string]*schema{
+	// PBS 4.2 turned the journal handler into an AsyncHttp streaming
+	// response (method DOWNLOAD in the apidoc) and the schema macro now
+	// emits "returns": {"type": "null"} for it. The body is unchanged:
+	// the standard envelope around an array of lines.
+	keyNodesJournal: journalLinesSchema,
+}
+
 // pdmReturnsOverrides supplies the correct "returns" schema for PDM
 // endpoints whose vendored _data/pdm-apidoc.json entry is wrong: either
 // "returns": {"type": "null"} on an endpoint that genuinely returns data
@@ -351,10 +435,7 @@ var pdmReturnsOverrides = map[string]*schema{
 		Type:  schemaTypeArray,
 		Items: &schema{Type: schemaTypeObject},
 	},
-	"GET /nodes/{node}/journal": {
-		Type:  schemaTypeArray,
-		Items: &schema{Type: schemaTypeString},
-	},
+	keyNodesJournal: journalLinesSchema,
 	// PDM-native; no PVE/PBS sibling apidoc entry exists to copy from.
 	"GET /auto-install/prepared/{id}": {
 		Type: schemaTypeObject,
@@ -459,6 +540,19 @@ type schema struct {
 	Minimum              json.RawMessage `json:"minimum,omitempty"`
 	Maximum              json.RawMessage `json:"maximum,omitempty"`
 	AdditionalProperties json.RawMessage `json:"additionalProperties,omitempty"`
+	// AllOf and OneOf carry composite parameter schemas. PVE 9.2's HA
+	// rule endpoints (pve-ha-manager 5.2) are the first to declare their
+	// parameters this way: an allOf of the common properties plus a
+	// oneOf with one variant per rule type, discriminated by
+	// TypeProperty. flattenCompositeParameters merges them back into a
+	// single Properties map before any emission code looks at them.
+	AllOf []*schema `json:"allOf,omitempty"`
+	OneOf []*schema `json:"oneOf,omitempty"`
+	// TypeProperty names the discriminator parameter selecting a OneOf
+	// variant ("type" for HA rules); TypePropertySchema is its schema.
+	TypeProperty       string  `json:"type-property,omitempty"`
+	InstanceType       string  `json:"instance-type,omitempty"`
+	TypePropertySchema *schema `json:"type-property-schema,omitempty"`
 }
 
 // endpoint is a fully resolved (path, verb) tuple ready to emit.
@@ -494,7 +588,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	endpoints := collectEndpoints(tree)
+	endpoints, err := collectEndpoints(tree)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "pvegen: collect endpoints: %v\n", err)
+		os.Exit(1)
+	}
+
 	byNS := groupByNamespace(endpoints)
 	wantNS := buildWantNS(nsList, byNS)
 
@@ -594,11 +693,16 @@ func loadSpec(path string) ([]*node, error) {
 
 // collectEndpoints walks the tree and returns one endpoint per
 // (path, verb). Output is sorted by (path, verb) for deterministic
-// generation.
-func collectEndpoints(tree []*node) []endpoint {
+// generation. Every entry of the active dialect's override tables must
+// match an endpoint in the tree, and every property override must name
+// a property the spec declares; otherwise an upstream rename would leave
+// the override silently dead, so the mismatch is returned as an error.
+func collectEndpoints(tree []*node) ([]endpoint, error) {
 	var (
-		out  []endpoint
-		walk func(*node)
+		out     []endpoint
+		errs    []error
+		walk    func(*node)
+		tracker = newOverrideTracker()
 	)
 
 	walk = func(treeNode *node) {
@@ -614,9 +718,9 @@ func collectEndpoints(tree []*node) []endpoint {
 		sort.Strings(verbs)
 
 		for _, verb := range verbs {
-			info := treeNode.Info[verb]
-			if override, ok := activeDialect.returnsOverrides[verb+" "+treeNode.Path]; ok {
-				info.Returns = override
+			info, err := tracker.apply(verb+" "+treeNode.Path, treeNode.Info[verb])
+			if err != nil {
+				errs = append(errs, err)
 			}
 
 			out = append(out, endpoint{
@@ -636,6 +740,12 @@ func collectEndpoints(tree []*node) []endpoint {
 		walk(root)
 	}
 
+	errs = append(errs, tracker.unused()...)
+
+	if len(errs) > 0 {
+		return nil, errors.Join(errs...)
+	}
+
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].Path != out[j].Path {
 			return out[i].Path < out[j].Path
@@ -644,7 +754,311 @@ func collectEndpoints(tree []*node) []endpoint {
 		return out[i].Verb < out[j].Verb
 	})
 
-	return out
+	return out, nil
+}
+
+// overrideTracker applies the active dialect's override tables to each
+// endpoint and records which entries were consumed, so collectEndpoints
+// can report the ones that matched nothing.
+type overrideTracker struct {
+	usedReturns map[string]bool
+	usedPatches map[string]bool
+}
+
+func newOverrideTracker() *overrideTracker {
+	return &overrideTracker{usedReturns: map[string]bool{}, usedPatches: map[string]bool{}}
+}
+
+// apply flattens composite schemas and substitutes the overrides keyed by
+// "VERB /path" into info. A property override that cannot be applied is
+// returned as an error naming the endpoint; info is returned as far as it
+// got so the caller can still list the endpoint.
+func (tracker *overrideTracker) apply(key string, info endpointInfo) (endpointInfo, error) {
+	info.Parameters = flattenComposite(info.Parameters)
+	info.Returns = flattenComposite(info.Returns)
+
+	if override, ok := activeDialect.returnsOverrides[key]; ok {
+		info.Returns = override
+		tracker.usedReturns[key] = true
+	}
+
+	patches, ok := activeDialect.returnsPropertyOverrides[key]
+	if !ok {
+		return info, nil
+	}
+
+	tracker.usedPatches[key] = true
+
+	patched, err := patchReturnsProperties(info.Returns, patches)
+	if err != nil {
+		return info, fmt.Errorf("%s: %w", key, err)
+	}
+
+	info.Returns = patched
+
+	return info, nil
+}
+
+// unused returns one error per override table entry no endpoint consumed,
+// in sorted key order.
+func (tracker *overrideTracker) unused() []error {
+	var errs []error
+
+	for _, key := range sortedKeys(activeDialect.returnsOverrides) {
+		if !tracker.usedReturns[key] {
+			errs = append(errs, fmt.Errorf("%w: returnsOverrides[%q]", errUnusedOverride, key))
+		}
+	}
+
+	for _, key := range sortedKeys(activeDialect.returnsPropertyOverrides) {
+		if !tracker.usedPatches[key] {
+			errs = append(errs, fmt.Errorf("%w: returnsPropertyOverrides[%q]", errUnusedOverride, key))
+		}
+	}
+
+	return errs
+}
+
+// sortedKeys returns the keys of table in sorted order so error output
+// and every other consumer stays deterministic.
+func sortedKeys[V any](table map[string]V) []string {
+	keys := make([]string, 0, len(table))
+	for key := range table {
+		keys = append(keys, key)
+	}
+
+	sort.Strings(keys)
+
+	return keys
+}
+
+// patchReturnsProperties returns a copy of returns whose named properties
+// carry the patch schemas' Type, Items, and Properties, inheriting the
+// spec's Description and Optional when the patch leaves them empty. With
+// no patches the input is returned untouched. A nil or non-object
+// returns schema, or a patch naming a property the spec does not
+// declare, is an error: either means the spec moved out from under the
+// override, and silently inventing the property would hide that.
+func patchReturnsProperties(returns *schema, patches map[string]*schema) (*schema, error) {
+	if len(patches) == 0 {
+		return returns, nil
+	}
+
+	if returns == nil || returns.Type != schemaTypeObject {
+		return nil, errPatchTarget
+	}
+
+	patched := *returns
+	patched.Properties = make(map[string]*schema, len(returns.Properties))
+
+	for name, prop := range returns.Properties {
+		patched.Properties[name] = prop
+	}
+
+	for _, name := range sortedKeys(patches) {
+		orig, ok := returns.Properties[name]
+		if !ok {
+			return nil, fmt.Errorf("%w: %q", errPatchProperty, name)
+		}
+
+		merged := *patches[name]
+
+		if merged.Description == "" {
+			merged.Description = orig.Description
+		}
+
+		if len(merged.Optional) == 0 {
+			merged.Optional = orig.Optional
+		}
+
+		patched.Properties[name] = &merged
+	}
+
+	return &patched, nil
+}
+
+// flattenComposite returns objSchema with any allOf/oneOf composition
+// merged into a single flat Properties map, which is the only shape the
+// emission code understands. Plain Properties declared next to the
+// composition are kept. A schema with no composition is returned
+// untouched. Both parameters and returns pass through here, so a
+// response that moves to this encoding upstream keeps its fields too.
+//
+// The merge rules mirror what the PVE API server enforces on the wire:
+//
+//   - allOf: every member's properties apply, so a property required by
+//     any member is required in the flattened struct.
+//   - oneOf: the request carries exactly one variant, so the flattened
+//     struct is the union of every variant's properties. A property is
+//     required only when every variant declares it required; a property
+//     missing from, or optional in, any variant becomes optional. The
+//     discriminator named by TypeProperty is added from
+//     TypePropertySchema and forced required, replacing any variant's
+//     own declaration of it, so the caller can always select the variant.
+//
+// Where two members declare the same property, the required declaration
+// wins for allOf and the first variant's schema (with optionality
+// recomputed) wins for oneOf. When variants describe the same property
+// differently, the descriptions are concatenated, each labelled with the
+// variant's discriminator value, so the emitted field doc covers every
+// meaning.
+func flattenComposite(objSchema *schema) *schema {
+	if objSchema == nil || (len(objSchema.AllOf) == 0 && len(objSchema.OneOf) == 0) {
+		return objSchema
+	}
+
+	flat := *objSchema
+	flat.Properties = compositeProperties(objSchema)
+	flat.AllOf = nil
+	flat.OneOf = nil
+	flat.TypeProperty = ""
+	flat.TypePropertySchema = nil
+
+	if flat.Type == "" {
+		flat.Type = schemaTypeObject
+	}
+
+	return &flat
+}
+
+// compositeProperties recursively resolves the property set of a schema
+// that may combine plain Properties with AllOf members and OneOf variants.
+// See flattenComposite for the merge rules.
+func compositeProperties(objSchema *schema) map[string]*schema {
+	props := map[string]*schema{}
+	if objSchema == nil {
+		return props
+	}
+
+	for name, prop := range objSchema.Properties {
+		props[name] = prop
+	}
+
+	for _, member := range objSchema.AllOf {
+		for name, prop := range compositeProperties(member) {
+			mergeRequiredWins(props, name, prop)
+		}
+	}
+
+	if len(objSchema.OneOf) > 0 {
+		for name, prop := range oneOfUnion(objSchema.OneOf, objSchema.TypeProperty) {
+			mergeRequiredWins(props, name, prop)
+		}
+	}
+
+	if objSchema.TypeProperty != "" && objSchema.TypePropertySchema != nil {
+		discriminator := *objSchema.TypePropertySchema
+		discriminator.Optional = nil
+		props[objSchema.TypeProperty] = &discriminator
+	}
+
+	return props
+}
+
+// mergeRequiredWins stores prop under name unless an existing entry is
+// already required while prop is optional: the stricter declaration is the
+// one the server enforces when both apply.
+func mergeRequiredWins(props map[string]*schema, name string, prop *schema) {
+	existing, exists := props[name]
+	if exists && !isOptional(existing) && isOptional(prop) {
+		return
+	}
+
+	props[name] = prop
+}
+
+// oneOfUnion returns the union of every variant's properties with
+// optionality recomputed: required only when present and required in all
+// variants. The first variant declaring a property supplies its schema;
+// when that schema must be relaxed to optional, or its description
+// extended with another variant's differing description, a copy is
+// stored so the spec tree itself is never mutated. typeProperty names the
+// discriminator and, together with each variant's InstanceType, labels
+// the merged descriptions.
+func oneOfUnion(variants []*schema, typeProperty string) map[string]*schema {
+	resolved := make([]map[string]*schema, 0, len(variants))
+	for _, variant := range variants {
+		resolved = append(resolved, compositeProperties(variant))
+	}
+
+	union := map[string]*schema{}
+
+	for _, variantProps := range resolved {
+		for name, prop := range variantProps {
+			if _, seen := union[name]; seen {
+				continue
+			}
+
+			requiredEverywhere := true
+
+			for _, other := range resolved {
+				otherProp, present := other[name]
+				if !present || isOptional(otherProp) {
+					requiredEverywhere = false
+
+					break
+				}
+			}
+
+			if requiredEverywhere || isOptional(prop) {
+				union[name] = prop
+
+				continue
+			}
+
+			relaxed := *prop
+			relaxed.Optional = schemaOptional
+			union[name] = &relaxed
+		}
+	}
+
+	for name, prop := range union {
+		if desc := variantDescriptions(variants, resolved, name, typeProperty); desc != prop.Description {
+			described := *prop
+			described.Description = desc
+			union[name] = &described
+		}
+	}
+
+	return union
+}
+
+// variantDescriptions returns the description of property name across
+// the oneOf variants: the single shared description when every variant
+// agrees, otherwise each distinct description in variant order, prefixed
+// with "With <typeProperty>=<instance-type>:" where the variant is
+// labelled.
+func variantDescriptions(variants []*schema, resolved []map[string]*schema, name, typeProperty string) string {
+	var distinct, labelled []string
+
+	for idx, variantProps := range resolved {
+		prop, ok := variantProps[name]
+		if !ok || strings.TrimSpace(prop.Description) == "" {
+			continue
+		}
+
+		desc := strings.TrimSpace(prop.Description)
+		if slices.Contains(distinct, desc) {
+			continue
+		}
+
+		distinct = append(distinct, desc)
+
+		if typeProperty != "" && variants[idx].InstanceType != "" {
+			desc = "With " + typeProperty + "=" + variants[idx].InstanceType + ": " + desc
+		}
+
+		labelled = append(labelled, desc)
+	}
+
+	switch len(distinct) {
+	case 0:
+		return ""
+	case 1:
+		return distinct[0]
+	default:
+		return strings.Join(labelled, " ")
+	}
 }
 
 // namespaceOf returns the top-level path segment for grouping. For
@@ -1503,6 +1917,7 @@ func renderResponseType(builder *strings.Builder, endpt endpoint) {
 		}
 
 		fmt.Fprintf(builder, "// %s mirrors the shape returned by %s %s.\n", name, endpt.Verb, endpt.Path)
+		writeResponseDescription(builder, ret)
 		fmt.Fprintf(builder, "type %s struct {\n", name)
 		builder.WriteString(body)
 		builder.WriteString("}\n\n")
@@ -1517,10 +1932,21 @@ func renderResponseType(builder *strings.Builder, endpt endpoint) {
 		}
 
 		fmt.Fprintf(builder, "// %s mirrors the shape returned by %s %s.\n", name, endpt.Verb, endpt.Path)
+		writeResponseDescription(builder, ret)
 		fmt.Fprintf(builder, "type %s []%s\n\n", name, inner)
 	default:
 		fmt.Fprintf(builder, "// %s is the raw JSON returned by %s %s.\n", name, endpt.Verb, endpt.Path)
+		writeResponseDescription(builder, ret)
 		fmt.Fprintf(builder, "type %s = json.RawMessage\n\n", name)
+	}
+}
+
+// writeResponseDescription adds the returns schema's own description, when
+// the spec or an override supplies one, as a second doc line on the
+// response type so shape caveats reach the caller's editor.
+func writeResponseDescription(builder *strings.Builder, ret *schema) {
+	if desc := escapeDoc(ret.Description); desc != "" {
+		fmt.Fprintf(builder, "// %s\n", desc)
 	}
 }
 

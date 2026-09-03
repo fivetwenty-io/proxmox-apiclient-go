@@ -217,6 +217,7 @@ func (s *service) ListAccess(ctx context.Context) error {
 }
 
 // ListAccessAdResponse mirrors the shape returned by GET /config/access/ad.
+// List of configured AD realms.
 type ListAccessAdResponse []json.RawMessage
 
 // ListAccessAd implements Service.ListAccessAd. GET /config/access/ad.
@@ -352,6 +353,7 @@ func (s *service) DeleteAccessAd(ctx context.Context, realm string, params *Dele
 }
 
 // GetAccessAdResponse mirrors the shape returned by GET /config/access/ad/{realm}.
+// AD realm configuration properties.
 type GetAccessAdResponse struct {
 	// BaseDn LDAP Domain
 	BaseDn *string `json:"base-dn,omitempty"`
@@ -483,6 +485,7 @@ func (s *service) UpdateAccessAd(ctx context.Context, realm string, params *Upda
 }
 
 // ListAccessLdapResponse mirrors the shape returned by GET /config/access/ldap.
+// List of configured LDAP realms.
 type ListAccessLdapResponse []json.RawMessage
 
 // ListAccessLdap implements Service.ListAccessLdap. GET /config/access/ldap.
@@ -620,6 +623,7 @@ func (s *service) DeleteAccessLdap(ctx context.Context, realm string, params *De
 }
 
 // GetAccessLdapResponse mirrors the shape returned by GET /config/access/ldap/{realm}.
+// LDAP configuration properties.
 type GetAccessLdapResponse struct {
 	// BaseDn LDAP Domain
 	BaseDn string `json:"base-dn"`
@@ -755,6 +759,7 @@ func (s *service) UpdateAccessLdap(ctx context.Context, realm string, params *Up
 }
 
 // ListAccessOpenidResponse mirrors the shape returned by GET /config/access/openid.
+// List of configured OpenId realms.
 type ListAccessOpenidResponse []json.RawMessage
 
 // ListAccessOpenid implements Service.ListAccessOpenid. GET /config/access/openid.
@@ -882,6 +887,7 @@ func (s *service) DeleteAccessOpenid(ctx context.Context, realm string, params *
 }
 
 // GetAccessOpenidResponse mirrors the shape returned by GET /config/access/openid/{realm}.
+// OpenID configuration properties.
 type GetAccessOpenidResponse struct {
 	// AcrValues OpenID ACR List
 	AcrValues *string `json:"acr-values,omitempty"`
@@ -997,6 +1003,7 @@ func (s *service) UpdateAccessOpenid(ctx context.Context, realm string, params *
 }
 
 // ListAccessPamResponse mirrors the shape returned by GET /config/access/pam.
+// Built-in PAM realm configuration properties.
 type ListAccessPamResponse struct {
 	// Comment Comment.
 	Comment *string `json:"comment,omitempty"`
@@ -1050,6 +1057,7 @@ type UpdateAccessPamParams struct {
 }
 
 // UpdateAccessPamResponse mirrors the shape returned by PUT /config/access/pam.
+// Built-in PAM realm configuration properties.
 type UpdateAccessPamResponse struct {
 	// Comment Comment.
 	Comment *string `json:"comment,omitempty"`
@@ -1103,6 +1111,7 @@ func (s *service) UpdateAccessPam(ctx context.Context, params *UpdateAccessPamPa
 }
 
 // ListAccessPdmResponse mirrors the shape returned by GET /config/access/pdm.
+// Built-in Proxmox Datacenter Manager realm configuration properties.
 type ListAccessPdmResponse struct {
 	// Comment Comment.
 	Comment *string `json:"comment,omitempty"`
@@ -1156,6 +1165,7 @@ type UpdateAccessPdmParams struct {
 }
 
 // UpdateAccessPdmResponse mirrors the shape returned by PUT /config/access/pdm.
+// Built-in Proxmox Datacenter Manager realm configuration properties.
 type UpdateAccessPdmResponse struct {
 	// Comment Comment.
 	Comment *string `json:"comment,omitempty"`
@@ -1227,6 +1237,7 @@ func (s *service) ListAccessTfa(ctx context.Context) error {
 }
 
 // ListAccessTfaWebauthnResponse mirrors the shape returned by GET /config/access/tfa/webauthn.
+// Server side webauthn server configuration.
 type ListAccessTfaWebauthnResponse struct {
 	// AllowSubdomains If an `origin` is specified, this specifies whether subdomains should be considered valid as well.  May be changed at any time.  Defaults to `true`.
 	AllowSubdomains *client.PVEBool `json:"allow-subdomains,omitempty"`
@@ -1333,6 +1344,7 @@ func (s *service) ListAcme(ctx context.Context) error {
 }
 
 // ListAcmeAccountResponse mirrors the shape returned by GET /config/acme/account.
+// List of ACME accounts.
 type ListAcmeAccountResponse []json.RawMessage
 
 // ListAcmeAccount implements Service.ListAcmeAccount. GET /config/acme/account.
@@ -1382,6 +1394,7 @@ type CreateAcmeAccountParams struct {
 }
 
 // CreateAcmeAccountResponse is the raw JSON returned by POST /config/acme/account.
+// Unique Process/Task Identifier
 type CreateAcmeAccountResponse = json.RawMessage
 
 // CreateAcmeAccount implements Service.CreateAcmeAccount. POST /config/acme/account.
@@ -1433,6 +1446,7 @@ type DeleteAcmeAccountParams struct {
 }
 
 // DeleteAcmeAccountResponse is the raw JSON returned by DELETE /config/acme/account/{name}.
+// Unique Process/Task Identifier
 type DeleteAcmeAccountResponse = json.RawMessage
 
 // DeleteAcmeAccount implements Service.DeleteAcmeAccount. DELETE /config/acme/account/{name}.
@@ -1478,6 +1492,7 @@ func (s *service) DeleteAcmeAccount(ctx context.Context, name string, params *De
 }
 
 // GetAcmeAccountResponse mirrors the shape returned by GET /config/acme/account/{name}.
+// ACME Account information.  This is what we return via the API.
 type GetAcmeAccountResponse struct {
 	// Account ACME Account data. This is the part of the account returned from and possibly sent to the ACME provider. Some fields may be uptdated by the user via a request to the account location, others may not be changed.
 	Account json.RawMessage `json:"account"`
@@ -1525,6 +1540,7 @@ type UpdateAcmeAccountParams struct {
 }
 
 // UpdateAcmeAccountResponse is the raw JSON returned by PUT /config/acme/account/{name}.
+// Unique Process/Task Identifier
 type UpdateAcmeAccountResponse = json.RawMessage
 
 // UpdateAcmeAccount implements Service.UpdateAcmeAccount. PUT /config/acme/account/{name}.
@@ -1570,6 +1586,7 @@ func (s *service) UpdateAcmeAccount(ctx context.Context, name string, params *Up
 }
 
 // ListAcmeChallengeSchemaResponse mirrors the shape returned by GET /config/acme/challenge-schema.
+// ACME Challenge Plugin Shema.
 type ListAcmeChallengeSchemaResponse []json.RawMessage
 
 // ListAcmeChallengeSchema implements Service.ListAcmeChallengeSchema. GET /config/acme/challenge-schema.
@@ -1603,6 +1620,7 @@ func (s *service) ListAcmeChallengeSchema(ctx context.Context) (*ListAcmeChallen
 }
 
 // ListAcmeDirectoriesResponse mirrors the shape returned by GET /config/acme/directories.
+// List of known ACME directories.
 type ListAcmeDirectoriesResponse []json.RawMessage
 
 // ListAcmeDirectories implements Service.ListAcmeDirectories. GET /config/acme/directories.
@@ -1636,6 +1654,7 @@ func (s *service) ListAcmeDirectories(ctx context.Context) (*ListAcmeDirectories
 }
 
 // ListAcmePluginsResponse mirrors the shape returned by GET /config/acme/plugins.
+// List of ACME plugin configurations.
 type ListAcmePluginsResponse []json.RawMessage
 
 // ListAcmePlugins implements Service.ListAcmePlugins. GET /config/acme/plugins.
@@ -1733,6 +1752,7 @@ func (s *service) DeleteAcmePlugins(ctx context.Context, id string) error {
 }
 
 // GetAcmePluginsResponse mirrors the shape returned by GET /config/acme/plugins/{id}.
+// ACME plugin config. The API's format is inherited from PVE/PMG:
 type GetAcmePluginsResponse struct {
 	// Api DNS Api name.
 	Api *string `json:"api,omitempty"`
@@ -1830,6 +1850,7 @@ type ListAcmeTosParams struct {
 }
 
 // ListAcmeTosResponse is the raw JSON returned by GET /config/acme/tos.
+// The ACME Directory's ToS URL, if any.
 type ListAcmeTosResponse = json.RawMessage
 
 // ListAcmeTos implements Service.ListAcmeTos. GET /config/acme/tos.
@@ -1875,6 +1896,7 @@ func (s *service) ListAcmeTos(ctx context.Context, params *ListAcmeTosParams) (*
 }
 
 // ListCertificateResponse mirrors the shape returned by GET /config/certificate.
+// Certificate configuration.
 type ListCertificateResponse struct {
 	// Acme The acme account to use.
 	Acme *string `json:"acme,omitempty"`
@@ -1970,6 +1992,7 @@ func (s *service) UpdateCertificate(ctx context.Context, params *UpdateCertifica
 }
 
 // ListNotesResponse is the raw JSON returned by GET /config/notes.
+// Notes, utf8 encoded markdown file.
 type ListNotesResponse = json.RawMessage
 
 // ListNotes implements Service.ListNotes. GET /config/notes.
@@ -2041,6 +2064,7 @@ func (s *service) UpdateNotes(ctx context.Context, params *UpdateNotesParams) er
 }
 
 // ListViewsResponse mirrors the shape returned by GET /config/views.
+// List of views.
 type ListViewsResponse []json.RawMessage
 
 // ListViews implements Service.ListViews. GET /config/views.
@@ -2156,6 +2180,7 @@ func (s *service) DeleteViews(ctx context.Context, id string, params *DeleteView
 }
 
 // GetViewsResponse mirrors the shape returned by GET /config/views/{id}.
+// View definition
 type GetViewsResponse struct {
 	// Exclude List of filter rules.
 	Exclude []string `json:"exclude,omitempty"`

@@ -267,6 +267,7 @@ type ListAptChangelogParams struct {
 }
 
 // ListAptChangelogResponse is the raw JSON returned by GET /nodes/{node}/apt/changelog.
+// The Package changelog.
 type ListAptChangelogResponse = json.RawMessage
 
 // ListAptChangelog implements Service.ListAptChangelog. GET /nodes/{node}/apt/changelog.
@@ -312,6 +313,7 @@ func (s *service) ListAptChangelog(ctx context.Context, node string, params *Lis
 }
 
 // ListAptRepositoriesResponse mirrors the shape returned by GET /nodes/{node}/apt/repositories.
+// Result from parsing the APT repository files in /etc/apt/.
 type ListAptRepositoriesResponse struct {
 	// Digest Prevent changes if current configuration file has different SHA256 digest. This can be used to prevent concurrent modifications.
 	Digest string `json:"digest"`
@@ -435,6 +437,7 @@ func (s *service) UpdateAptRepositories(ctx context.Context, node string, params
 }
 
 // ListAptUpdateResponse mirrors the shape returned by GET /nodes/{node}/apt/update.
+// A list of packages with available updates.
 type ListAptUpdateResponse []json.RawMessage
 
 // ListAptUpdate implements Service.ListAptUpdate. GET /nodes/{node}/apt/update.
@@ -476,6 +479,7 @@ type CreateAptUpdateParams struct {
 }
 
 // CreateAptUpdateResponse is the raw JSON returned by POST /nodes/{node}/apt/update.
+// Unique Process/Task Identifier
 type CreateAptUpdateResponse = json.RawMessage
 
 // CreateAptUpdate implements Service.CreateAptUpdate. POST /nodes/{node}/apt/update.
@@ -521,6 +525,7 @@ func (s *service) CreateAptUpdate(ctx context.Context, node string, params *Crea
 }
 
 // ListAptVersionsResponse mirrors the shape returned by GET /nodes/{node}/apt/versions.
+// List of more relevant packages.
 type ListAptVersionsResponse []json.RawMessage
 
 // ListAptVersions implements Service.ListAptVersions. GET /nodes/{node}/apt/versions.
@@ -596,6 +601,7 @@ type CreateCertificatesAcmeCertificateParams struct {
 }
 
 // CreateCertificatesAcmeCertificateResponse is the raw JSON returned by POST /nodes/{node}/certificates/acme/certificate.
+// Unique Process/Task Identifier
 type CreateCertificatesAcmeCertificateResponse = json.RawMessage
 
 // CreateCertificatesAcmeCertificate implements Service.CreateCertificatesAcmeCertificate. POST /nodes/{node}/certificates/acme/certificate.
@@ -647,6 +653,7 @@ type UpdateCertificatesAcmeCertificateParams struct {
 }
 
 // UpdateCertificatesAcmeCertificateResponse is the raw JSON returned by PUT /nodes/{node}/certificates/acme/certificate.
+// Unique Process/Task Identifier
 type UpdateCertificatesAcmeCertificateResponse = json.RawMessage
 
 // UpdateCertificatesAcmeCertificate implements Service.UpdateCertificatesAcmeCertificate. PUT /nodes/{node}/certificates/acme/certificate.
@@ -740,6 +747,7 @@ type CreateCertificatesCustomParams struct {
 }
 
 // CreateCertificatesCustomResponse mirrors the shape returned by POST /nodes/{node}/certificates/custom.
+// List of certificate infos.
 type CreateCertificatesCustomResponse []json.RawMessage
 
 // CreateCertificatesCustom implements Service.CreateCertificatesCustom. POST /nodes/{node}/certificates/custom.
@@ -785,6 +793,7 @@ func (s *service) CreateCertificatesCustom(ctx context.Context, node string, par
 }
 
 // ListCertificatesInfoResponse mirrors the shape returned by GET /nodes/{node}/certificates/info.
+// List of certificate infos.
 type ListCertificatesInfoResponse []json.RawMessage
 
 // ListCertificatesInfo implements Service.ListCertificatesInfo. GET /nodes/{node}/certificates/info.
@@ -818,6 +827,7 @@ func (s *service) ListCertificatesInfo(ctx context.Context, node string) (*ListC
 }
 
 // ListConfigResponse mirrors the shape returned by GET /nodes/{node}/config.
+// Node specific configuration.
 type ListConfigResponse struct {
 	// CiphersTls12 OpenSSL cipher list used by the api server for TLS <= 1.2
 	CiphersTls12 *string `json:"ciphers-tls-1.2,omitempty"`
@@ -909,6 +919,7 @@ func (s *service) UpdateConfig(ctx context.Context, node string, params *UpdateC
 }
 
 // ListDnsResponse mirrors the shape returned by GET /nodes/{node}/dns.
+// DNS configuration with digest.
 type ListDnsResponse struct {
 	// Digest Prevent changes if current configuration file has different SHA256 digest. This can be used to prevent concurrent modifications.
 	Digest string `json:"digest"`
@@ -1030,6 +1041,7 @@ type ListJournalParams struct {
 }
 
 // ListJournalResponse mirrors the shape returned by GET /nodes/{node}/journal.
+// One pre-rendered log line per entry. With Structured set the server returns one object per entry instead, which this type cannot decode; fetch the same path through GetRawCtx and decode the data array yourself.
 type ListJournalResponse []string
 
 // ListJournal implements Service.ListJournal. GET /nodes/{node}/journal.
@@ -1093,6 +1105,7 @@ func (s *service) DeleteNetwork(ctx context.Context, node string) error {
 }
 
 // ListNetworkResponse mirrors the shape returned by GET /nodes/{node}/network.
+// List network devices (with config digest).
 type ListNetworkResponse []json.RawMessage
 
 // ListNetwork implements Service.ListNetwork. GET /nodes/{node}/network.
@@ -1200,6 +1213,7 @@ func (s *service) CreateNetwork(ctx context.Context, node string, params *Create
 }
 
 // UpdateNetworkResponse is the raw JSON returned by PUT /nodes/{node}/network.
+// Unique Process/Task Identifier
 type UpdateNetworkResponse = json.RawMessage
 
 // UpdateNetwork implements Service.UpdateNetwork. PUT /nodes/{node}/network.
@@ -1269,6 +1283,7 @@ func (s *service) DeleteNetwork2(ctx context.Context, node string, iface string,
 }
 
 // GetNetworkResponse mirrors the shape returned by GET /nodes/{node}/network/{iface}.
+// Network Interface configuration
 type GetNetworkResponse struct {
 	// Active Interface is active (UP)
 	Active client.PVEBool `json:"active"`
@@ -1426,6 +1441,7 @@ func (s *service) UpdateNetwork2(ctx context.Context, node string, iface string,
 }
 
 // ListReportResponse is the raw JSON returned by GET /nodes/{node}/report.
+// The system report for this PDM node.
 type ListReportResponse = json.RawMessage
 
 // ListReport implements Service.ListReport. GET /nodes/{node}/report.
@@ -1467,6 +1483,7 @@ type ListRrddataParams struct {
 }
 
 // ListRrddataResponse mirrors the shape returned by GET /nodes/{node}/rrddata.
+// An array of RRD data points.
 type ListRrddataResponse []json.RawMessage
 
 // ListRrddata implements Service.ListRrddata. GET /nodes/{node}/rrddata.
@@ -1554,6 +1571,7 @@ type ListSdnVnetsMacVrfParams struct {
 }
 
 // ListSdnVnetsMacVrfResponse mirrors the shape returned by GET /nodes/{node}/sdn/vnets/{vnet}/mac-vrf.
+// Object.
 type ListSdnVnetsMacVrfResponse struct {
 	// Ip The IP address of the MAC VRF entry.
 	Ip string `json:"ip"`
@@ -1629,6 +1647,7 @@ type ListSdnZonesIpVrfParams struct {
 }
 
 // ListSdnZonesIpVrfResponse mirrors the shape returned by GET /nodes/{node}/sdn/zones/{zone}/ip-vrf.
+// Object.
 type ListSdnZonesIpVrfResponse struct {
 	// Ip The CIDR of the route table entry.
 	Ip string `json:"ip"`
@@ -1682,6 +1701,7 @@ func (s *service) ListSdnZonesIpVrf(ctx context.Context, node string, zone strin
 }
 
 // ListStatusResponse mirrors the shape returned by GET /nodes/{node}/status.
+// The Node status
 type ListStatusResponse struct {
 	// BootInfo Holds the Bootmodes
 	BootInfo json.RawMessage `json:"boot-info"`
@@ -1775,6 +1795,7 @@ func (s *service) CreateStatus(ctx context.Context, node string, params *CreateS
 }
 
 // ListSubscriptionResponse mirrors the shape returned by GET /nodes/{node}/subscription.
+// Proxmox subscription information
 type ListSubscriptionResponse struct {
 	// Checktime timestamp of the last check done
 	Checktime *client.PVEInt `json:"checktime,omitempty"`
@@ -1860,6 +1881,7 @@ type ListSyslogParams struct {
 }
 
 // ListSyslogResponse mirrors the shape returned by GET /nodes/{node}/syslog.
+// Returns a list of syslog entries.
 type ListSyslogResponse []json.RawMessage
 
 // ListSyslog implements Service.ListSyslog. GET /nodes/{node}/syslog.
@@ -1927,6 +1949,7 @@ type ListTasksParams struct {
 }
 
 // ListTasksResponse mirrors the shape returned by GET /nodes/{node}/tasks.
+// A list of tasks.
 type ListTasksResponse []json.RawMessage
 
 // ListTasks implements Service.ListTasks. GET /nodes/{node}/tasks.
@@ -2065,6 +2088,7 @@ func (s *service) ListTasksLog(ctx context.Context, node string, upid string, pa
 }
 
 // ListTasksStatusResponse mirrors the shape returned by GET /nodes/{node}/tasks/{upid}/status.
+// Task status information.
 type ListTasksStatusResponse struct {
 	// Exitstatus 'OK', 'Error: <msg>', or 'unknown'.
 	Exitstatus *string `json:"exitstatus,omitempty"`
@@ -2126,6 +2150,7 @@ type CreateTermproxyParams struct {
 }
 
 // CreateTermproxyResponse mirrors the shape returned by POST /nodes/{node}/termproxy.
+// Object with the user, ticket, port and upid
 type CreateTermproxyResponse struct {
 	Port   string `json:"port"`
 	Ticket string `json:"ticket"`
@@ -2175,6 +2200,7 @@ func (s *service) CreateTermproxy(ctx context.Context, node string, params *Crea
 }
 
 // ListTimeResponse mirrors the shape returned by GET /nodes/{node}/time.
+// Server time and timezone.
 type ListTimeResponse struct {
 	// Localtime Seconds since 1970-01-01 00:00:00 UTC. (local time)
 	Localtime client.PVEInt `json:"localtime"`

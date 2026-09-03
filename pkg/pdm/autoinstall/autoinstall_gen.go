@@ -114,6 +114,7 @@ type CreateAnswerParams struct {
 }
 
 // CreateAnswerResponse mirrors the shape returned by POST /auto-install/answer.
+// Top-level answer file structure, describing all possible options for an automated installation.
 type CreateAnswerResponse struct {
 	// DiskSetup Disk configuration for the target installation.
 	DiskSetup json.RawMessage `json:"disk-setup"`
@@ -204,6 +205,7 @@ func (s *service) CreateAnswer(ctx context.Context, params *CreateAnswerParams) 
 }
 
 // ListInstallationsResponse mirrors the shape returned by GET /auto-install/installations.
+// List of all automated installations.
 type ListInstallationsResponse []json.RawMessage
 
 // ListInstallations implements Service.ListInstallations. GET /auto-install/installations.
@@ -391,6 +393,7 @@ func (s *service) CreateInstallationsPostHook(ctx context.Context, uuid string, 
 }
 
 // ListPreparedResponse mirrors the shape returned by GET /auto-install/prepared.
+// List of prepared auto-installer answer configurations.
 type ListPreparedResponse []json.RawMessage
 
 // ListPrepared implements Service.ListPrepared. GET /auto-install/prepared.
@@ -488,6 +491,7 @@ type CreatePreparedParams struct {
 }
 
 // CreatePreparedResponse mirrors the shape returned by POST /auto-install/prepared.
+// Result when creating a new installation configuration.
 type CreatePreparedResponse struct {
 	// Config Configuration describing an automated installation.  Certain fields support simple templating via [MiniJinja]. Currently, following fields will resolve MiniJinja expressions upon instantiation of an answer:  * `fqdn` * `mailto` * `cidr` * `gateway` * `dns`  [MiniJinja]: https://docs.rs/minijinja/
 	Config json.RawMessage `json:"config"`
@@ -689,6 +693,7 @@ type UpdatePreparedParams struct {
 }
 
 // UpdatePreparedResponse mirrors the shape returned by PUT /auto-install/prepared/{id}.
+// Result when creating a new installation configuration.
 type UpdatePreparedResponse struct {
 	// Config Configuration describing an automated installation.  Certain fields support simple templating via [MiniJinja]. Currently, following fields will resolve MiniJinja expressions upon instantiation of an answer:  * `fqdn` * `mailto` * `cidr` * `gateway` * `dns`  [MiniJinja]: https://docs.rs/minijinja/
 	Config json.RawMessage `json:"config"`
@@ -773,6 +778,7 @@ func (s *service) UpdatePrepared(ctx context.Context, id string, params *UpdateP
 }
 
 // ListTokensResponse mirrors the shape returned by GET /auto-install/tokens.
+// List of tokens for authenticating automated installations requests.
 type ListTokensResponse []json.RawMessage
 
 // ListTokens implements Service.ListTokens. GET /auto-install/tokens.
@@ -818,6 +824,7 @@ type CreateTokensParams struct {
 }
 
 // CreateTokensResponse mirrors the shape returned by POST /auto-install/tokens.
+// Result when creating a new token.
 type CreateTokensResponse struct {
 	// Secret The secret value itself.
 	Secret string `json:"secret"`
@@ -901,6 +908,7 @@ type UpdateTokensParams struct {
 }
 
 // UpdateTokensResponse mirrors the shape returned by PUT /auto-install/tokens/{id}.
+// Result when updating a new token.
 type UpdateTokensResponse struct {
 	// Secret The secret, if a new one was requested to be generated.
 	Secret *string `json:"secret,omitempty"`

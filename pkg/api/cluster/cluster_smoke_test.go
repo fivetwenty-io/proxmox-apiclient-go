@@ -818,6 +818,26 @@ func TestGenerated_Cluster_Methods(t *testing.T) {
 			t.Errorf("ListCephMetadata: expected error for nil context, got nil")
 		}
 	})
+	t.Run("CreateCephRestartBulk", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateCephRestartBulk(ctx, &cluster.CreateCephRestartBulkParams{ServiceType: "sample-service-type"})
+		if err != nil {
+			t.Fatalf("CreateCephRestartBulk: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateCephRestartBulk: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/cluster/ceph/restart-bulk")
+		assertParamValue(t, got.form, "service-type", "sample-service-type")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateCephRestartBulk(nilCtx, &cluster.CreateCephRestartBulkParams{ServiceType: "sample-service-type"}); err == nil {
+			t.Errorf("CreateCephRestartBulk: expected error for nil context, got nil")
+		}
+	})
 	t.Run("ListCephStatus", func(t *testing.T) {
 		harness.set(http.StatusOK, `{"data":{},"success":1}`)
 

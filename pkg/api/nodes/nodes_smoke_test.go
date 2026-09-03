@@ -1170,6 +1170,25 @@ func TestGenerated_Nodes_Methods(t *testing.T) {
 			t.Errorf("ListCephPoolStatus: expected error for nil context, got nil")
 		}
 	})
+	t.Run("ListCephReleases", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListCephReleases(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListCephReleases: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListCephReleases: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/ceph/releases")
+
+		var nilCtx context.Context
+		if _, err := svc.ListCephReleases(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListCephReleases: expected error for nil context, got nil")
+		}
+	})
 	t.Run("CreateCephRestart", func(t *testing.T) {
 		harness.set(http.StatusOK, `{"data":{},"success":1}`)
 
@@ -1187,6 +1206,26 @@ func TestGenerated_Nodes_Methods(t *testing.T) {
 		var nilCtx context.Context
 		if _, err := svc.CreateCephRestart(nilCtx, "sample-node", &nodes.CreateCephRestartParams{}); err == nil {
 			t.Errorf("CreateCephRestart: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateCephRestartBulk", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.CreateCephRestartBulk(ctx, "sample-node", &nodes.CreateCephRestartBulkParams{ServiceType: "sample-service-type"})
+		if err != nil {
+			t.Fatalf("CreateCephRestartBulk: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("CreateCephRestartBulk: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/nodes/sample-node/ceph/restart-bulk")
+		assertParamValue(t, got.form, "service-type", "sample-service-type")
+
+		var nilCtx context.Context
+		if _, err := svc.CreateCephRestartBulk(nilCtx, "sample-node", &nodes.CreateCephRestartBulkParams{ServiceType: "sample-service-type"}); err == nil {
+			t.Errorf("CreateCephRestartBulk: expected error for nil context, got nil")
 		}
 	})
 	t.Run("ListCephRules", func(t *testing.T) {

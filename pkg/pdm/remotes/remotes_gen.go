@@ -115,6 +115,7 @@ func (s *service) ListRemotes(ctx context.Context) error {
 }
 
 // ListMetricCollectionStatusResponse mirrors the shape returned by GET /remotes/metric-collection/status.
+// A list of metric collection statuses.
 type ListMetricCollectionStatusResponse []json.RawMessage
 
 // ListMetricCollectionStatus implements Service.ListMetricCollectionStatus. GET /remotes/metric-collection/status.
@@ -184,6 +185,7 @@ func (s *service) CreateMetricCollectionTrigger(ctx context.Context, params *Cre
 }
 
 // ListRemoteResponse mirrors the shape returned by GET /remotes/remote.
+// The list of configured remotes.
 type ListRemoteResponse []json.RawMessage
 
 // ListRemote implements Service.ListRemote. GET /remotes/remote.
@@ -365,6 +367,7 @@ func (s *service) UpdateRemote(ctx context.Context, id string, params *UpdateRem
 }
 
 // ListRemoteConfigResponse mirrors the shape returned by GET /remotes/remote/{id}/config.
+// The information required to connect to a remote instance.
 type ListRemoteConfigResponse struct {
 	// Authid Authentication ID
 	Authid string `json:"authid"`
@@ -454,6 +457,7 @@ type ListRemoteRrddataParams struct {
 }
 
 // ListRemoteRrddataResponse mirrors the shape returned by GET /remotes/remote/{id}/rrddata.
+// A list remote RRD data points.
 type ListRemoteRrddataResponse []json.RawMessage
 
 // ListRemoteRrddata implements Service.ListRemoteRrddata. GET /remotes/remote/{id}/rrddata.
@@ -499,6 +503,7 @@ func (s *service) ListRemoteRrddata(ctx context.Context, id string, params *List
 }
 
 // ListRemoteVersionResponse mirrors the shape returned by GET /remotes/remote/{id}/version.
+// Object.
 type ListRemoteVersionResponse struct {
 	// Console The default console viewer to use.
 	Console *string `json:"console,omitempty"`
@@ -584,6 +589,7 @@ type ListTasksListParams struct {
 }
 
 // ListTasksListResponse mirrors the shape returned by GET /remotes/tasks/list.
+// A list of tasks for all remotes.
 type ListTasksListResponse []json.RawMessage
 
 // ListTasksList implements Service.ListTasksList. GET /remotes/tasks/list.
@@ -635,6 +641,7 @@ type CreateTasksRefreshParams struct {
 }
 
 // CreateTasksRefreshResponse is the raw JSON returned by POST /remotes/tasks/refresh.
+// Unique Process/Task Identifier
 type CreateTasksRefreshResponse = json.RawMessage
 
 // CreateTasksRefresh implements Service.CreateTasksRefresh. POST /remotes/tasks/refresh.
@@ -706,6 +713,7 @@ type ListTasksStatisticsParams struct {
 }
 
 // ListTasksStatisticsResponse mirrors the shape returned by GET /remotes/tasks/statistics.
+// Lists the task status counts by type and by remote
 type ListTasksStatisticsResponse struct {
 	// ByRemote A map of remotes to status counts
 	ByRemote json.RawMessage `json:"by-remote"`
@@ -773,6 +781,7 @@ func (s *service) ListUpdates(ctx context.Context) error {
 }
 
 // CreateUpdatesRefreshResponse is the raw JSON returned by POST /remotes/updates/refresh.
+// Unique Process/Task Identifier
 type CreateUpdatesRefreshResponse = json.RawMessage
 
 // CreateUpdatesRefresh implements Service.CreateUpdatesRefresh. POST /remotes/updates/refresh.
@@ -806,6 +815,7 @@ func (s *service) CreateUpdatesRefresh(ctx context.Context) (*CreateUpdatesRefre
 }
 
 // ListUpdatesSummaryResponse mirrors the shape returned by GET /remotes/updates/summary.
+// Update summary for all remotes.
 type ListUpdatesSummaryResponse struct {
 	// Remotes Map of per-remote update summaries
 	Remotes json.RawMessage `json:"remotes"`

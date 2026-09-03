@@ -88,6 +88,7 @@ type ListControllersParams struct {
 }
 
 // ListControllersResponse mirrors the shape returned by GET /sdn/controllers.
+// Get a list of controllers fitting the filtering criteria.
 type ListControllersResponse []json.RawMessage
 
 // ListControllers implements Service.ListControllers. GET /sdn/controllers.
@@ -143,6 +144,7 @@ type ListVnetsParams struct {
 }
 
 // ListVnetsResponse mirrors the shape returned by GET /sdn/vnets.
+// Get a list of controllers fitting the filtering criteria.
 type ListVnetsResponse []json.RawMessage
 
 // ListVnets implements Service.ListVnets. GET /sdn/vnets.
@@ -198,6 +200,7 @@ type CreateVnetsParams struct {
 }
 
 // CreateVnetsResponse is the raw JSON returned by POST /sdn/vnets.
+// Unique Process/Task Identifier
 type CreateVnetsResponse = json.RawMessage
 
 // CreateVnets implements Service.CreateVnets. POST /sdn/vnets.
@@ -262,6 +265,7 @@ type ListZonesParams struct {
 }
 
 // ListZonesResponse mirrors the shape returned by GET /sdn/zones.
+// Get a list of zones fitting the filtering criteria.
 type ListZonesResponse []json.RawMessage
 
 // ListZones implements Service.ListZones. GET /sdn/zones.
@@ -317,6 +321,7 @@ type CreateZonesParams struct {
 }
 
 // CreateZonesResponse is the raw JSON returned by POST /sdn/zones.
+// Unique Process/Task Identifier
 type CreateZonesResponse = json.RawMessage
 
 // CreateZones implements Service.CreateZones. POST /sdn/zones.

@@ -151,6 +151,7 @@ type ListAclParams struct {
 }
 
 // ListAclResponse mirrors the shape returned by GET /access/acl.
+// ACL entry list.
 type ListAclResponse []json.RawMessage
 
 // ListAcl implements Service.ListAcl. GET /access/acl.
@@ -244,6 +245,7 @@ func (s *service) UpdateAcl(ctx context.Context, params *UpdateAclParams) error 
 }
 
 // ListDomainsResponse mirrors the shape returned by GET /access/domains.
+// List of realms with basic info.
 type ListDomainsResponse []json.RawMessage
 
 // ListDomains implements Service.ListDomains. GET /access/domains.
@@ -287,6 +289,7 @@ type CreateDomainsSyncParams struct {
 }
 
 // CreateDomainsSyncResponse is the raw JSON returned by POST /access/domains/{realm}/sync.
+// Unique Process/Task Identifier
 type CreateDomainsSyncResponse = json.RawMessage
 
 // CreateDomainsSync implements Service.CreateDomainsSync. POST /access/domains/{realm}/sync.
@@ -358,6 +361,7 @@ type CreateOpenidAuthUrlParams struct {
 }
 
 // CreateOpenidAuthUrlResponse is the raw JSON returned by POST /access/openid/auth-url.
+// Redirection URL.
 type CreateOpenidAuthUrlResponse = json.RawMessage
 
 // CreateOpenidAuthUrl implements Service.CreateOpenidAuthUrl. POST /access/openid/auth-url.
@@ -413,6 +417,7 @@ type CreateOpenidLoginParams struct {
 }
 
 // CreateOpenidLoginResponse mirrors the shape returned by POST /access/openid/login.
+// The API response for a ticket call.
 type CreateOpenidLoginResponse struct {
 	// CSRFPreventionToken The CSRF prevention token.
 	CSRFPreventionToken *string `json:"CSRFPreventionToken,omitempty"`
@@ -474,6 +479,7 @@ type ListPermissionsParams struct {
 }
 
 // ListPermissionsResponse is the raw JSON returned by GET /access/permissions.
+// Map of ACL path to Map of privilege to propagate bit
 type ListPermissionsResponse = json.RawMessage
 
 // ListPermissions implements Service.ListPermissions. GET /access/permissions.
@@ -519,6 +525,7 @@ func (s *service) ListPermissions(ctx context.Context, params *ListPermissionsPa
 }
 
 // ListRolesResponse mirrors the shape returned by GET /access/roles.
+// List of roles.
 type ListRolesResponse []json.RawMessage
 
 // ListRoles implements Service.ListRoles. GET /access/roles.
@@ -552,6 +559,7 @@ func (s *service) ListRoles(ctx context.Context) (*ListRolesResponse, error) {
 }
 
 // ListTfaResponse mirrors the shape returned by GET /access/tfa.
+// The list tuples of user and TFA entries.
 type ListTfaResponse []json.RawMessage
 
 // ListTfa implements Service.ListTfa. GET /access/tfa.
@@ -585,6 +593,7 @@ func (s *service) ListTfa(ctx context.Context) (*ListTfaResponse, error) {
 }
 
 // GetTfaResponse mirrors the shape returned by GET /access/tfa/{userid}.
+// A list of TFA entries for a user.
 type GetTfaResponse []json.RawMessage
 
 // GetTfa implements Service.GetTfa. GET /access/tfa/{userid}.
@@ -634,6 +643,7 @@ type CreateTfaParams struct {
 }
 
 // CreateTfaResponse mirrors the shape returned by POST /access/tfa/{userid}.
+// The result returned when adding TFA entries to a user.
 type CreateTfaResponse struct {
 	// Challenge When adding u2f entries, this contains a challenge the user must respond to in order to finish the registration.
 	Challenge *string `json:"challenge,omitempty"`
@@ -721,6 +731,7 @@ func (s *service) DeleteTfa(ctx context.Context, userid string, id string, param
 }
 
 // GetTfa2Response mirrors the shape returned by GET /access/tfa/{userid}/{id}.
+// A TFA entry for a user.
 type GetTfa2Response struct {
 	// Created Creation time of this entry as unix epoch.
 	Created client.PVEInt `json:"created"`
@@ -838,6 +849,7 @@ type CreateTicketParams struct {
 }
 
 // CreateTicketResponse mirrors the shape returned by POST /access/ticket.
+// The API response for a ticket call.
 type CreateTicketResponse struct {
 	// CSRFPreventionToken The CSRF prevention token.
 	CSRFPreventionToken *string `json:"CSRFPreventionToken,omitempty"`
@@ -897,6 +909,7 @@ type ListUsersParams struct {
 }
 
 // ListUsersResponse mirrors the shape returned by GET /access/users.
+// List users (with config digest).
 type ListUsersResponse []json.RawMessage
 
 // ListUsers implements Service.ListUsers. GET /access/users.
@@ -1028,6 +1041,7 @@ func (s *service) DeleteUsers(ctx context.Context, userid string, params *Delete
 }
 
 // GetUsersResponse mirrors the shape returned by GET /access/users/{userid}.
+// User properties.
 type GetUsersResponse struct {
 	// Comment Comment.
 	Comment *string `json:"comment,omitempty"`
@@ -1127,6 +1141,7 @@ func (s *service) UpdateUsers(ctx context.Context, userid string, params *Update
 }
 
 // ListUsersTokenResponse mirrors the shape returned by GET /access/users/{userid}/token.
+// List user's API tokens (with config digest).
 type ListUsersTokenResponse []json.RawMessage
 
 // ListUsersToken implements Service.ListUsersToken. GET /access/users/{userid}/token.
@@ -1196,6 +1211,7 @@ func (s *service) DeleteUsersToken(ctx context.Context, userid string, tokenName
 }
 
 // GetUsersTokenResponse mirrors the shape returned by GET /access/users/{userid}/token/{token-name}.
+// ApiToken properties.
 type GetUsersTokenResponse struct {
 	// Comment Comment.
 	Comment *string `json:"comment,omitempty"`
@@ -1249,6 +1265,7 @@ type CreateUsersTokenParams struct {
 }
 
 // CreateUsersTokenResponse mirrors the shape returned by POST /access/users/{userid}/token/{token-name}.
+// ApiToken id / secret pair
 type CreateUsersTokenResponse struct {
 	// Tokenid Authentication ID
 	Tokenid string `json:"tokenid"`

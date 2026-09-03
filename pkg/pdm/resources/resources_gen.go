@@ -88,6 +88,7 @@ type ListListParams struct {
 }
 
 // ListListResponse mirrors the shape returned by GET /resources/list.
+// Array of resources, grouped by remote
 type ListListResponse []json.RawMessage
 
 // ListList implements Service.ListList. GET /resources/list.
@@ -179,6 +180,7 @@ type ListStatusParams struct {
 }
 
 // ListStatusResponse mirrors the shape returned by GET /resources/status.
+// Resource API response
 type ListStatusResponse struct {
 	// Error Any error that occurred when querying remote resources
 	Error *string `json:"error,omitempty"`
@@ -240,6 +242,7 @@ type ListSubscriptionParams struct {
 }
 
 // ListSubscriptionResponse mirrors the shape returned by GET /resources/subscription.
+// Subscription state for each remote.
 type ListSubscriptionResponse []json.RawMessage
 
 // ListSubscription implements Service.ListSubscription. GET /resources/subscription.
@@ -293,6 +296,7 @@ type ListTopEntitiesParams struct {
 }
 
 // ListTopEntitiesResponse mirrors the shape returned by GET /resources/top-entities.
+// Contains a list for "top entities" for Guest-CPU, Node-CPU and Node-Memory
 type ListTopEntitiesResponse struct {
 	// GuestCpu The top entries for Guest CPU
 	GuestCpu []json.RawMessage `json:"guest-cpu"`

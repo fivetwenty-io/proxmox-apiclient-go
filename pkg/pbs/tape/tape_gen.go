@@ -178,6 +178,7 @@ func (s *service) ListTape(ctx context.Context) error {
 }
 
 // ListBackupResponse mirrors the shape returned by GET /tape/backup.
+// List configured thape backup jobs and their status
 type ListBackupResponse []json.RawMessage
 
 // ListBackup implements Service.ListBackup. GET /tape/backup.
@@ -241,6 +242,7 @@ type CreateBackupParams struct {
 }
 
 // CreateBackupResponse is the raw JSON returned by POST /tape/backup.
+// Unique Process/Task Identifier
 type CreateBackupResponse = json.RawMessage
 
 // CreateBackup implements Service.CreateBackup. POST /tape/backup.
@@ -304,6 +306,7 @@ func (s *service) CreateBackup2(ctx context.Context, id string) error {
 }
 
 // ListChangerResponse mirrors the shape returned by GET /tape/changer.
+// The list of configured changers with model information.
 type ListChangerResponse []json.RawMessage
 
 // ListChanger implements Service.ListChanger. GET /tape/changer.
@@ -361,6 +364,7 @@ type ListChangerStatusParams struct {
 }
 
 // ListChangerStatusResponse mirrors the shape returned by GET /tape/changer/{name}/status.
+// A status entry for each drive and slot.
 type ListChangerStatusResponse []json.RawMessage
 
 // ListChangerStatus implements Service.ListChangerStatus. GET /tape/changer/{name}/status.
@@ -452,6 +456,7 @@ type ListDriveParams struct {
 }
 
 // ListDriveResponse mirrors the shape returned by GET /tape/drive.
+// The list of configured drives with model information.
 type ListDriveResponse []json.RawMessage
 
 // ListDrive implements Service.ListDrive. GET /tape/drive.
@@ -521,6 +526,7 @@ type CreateDriveBarcodeLabelMediaParams struct {
 }
 
 // CreateDriveBarcodeLabelMediaResponse is the raw JSON returned by POST /tape/drive/{drive}/barcode-label-media.
+// Unique Process/Task Identifier
 type CreateDriveBarcodeLabelMediaResponse = json.RawMessage
 
 // CreateDriveBarcodeLabelMedia implements Service.CreateDriveBarcodeLabelMedia. POST /tape/drive/{drive}/barcode-label-media.
@@ -566,6 +572,7 @@ func (s *service) CreateDriveBarcodeLabelMedia(ctx context.Context, drive string
 }
 
 // ListDriveCartridgeMemoryResponse mirrors the shape returned by GET /tape/drive/{drive}/cartridge-memory.
+// A List of medium auxiliary memory attributes.
 type ListDriveCartridgeMemoryResponse []json.RawMessage
 
 // ListDriveCartridgeMemory implements Service.ListDriveCartridgeMemory. GET /tape/drive/{drive}/cartridge-memory.
@@ -609,6 +616,7 @@ type CreateDriveCatalogParams struct {
 }
 
 // CreateDriveCatalogResponse is the raw JSON returned by POST /tape/drive/{drive}/catalog.
+// Unique Process/Task Identifier
 type CreateDriveCatalogResponse = json.RawMessage
 
 // CreateDriveCatalog implements Service.CreateDriveCatalog. POST /tape/drive/{drive}/catalog.
@@ -654,6 +662,7 @@ func (s *service) CreateDriveCatalog(ctx context.Context, drive string, params *
 }
 
 // UpdateDriveCleanResponse is the raw JSON returned by PUT /tape/drive/{drive}/clean.
+// Unique Process/Task Identifier
 type UpdateDriveCleanResponse = json.RawMessage
 
 // UpdateDriveClean implements Service.UpdateDriveClean. PUT /tape/drive/{drive}/clean.
@@ -687,6 +696,7 @@ func (s *service) UpdateDriveClean(ctx context.Context, drive string) (*UpdateDr
 }
 
 // CreateDriveEjectMediaResponse is the raw JSON returned by POST /tape/drive/{drive}/eject-media.
+// Unique Process/Task Identifier
 type CreateDriveEjectMediaResponse = json.RawMessage
 
 // CreateDriveEjectMedia implements Service.CreateDriveEjectMedia. POST /tape/drive/{drive}/eject-media.
@@ -726,6 +736,7 @@ type UpdateDriveExportMediaParams struct {
 }
 
 // UpdateDriveExportMediaResponse is the raw JSON returned by PUT /tape/drive/{drive}/export-media.
+// The import-export slot number the media was transferred to.
 type UpdateDriveExportMediaResponse = json.RawMessage
 
 // UpdateDriveExportMedia implements Service.UpdateDriveExportMedia. PUT /tape/drive/{drive}/export-media.
@@ -781,6 +792,7 @@ type CreateDriveFormatMediaParams struct {
 }
 
 // CreateDriveFormatMediaResponse is the raw JSON returned by POST /tape/drive/{drive}/format-media.
+// Unique Process/Task Identifier
 type CreateDriveFormatMediaResponse = json.RawMessage
 
 // CreateDriveFormatMedia implements Service.CreateDriveFormatMedia. POST /tape/drive/{drive}/format-media.
@@ -826,6 +838,7 @@ func (s *service) CreateDriveFormatMedia(ctx context.Context, drive string, para
 }
 
 // ListDriveInventoryResponse mirrors the shape returned by GET /tape/drive/{drive}/inventory.
+// The list of media labels with associated media Uuid (if any).
 type ListDriveInventoryResponse []json.RawMessage
 
 // ListDriveInventory implements Service.ListDriveInventory. GET /tape/drive/{drive}/inventory.
@@ -867,6 +880,7 @@ type UpdateDriveInventoryParams struct {
 }
 
 // UpdateDriveInventoryResponse is the raw JSON returned by PUT /tape/drive/{drive}/inventory.
+// Unique Process/Task Identifier
 type UpdateDriveInventoryResponse = json.RawMessage
 
 // UpdateDriveInventory implements Service.UpdateDriveInventory. PUT /tape/drive/{drive}/inventory.
@@ -920,6 +934,7 @@ type CreateDriveLabelMediaParams struct {
 }
 
 // CreateDriveLabelMediaResponse is the raw JSON returned by POST /tape/drive/{drive}/label-media.
+// Unique Process/Task Identifier
 type CreateDriveLabelMediaResponse = json.RawMessage
 
 // CreateDriveLabelMedia implements Service.CreateDriveLabelMedia. POST /tape/drive/{drive}/label-media.
@@ -971,6 +986,7 @@ type CreateDriveLoadMediaParams struct {
 }
 
 // CreateDriveLoadMediaResponse is the raw JSON returned by POST /tape/drive/{drive}/load-media.
+// Unique Process/Task Identifier
 type CreateDriveLoadMediaResponse = json.RawMessage
 
 // CreateDriveLoadMedia implements Service.CreateDriveLoadMedia. POST /tape/drive/{drive}/load-media.
@@ -1058,6 +1074,7 @@ type ListDriveReadLabelParams struct {
 }
 
 // ListDriveReadLabelResponse mirrors the shape returned by GET /tape/drive/{drive}/read-label.
+// Media label info
 type ListDriveReadLabelResponse struct {
 	// Ctime Creation time stamp
 	Ctime client.PVEInt `json:"ctime"`
@@ -1155,6 +1172,7 @@ func (s *service) CreateDriveRestoreKey(ctx context.Context, drive string, param
 }
 
 // CreateDriveRewindResponse is the raw JSON returned by POST /tape/drive/{drive}/rewind.
+// Unique Process/Task Identifier
 type CreateDriveRewindResponse = json.RawMessage
 
 // CreateDriveRewind implements Service.CreateDriveRewind. POST /tape/drive/{drive}/rewind.
@@ -1188,6 +1206,7 @@ func (s *service) CreateDriveRewind(ctx context.Context, drive string) (*CreateD
 }
 
 // ListDriveStatusResponse mirrors the shape returned by GET /tape/drive/{drive}/status.
+// Drive/Media status for Lto SCSI drives.  Media related data is optional - only set if there is a medium loaded.
 type ListDriveStatusResponse struct {
 	// AlertFlags Tape Alert Flags
 	AlertFlags *string `json:"alert-flags,omitempty"`
@@ -1263,6 +1282,7 @@ type CreateDriveUnloadParams struct {
 }
 
 // CreateDriveUnloadResponse is the raw JSON returned by POST /tape/drive/{drive}/unload.
+// Unique Process/Task Identifier
 type CreateDriveUnloadResponse = json.RawMessage
 
 // CreateDriveUnload implements Service.CreateDriveUnload. POST /tape/drive/{drive}/unload.
@@ -1308,6 +1328,7 @@ func (s *service) CreateDriveUnload(ctx context.Context, drive string, params *C
 }
 
 // ListDriveVolumeStatisticsResponse mirrors the shape returned by GET /tape/drive/{drive}/volume-statistics.
+// Volume statistics from SCSI log page 17h
 type ListDriveVolumeStatisticsResponse struct {
 	// BeginningOfMediumPasses Beginning of medium passes
 	BeginningOfMediumPasses client.PVEInt `json:"beginning-of-medium-passes"`
@@ -1427,6 +1448,7 @@ type ListMediaContentParams struct {
 }
 
 // ListMediaContentResponse mirrors the shape returned by GET /tape/media/content.
+// Media content list.
 type ListMediaContentResponse []json.RawMessage
 
 // ListMediaContent implements Service.ListMediaContent. GET /tape/media/content.
@@ -1522,6 +1544,7 @@ type ListMediaListParams struct {
 }
 
 // ListMediaListResponse mirrors the shape returned by GET /tape/media/list.
+// List of registered backup media.
 type ListMediaListResponse []json.RawMessage
 
 // ListMediaList implements Service.ListMediaList. GET /tape/media/list.
@@ -1639,6 +1662,7 @@ func (s *service) CreateMediaListStatus(ctx context.Context, uuid string, params
 }
 
 // ListMediaMediaSetsResponse mirrors the shape returned by GET /tape/media/media-sets.
+// List of media sets.
 type ListMediaMediaSetsResponse []json.RawMessage
 
 // ListMediaMediaSets implements Service.ListMediaMediaSets. GET /tape/media/media-sets.
@@ -1732,6 +1756,7 @@ type CreateRestoreParams struct {
 }
 
 // CreateRestoreResponse is the raw JSON returned by POST /tape/restore.
+// Unique Process/Task Identifier
 type CreateRestoreResponse = json.RawMessage
 
 // CreateRestore implements Service.CreateRestore. POST /tape/restore.
@@ -1777,6 +1802,7 @@ func (s *service) CreateRestore(ctx context.Context, params *CreateRestoreParams
 }
 
 // ListScanChangersResponse mirrors the shape returned by GET /tape/scan-changers.
+// The list of autodetected tape changers.
 type ListScanChangersResponse []json.RawMessage
 
 // ListScanChangers implements Service.ListScanChangers. GET /tape/scan-changers.
@@ -1810,6 +1836,7 @@ func (s *service) ListScanChangers(ctx context.Context) (*ListScanChangersRespon
 }
 
 // ListScanDrivesResponse mirrors the shape returned by GET /tape/scan-drives.
+// The list of autodetected tape drives.
 type ListScanDrivesResponse []json.RawMessage
 
 // ListScanDrives implements Service.ListScanDrives. GET /tape/scan-drives.

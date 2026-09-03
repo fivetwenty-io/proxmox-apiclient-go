@@ -43,6 +43,7 @@ type service struct {
 }
 
 // PingResponse is the raw JSON returned by GET /ping.
+// The string "pong".
 type PingResponse = json.RawMessage
 
 // Ping implements Service.Ping. GET /ping.

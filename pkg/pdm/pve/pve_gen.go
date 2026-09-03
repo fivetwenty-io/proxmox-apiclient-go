@@ -370,6 +370,7 @@ func (s *service) ListFirewall(ctx context.Context) error {
 }
 
 // ListFirewallStatusResponse mirrors the shape returned by GET /pve/firewall/status.
+// Get firewall status of remotes
 type ListFirewallStatusResponse []json.RawMessage
 
 // ListFirewallStatus implements Service.ListFirewallStatus. GET /pve/firewall/status.
@@ -449,6 +450,7 @@ type ListRealmsParams struct {
 }
 
 // ListRealmsResponse mirrors the shape returned by GET /pve/realms.
+// A list of realms of a PVE remote.
 type ListRealmsResponse []json.RawMessage
 
 // ListRealms implements Service.ListRealms. GET /pve/realms.
@@ -494,6 +496,7 @@ func (s *service) ListRealms(ctx context.Context, params *ListRealmsParams) (*Li
 }
 
 // ListRemotesResponse mirrors the shape returned by GET /pve/remotes.
+// List of PVE remotes
 type ListRemotesResponse []json.RawMessage
 
 // ListRemotes implements Service.ListRemotes. GET /pve/remotes.
@@ -602,6 +605,7 @@ type ListRemotesClusterStatusParams struct {
 }
 
 // ListRemotesClusterStatusResponse mirrors the shape returned by GET /pve/remotes/{remote}/cluster-status.
+// Get all nodes Cluster Status
 type ListRemotesClusterStatusResponse []json.RawMessage
 
 // ListRemotesClusterStatus implements Service.ListRemotesClusterStatus. GET /pve/remotes/{remote}/cluster-status.
@@ -665,6 +669,7 @@ func (s *service) ListRemotesFirewall(ctx context.Context, remote string) error 
 }
 
 // ListRemotesFirewallOptionsResponse mirrors the shape returned by GET /pve/remotes/{remote}/firewall/options.
+// Object.
 type ListRemotesFirewallOptionsResponse struct {
 	// Ebtables Enable ebtables rules cluster wide.
 	Ebtables *client.PVEBool `json:"ebtables,omitempty"`
@@ -760,6 +765,7 @@ func (s *service) UpdateRemotesFirewallOptions(ctx context.Context, remote strin
 }
 
 // ListRemotesFirewallRulesResponse mirrors the shape returned by GET /pve/remotes/{remote}/firewall/rules.
+// List cluster firewall rules.
 type ListRemotesFirewallRulesResponse []json.RawMessage
 
 // ListRemotesFirewallRules implements Service.ListRemotesFirewallRules. GET /pve/remotes/{remote}/firewall/rules.
@@ -793,6 +799,7 @@ func (s *service) ListRemotesFirewallRules(ctx context.Context, remote string) (
 }
 
 // ListRemotesFirewallStatusResponse mirrors the shape returned by GET /pve/remotes/{remote}/firewall/status.
+// Firewall status of a PVE remote.
 type ListRemotesFirewallStatusResponse struct {
 	// Nodes Nodes in the cluster
 	Nodes []json.RawMessage `json:"nodes"`
@@ -838,6 +845,7 @@ type ListRemotesLxcParams struct {
 }
 
 // ListRemotesLxcResponse mirrors the shape returned by GET /pve/remotes/{remote}/lxc.
+// Get a list of containers.
 type ListRemotesLxcResponse []json.RawMessage
 
 // ListRemotesLxc implements Service.ListRemotesLxc. GET /pve/remotes/{remote}/lxc.
@@ -911,6 +919,7 @@ type ListRemotesLxcConfigParams struct {
 }
 
 // ListRemotesLxcConfigResponse mirrors the shape returned by GET /pve/remotes/{remote}/lxc/{vmid}/config.
+// Object.
 type ListRemotesLxcConfigResponse struct {
 	// Arch OS architecture type.
 	Arch *string `json:"arch,omitempty"`
@@ -2640,6 +2649,7 @@ type ListRemotesLxcFirewallOptionsParams struct {
 }
 
 // ListRemotesLxcFirewallOptionsResponse mirrors the shape returned by GET /pve/remotes/{remote}/lxc/{vmid}/firewall/options.
+// Object.
 type ListRemotesLxcFirewallOptionsResponse struct {
 	// Dhcp Enable DHCP.
 	Dhcp *client.PVEBool `json:"dhcp,omitempty"`
@@ -2771,6 +2781,7 @@ type ListRemotesLxcFirewallRulesParams struct {
 }
 
 // ListRemotesLxcFirewallRulesResponse mirrors the shape returned by GET /pve/remotes/{remote}/lxc/{vmid}/firewall/rules.
+// List LXC firewall rules.
 type ListRemotesLxcFirewallRulesResponse []json.RawMessage
 
 // ListRemotesLxcFirewallRules implements Service.ListRemotesLxcFirewallRules. GET /pve/remotes/{remote}/lxc/{vmid}/firewall/rules.
@@ -2834,6 +2845,7 @@ type CreateRemotesLxcMigrateParams struct {
 }
 
 // CreateRemotesLxcMigrateResponse is the raw JSON returned by POST /pve/remotes/{remote}/lxc/{vmid}/migrate.
+// A remote UPID
 type CreateRemotesLxcMigrateResponse = json.RawMessage
 
 // CreateRemotesLxcMigrate implements Service.CreateRemotesLxcMigrate. POST /pve/remotes/{remote}/lxc/{vmid}/migrate.
@@ -2956,6 +2968,7 @@ type CreateRemotesLxcRemoteMigrateParams struct {
 }
 
 // CreateRemotesLxcRemoteMigrateResponse is the raw JSON returned by POST /pve/remotes/{remote}/lxc/{vmid}/remote-migrate.
+// A remote UPID
 type CreateRemotesLxcRemoteMigrateResponse = json.RawMessage
 
 // CreateRemotesLxcRemoteMigrate implements Service.CreateRemotesLxcRemoteMigrate. POST /pve/remotes/{remote}/lxc/{vmid}/remote-migrate.
@@ -3009,6 +3022,7 @@ type ListRemotesLxcRrddataParams struct {
 }
 
 // ListRemotesLxcRrddataResponse mirrors the shape returned by GET /pve/remotes/{remote}/lxc/{vmid}/rrddata.
+// A list of RRD data points for an LXC guest.
 type ListRemotesLxcRrddataResponse []json.RawMessage
 
 // ListRemotesLxcRrddata implements Service.ListRemotesLxcRrddata. GET /pve/remotes/{remote}/lxc/{vmid}/rrddata.
@@ -3060,6 +3074,7 @@ type CreateRemotesLxcShutdownParams struct {
 }
 
 // CreateRemotesLxcShutdownResponse is the raw JSON returned by POST /pve/remotes/{remote}/lxc/{vmid}/shutdown.
+// A remote UPID
 type CreateRemotesLxcShutdownResponse = json.RawMessage
 
 // CreateRemotesLxcShutdown implements Service.CreateRemotesLxcShutdown. POST /pve/remotes/{remote}/lxc/{vmid}/shutdown.
@@ -3111,6 +3126,7 @@ type ListRemotesLxcSnapshotParams struct {
 }
 
 // ListRemotesLxcSnapshotResponse mirrors the shape returned by GET /pve/remotes/{remote}/lxc/{vmid}/snapshot.
+// The list of snapshots, including the current state as 'current'.
 type ListRemotesLxcSnapshotResponse []json.RawMessage
 
 // ListRemotesLxcSnapshot implements Service.ListRemotesLxcSnapshot. GET /pve/remotes/{remote}/lxc/{vmid}/snapshot.
@@ -3166,6 +3182,7 @@ type CreateRemotesLxcSnapshotParams struct {
 }
 
 // CreateRemotesLxcSnapshotResponse is the raw JSON returned by POST /pve/remotes/{remote}/lxc/{vmid}/snapshot.
+// A remote UPID
 type CreateRemotesLxcSnapshotResponse = json.RawMessage
 
 // CreateRemotesLxcSnapshot implements Service.CreateRemotesLxcSnapshot. POST /pve/remotes/{remote}/lxc/{vmid}/snapshot.
@@ -3217,6 +3234,7 @@ type DeleteRemotesLxcSnapshotParams struct {
 }
 
 // DeleteRemotesLxcSnapshotResponse is the raw JSON returned by DELETE /pve/remotes/{remote}/lxc/{vmid}/snapshot/{snapname}.
+// A remote UPID
 type DeleteRemotesLxcSnapshotResponse = json.RawMessage
 
 // DeleteRemotesLxcSnapshot implements Service.DeleteRemotesLxcSnapshot. DELETE /pve/remotes/{remote}/lxc/{vmid}/snapshot/{snapname}.
@@ -3308,6 +3326,7 @@ type CreateRemotesLxcSnapshotRollbackParams struct {
 }
 
 // CreateRemotesLxcSnapshotRollbackResponse is the raw JSON returned by POST /pve/remotes/{remote}/lxc/{vmid}/snapshot/{snapname}/rollback.
+// A remote UPID
 type CreateRemotesLxcSnapshotRollbackResponse = json.RawMessage
 
 // CreateRemotesLxcSnapshotRollback implements Service.CreateRemotesLxcSnapshotRollback. POST /pve/remotes/{remote}/lxc/{vmid}/snapshot/{snapname}/rollback.
@@ -3359,6 +3378,7 @@ type CreateRemotesLxcStartParams struct {
 }
 
 // CreateRemotesLxcStartResponse is the raw JSON returned by POST /pve/remotes/{remote}/lxc/{vmid}/start.
+// A remote UPID
 type CreateRemotesLxcStartResponse = json.RawMessage
 
 // CreateRemotesLxcStart implements Service.CreateRemotesLxcStart. POST /pve/remotes/{remote}/lxc/{vmid}/start.
@@ -3410,6 +3430,7 @@ type ListRemotesLxcStatusParams struct {
 }
 
 // ListRemotesLxcStatusResponse mirrors the shape returned by GET /pve/remotes/{remote}/lxc/{vmid}/status.
+// Object.
 type ListRemotesLxcStatusResponse struct {
 	// Cpu Current CPU usage.
 	Cpu *client.PVEFloat `json:"cpu,omitempty"`
@@ -3509,6 +3530,7 @@ type CreateRemotesLxcStopParams struct {
 }
 
 // CreateRemotesLxcStopResponse is the raw JSON returned by POST /pve/remotes/{remote}/lxc/{vmid}/stop.
+// A remote UPID
 type CreateRemotesLxcStopResponse = json.RawMessage
 
 // CreateRemotesLxcStop implements Service.CreateRemotesLxcStop. POST /pve/remotes/{remote}/lxc/{vmid}/stop.
@@ -3554,6 +3576,7 @@ func (s *service) CreateRemotesLxcStop(ctx context.Context, remote string, vmid 
 }
 
 // CreateRemotesLxcTermproxyResponse mirrors the shape returned by POST /pve/remotes/{remote}/lxc/{vmid}/termproxy.
+// Object with the user and ticket
 type CreateRemotesLxcTermproxyResponse struct {
 	// Port Always '0'.
 	Port client.PVEInt `json:"port"`
@@ -3629,6 +3652,7 @@ func (s *service) ListRemotesLxcVncwebsocket(ctx context.Context, remote string,
 }
 
 // ListRemotesNodesResponse mirrors the shape returned by GET /pve/remotes/{remote}/nodes.
+// List of basic PVE node information
 type ListRemotesNodesResponse []json.RawMessage
 
 // ListRemotesNodes implements Service.ListRemotesNodes. GET /pve/remotes/{remote}/nodes.
@@ -3706,6 +3730,7 @@ type ListRemotesNodesAptChangelogParams struct {
 }
 
 // ListRemotesNodesAptChangelogResponse is the raw JSON returned by GET /pve/remotes/{remote}/nodes/{node}/apt/changelog.
+// The Package changelog.
 type ListRemotesNodesAptChangelogResponse = json.RawMessage
 
 // ListRemotesNodesAptChangelog implements Service.ListRemotesNodesAptChangelog. GET /pve/remotes/{remote}/nodes/{node}/apt/changelog.
@@ -3789,6 +3814,7 @@ func (s *service) ListRemotesNodesAptRepositories(ctx context.Context, remote st
 }
 
 // ListRemotesNodesAptUpdateResponse mirrors the shape returned by GET /pve/remotes/{remote}/nodes/{node}/apt/update.
+// A list of packages with available updates.
 type ListRemotesNodesAptUpdateResponse []json.RawMessage
 
 // ListRemotesNodesAptUpdate implements Service.ListRemotesNodesAptUpdate. GET /pve/remotes/{remote}/nodes/{node}/apt/update.
@@ -3822,6 +3848,7 @@ func (s *service) ListRemotesNodesAptUpdate(ctx context.Context, remote string, 
 }
 
 // CreateRemotesNodesAptUpdateResponse is the raw JSON returned by POST /pve/remotes/{remote}/nodes/{node}/apt/update.
+// A remote UPID
 type CreateRemotesNodesAptUpdateResponse = json.RawMessage
 
 // CreateRemotesNodesAptUpdate implements Service.CreateRemotesNodesAptUpdate. POST /pve/remotes/{remote}/nodes/{node}/apt/update.
@@ -3906,6 +3933,7 @@ func (s *service) ListRemotesNodesFirewall(ctx context.Context, remote string, n
 }
 
 // ListRemotesNodesFirewallOptionsResponse mirrors the shape returned by GET /pve/remotes/{remote}/nodes/{node}/firewall/options.
+// Object.
 type ListRemotesNodesFirewallOptionsResponse struct {
 	// Enable Enable host firewall rules.
 	Enable *client.PVEBool `json:"enable,omitempty"`
@@ -4053,6 +4081,7 @@ func (s *service) UpdateRemotesNodesFirewallOptions(ctx context.Context, remote 
 }
 
 // ListRemotesNodesFirewallRulesResponse mirrors the shape returned by GET /pve/remotes/{remote}/nodes/{node}/firewall/rules.
+// List node firewall rules.
 type ListRemotesNodesFirewallRulesResponse []json.RawMessage
 
 // ListRemotesNodesFirewallRules implements Service.ListRemotesNodesFirewallRules. GET /pve/remotes/{remote}/nodes/{node}/firewall/rules.
@@ -4086,6 +4115,7 @@ func (s *service) ListRemotesNodesFirewallRules(ctx context.Context, remote stri
 }
 
 // ListRemotesNodesFirewallStatusResponse mirrors the shape returned by GET /pve/remotes/{remote}/nodes/{node}/firewall/status.
+// Firewall status of a node
 type ListRemotesNodesFirewallStatusResponse struct {
 	// Guests Guests on a node
 	Guests []json.RawMessage `json:"guests"`
@@ -4131,6 +4161,7 @@ type ListRemotesNodesNetworkParams struct {
 }
 
 // ListRemotesNodesNetworkResponse mirrors the shape returned by GET /pve/remotes/{remote}/nodes/{node}/network.
+// A list of network interfaces of a PVE remote.
 type ListRemotesNodesNetworkResponse []json.RawMessage
 
 // ListRemotesNodesNetwork implements Service.ListRemotesNodesNetwork. GET /pve/remotes/{remote}/nodes/{node}/network.
@@ -4184,6 +4215,7 @@ type ListRemotesNodesRrddataParams struct {
 }
 
 // ListRemotesNodesRrddataResponse mirrors the shape returned by GET /pve/remotes/{remote}/nodes/{node}/rrddata.
+// A list of RRD data points for a PVE node.
 type ListRemotesNodesRrddataResponse []json.RawMessage
 
 // ListRemotesNodesRrddata implements Service.ListRemotesNodesRrddata. GET /pve/remotes/{remote}/nodes/{node}/rrddata.
@@ -4265,6 +4297,7 @@ func (s *service) GetRemotesNodesSdnVnets(ctx context.Context, remote string, no
 }
 
 // ListRemotesNodesSdnVnetsMacVrfResponse mirrors the shape returned by GET /pve/remotes/{remote}/nodes/{node}/sdn/vnets/{vnet}/mac-vrf.
+// Object.
 type ListRemotesNodesSdnVnetsMacVrfResponse struct {
 	// Ip The IP address of the MAC VRF entry.
 	Ip string `json:"ip"`
@@ -4322,6 +4355,7 @@ func (s *service) GetRemotesNodesSdnZones(ctx context.Context, remote string, no
 }
 
 // ListRemotesNodesSdnZonesIpVrfResponse mirrors the shape returned by GET /pve/remotes/{remote}/nodes/{node}/sdn/zones/{zone}/ip-vrf.
+// Object.
 type ListRemotesNodesSdnZonesIpVrfResponse struct {
 	// Ip The CIDR of the route table entry.
 	Ip string `json:"ip"`
@@ -4363,6 +4397,7 @@ func (s *service) ListRemotesNodesSdnZonesIpVrf(ctx context.Context, remote stri
 }
 
 // ListRemotesNodesStatusResponse mirrors the shape returned by GET /pve/remotes/{remote}/nodes/{node}/status.
+// Object.
 type ListRemotesNodesStatusResponse struct {
 	// BootInfo Meta-information about the boot mode.
 	BootInfo json.RawMessage `json:"boot-info"`
@@ -4426,6 +4461,7 @@ type ListRemotesNodesStorageParams struct {
 }
 
 // ListRemotesNodesStorageResponse mirrors the shape returned by GET /pve/remotes/{remote}/nodes/{node}/storage.
+// A list of storages of a PVE remote.
 type ListRemotesNodesStorageResponse []json.RawMessage
 
 // ListRemotesNodesStorage implements Service.ListRemotesNodesStorage. GET /pve/remotes/{remote}/nodes/{node}/storage.
@@ -4497,6 +4533,7 @@ type ListRemotesNodesStorageRrddataParams struct {
 }
 
 // ListRemotesNodesStorageRrddataResponse mirrors the shape returned by GET /pve/remotes/{remote}/nodes/{node}/storage/{storage}/rrddata.
+// A list of RRD data points on a PVE remote's storage.
 type ListRemotesNodesStorageRrddataResponse []json.RawMessage
 
 // ListRemotesNodesStorageRrddata implements Service.ListRemotesNodesStorageRrddata. GET /pve/remotes/{remote}/nodes/{node}/storage/{storage}/rrddata.
@@ -4542,6 +4579,7 @@ func (s *service) ListRemotesNodesStorageRrddata(ctx context.Context, remote str
 }
 
 // ListRemotesNodesStorageStatusResponse mirrors the shape returned by GET /pve/remotes/{remote}/nodes/{node}/storage/{storage}/status.
+// Object.
 type ListRemotesNodesStorageStatusResponse struct {
 	// Active Set when storage is accessible.
 	Active *client.PVEBool `json:"active,omitempty"`
@@ -4636,6 +4674,7 @@ func (s *service) ListRemotesNodesSubscription(ctx context.Context, remote strin
 }
 
 // CreateRemotesNodesTermproxyResponse mirrors the shape returned by POST /pve/remotes/{remote}/nodes/{node}/termproxy.
+// Object with the user and ticket
 type CreateRemotesNodesTermproxyResponse struct {
 	// Port Always '0'.
 	Port client.PVEInt `json:"port"`
@@ -4752,6 +4791,7 @@ type ListRemotesQemuParams struct {
 }
 
 // ListRemotesQemuResponse mirrors the shape returned by GET /pve/remotes/{remote}/qemu.
+// Get a list of VMs
 type ListRemotesQemuResponse []json.RawMessage
 
 // ListRemotesQemu implements Service.ListRemotesQemu. GET /pve/remotes/{remote}/qemu.
@@ -4825,6 +4865,7 @@ type ListRemotesQemuConfigParams struct {
 }
 
 // ListRemotesQemuConfigResponse mirrors the shape returned by GET /pve/remotes/{remote}/qemu/{vmid}/config.
+// The VM configuration.
 type ListRemotesQemuConfigResponse struct {
 	// Acpi Enable/disable ACPI.
 	Acpi *client.PVEBool `json:"acpi,omitempty"`
@@ -5910,6 +5951,7 @@ type ListRemotesQemuFirewallOptionsParams struct {
 }
 
 // ListRemotesQemuFirewallOptionsResponse mirrors the shape returned by GET /pve/remotes/{remote}/qemu/{vmid}/firewall/options.
+// Object.
 type ListRemotesQemuFirewallOptionsResponse struct {
 	// Dhcp Enable DHCP.
 	Dhcp *client.PVEBool `json:"dhcp,omitempty"`
@@ -6041,6 +6083,7 @@ type ListRemotesQemuFirewallRulesParams struct {
 }
 
 // ListRemotesQemuFirewallRulesResponse mirrors the shape returned by GET /pve/remotes/{remote}/qemu/{vmid}/firewall/rules.
+// List QEMU firewall rules.
 type ListRemotesQemuFirewallRulesResponse []json.RawMessage
 
 // ListRemotesQemuFirewallRules implements Service.ListRemotesQemuFirewallRules. GET /pve/remotes/{remote}/qemu/{vmid}/firewall/rules.
@@ -6094,6 +6137,7 @@ type ListRemotesQemuMigrateParams struct {
 }
 
 // ListRemotesQemuMigrateResponse mirrors the shape returned by GET /pve/remotes/{remote}/qemu/{vmid}/migrate.
+// Object.
 type ListRemotesQemuMigrateResponse struct {
 	// AllowedNodes List of nodes allowed for migration.
 	AllowedNodes []string `json:"allowed_nodes,omitempty"`
@@ -6179,6 +6223,7 @@ type CreateRemotesQemuMigrateParams struct {
 }
 
 // CreateRemotesQemuMigrateResponse is the raw JSON returned by POST /pve/remotes/{remote}/qemu/{vmid}/migrate.
+// A remote UPID
 type CreateRemotesQemuMigrateResponse = json.RawMessage
 
 // CreateRemotesQemuMigrate implements Service.CreateRemotesQemuMigrate. POST /pve/remotes/{remote}/qemu/{vmid}/migrate.
@@ -6297,6 +6342,7 @@ type CreateRemotesQemuRemoteMigrateParams struct {
 }
 
 // CreateRemotesQemuRemoteMigrateResponse is the raw JSON returned by POST /pve/remotes/{remote}/qemu/{vmid}/remote-migrate.
+// A remote UPID
 type CreateRemotesQemuRemoteMigrateResponse = json.RawMessage
 
 // CreateRemotesQemuRemoteMigrate implements Service.CreateRemotesQemuRemoteMigrate. POST /pve/remotes/{remote}/qemu/{vmid}/remote-migrate.
@@ -6348,6 +6394,7 @@ type CreateRemotesQemuResumeParams struct {
 }
 
 // CreateRemotesQemuResumeResponse is the raw JSON returned by POST /pve/remotes/{remote}/qemu/{vmid}/resume.
+// A remote UPID
 type CreateRemotesQemuResumeResponse = json.RawMessage
 
 // CreateRemotesQemuResume implements Service.CreateRemotesQemuResume. POST /pve/remotes/{remote}/qemu/{vmid}/resume.
@@ -6401,6 +6448,7 @@ type ListRemotesQemuRrddataParams struct {
 }
 
 // ListRemotesQemuRrddataResponse mirrors the shape returned by GET /pve/remotes/{remote}/qemu/{vmid}/rrddata.
+// A list of RRD data points for a QEMU guest.
 type ListRemotesQemuRrddataResponse []json.RawMessage
 
 // ListRemotesQemuRrddata implements Service.ListRemotesQemuRrddata. GET /pve/remotes/{remote}/qemu/{vmid}/rrddata.
@@ -6452,6 +6500,7 @@ type CreateRemotesQemuShutdownParams struct {
 }
 
 // CreateRemotesQemuShutdownResponse is the raw JSON returned by POST /pve/remotes/{remote}/qemu/{vmid}/shutdown.
+// A remote UPID
 type CreateRemotesQemuShutdownResponse = json.RawMessage
 
 // CreateRemotesQemuShutdown implements Service.CreateRemotesQemuShutdown. POST /pve/remotes/{remote}/qemu/{vmid}/shutdown.
@@ -6503,6 +6552,7 @@ type ListRemotesQemuSnapshotParams struct {
 }
 
 // ListRemotesQemuSnapshotResponse mirrors the shape returned by GET /pve/remotes/{remote}/qemu/{vmid}/snapshot.
+// The list of snapshots, including the current state as 'current'.
 type ListRemotesQemuSnapshotResponse []json.RawMessage
 
 // ListRemotesQemuSnapshot implements Service.ListRemotesQemuSnapshot. GET /pve/remotes/{remote}/qemu/{vmid}/snapshot.
@@ -6560,6 +6610,7 @@ type CreateRemotesQemuSnapshotParams struct {
 }
 
 // CreateRemotesQemuSnapshotResponse is the raw JSON returned by POST /pve/remotes/{remote}/qemu/{vmid}/snapshot.
+// A remote UPID
 type CreateRemotesQemuSnapshotResponse = json.RawMessage
 
 // CreateRemotesQemuSnapshot implements Service.CreateRemotesQemuSnapshot. POST /pve/remotes/{remote}/qemu/{vmid}/snapshot.
@@ -6611,6 +6662,7 @@ type DeleteRemotesQemuSnapshotParams struct {
 }
 
 // DeleteRemotesQemuSnapshotResponse is the raw JSON returned by DELETE /pve/remotes/{remote}/qemu/{vmid}/snapshot/{snapname}.
+// A remote UPID
 type DeleteRemotesQemuSnapshotResponse = json.RawMessage
 
 // DeleteRemotesQemuSnapshot implements Service.DeleteRemotesQemuSnapshot. DELETE /pve/remotes/{remote}/qemu/{vmid}/snapshot/{snapname}.
@@ -6702,6 +6754,7 @@ type CreateRemotesQemuSnapshotRollbackParams struct {
 }
 
 // CreateRemotesQemuSnapshotRollbackResponse is the raw JSON returned by POST /pve/remotes/{remote}/qemu/{vmid}/snapshot/{snapname}/rollback.
+// A remote UPID
 type CreateRemotesQemuSnapshotRollbackResponse = json.RawMessage
 
 // CreateRemotesQemuSnapshotRollback implements Service.CreateRemotesQemuSnapshotRollback. POST /pve/remotes/{remote}/qemu/{vmid}/snapshot/{snapname}/rollback.
@@ -6753,6 +6806,7 @@ type CreateRemotesQemuStartParams struct {
 }
 
 // CreateRemotesQemuStartResponse is the raw JSON returned by POST /pve/remotes/{remote}/qemu/{vmid}/start.
+// A remote UPID
 type CreateRemotesQemuStartResponse = json.RawMessage
 
 // CreateRemotesQemuStart implements Service.CreateRemotesQemuStart. POST /pve/remotes/{remote}/qemu/{vmid}/start.
@@ -6804,6 +6858,7 @@ type ListRemotesQemuStatusParams struct {
 }
 
 // ListRemotesQemuStatusResponse mirrors the shape returned by GET /pve/remotes/{remote}/qemu/{vmid}/status.
+// Object.
 type ListRemotesQemuStatusResponse struct {
 	// Agent QEMU Guest Agent is enabled in config.
 	Agent *client.PVEBool `json:"agent,omitempty"`
@@ -6919,6 +6974,7 @@ type CreateRemotesQemuStopParams struct {
 }
 
 // CreateRemotesQemuStopResponse is the raw JSON returned by POST /pve/remotes/{remote}/qemu/{vmid}/stop.
+// A remote UPID
 type CreateRemotesQemuStopResponse = json.RawMessage
 
 // CreateRemotesQemuStop implements Service.CreateRemotesQemuStop. POST /pve/remotes/{remote}/qemu/{vmid}/stop.
@@ -6964,6 +7020,7 @@ func (s *service) CreateRemotesQemuStop(ctx context.Context, remote string, vmid
 }
 
 // CreateRemotesQemuTermproxyResponse mirrors the shape returned by POST /pve/remotes/{remote}/qemu/{vmid}/termproxy.
+// Object with the user and ticket
 type CreateRemotesQemuTermproxyResponse struct {
 	// Port Always '0'.
 	Port client.PVEInt `json:"port"`
@@ -7007,6 +7064,7 @@ type CreateRemotesQemuVncproxyParams struct {
 }
 
 // CreateRemotesQemuVncproxyResponse mirrors the shape returned by POST /pve/remotes/{remote}/qemu/{vmid}/vncproxy.
+// Object with the user and ticket
 type CreateRemotesQemuVncproxyResponse struct {
 	// Password VNC protocol password for this session.
 	Password *string `json:"password,omitempty"`
@@ -7102,6 +7160,7 @@ type ListRemotesResourcesParams struct {
 }
 
 // ListRemotesResourcesResponse mirrors the shape returned by GET /pve/remotes/{remote}/resources.
+// List all the resources in a PVE cluster.
 type ListRemotesResourcesResponse []json.RawMessage
 
 // ListRemotesResources implements Service.ListRemotesResources. GET /pve/remotes/{remote}/resources.
@@ -7153,6 +7212,7 @@ type ListRemotesTasksParams struct {
 }
 
 // ListRemotesTasksResponse mirrors the shape returned by GET /pve/remotes/{remote}/tasks.
+// A list of tasks.
 type ListRemotesTasksResponse []json.RawMessage
 
 // ListRemotesTasks implements Service.ListRemotesTasks. GET /pve/remotes/{remote}/tasks.
@@ -7295,6 +7355,7 @@ type ListRemotesTasksStatusParams struct {
 }
 
 // ListRemotesTasksStatusResponse mirrors the shape returned by GET /pve/remotes/{remote}/tasks/{upid}/status.
+// Object.
 type ListRemotesTasksStatusResponse struct {
 	// Exitstatus The task's exit status.
 	Exitstatus *string `json:"exitstatus,omitempty"`
@@ -7410,6 +7471,7 @@ type CreateScanParams struct {
 }
 
 // CreateScanResponse mirrors the shape returned by POST /pve/scan.
+// The information required to connect to a remote instance.
 type CreateScanResponse struct {
 	// Authid Authentication ID
 	Authid string `json:"authid"`
