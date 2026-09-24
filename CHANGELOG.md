@@ -5,6 +5,12 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v3.10.1] — 2026-09-24
+
+### Fixed
+
+- The retry loop no longer retries a request whose server certificate the client refused. A pinned fingerprint that does not match, an unknown fingerprint with no way to approve it, and a chain, hostname, or validity failure from standard verification all come back after one attempt, where they used to cost four handshakes and about six seconds of backoff. The error keeps its usual `request failed after 1 attempt(s): ...` wrapping and its verifier sentinel, so callers that match either still see them. One message changes: a certificate that a `VerifyFingerprintCallback` or `ManualVerifyCallback` rejects now surfaces that attempt's own error, such as `unknown certificate fingerprint (manual verification required)`, where the fourth attempt used to report the cached rejection as `certificate fingerprint is not trusted`. A handshake that timed out or was cut off is not a refusal of the certificate, and it stays retryable.
+
 ## [v3.10.0] — 2026-09-03
 
 ### Added
