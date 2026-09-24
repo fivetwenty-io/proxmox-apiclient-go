@@ -2,12 +2,20 @@ package http //nolint:testpackage // white-box: exercises retryMiddleware direct
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"errors"
+	"fmt"
 	"net"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	issl "github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/ssl"
 	apierrors "github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/errors"
 )
 
@@ -206,3 +214,209 @@ func TestIsTerminalTransportError(t *testing.T) {
 type connRefusedError struct{}
 
 func (connRefusedError) Error() string { return "connection refused" }
+
+// tlsCountingClient is countingClient pointed at a TLS test server, with the
+// transport replaced by one built from cfg, so a test decides how the
+// client verifies the server's certificate.
+func tlsCountingClient(t *testing.T, cfg *tls.Config, calls *int32) *Client {
+	t.Helper()
+
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		_, _ = writer.Write([]byte(`{"data":{}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	client := countingClient(t, srv.URL, calls)
+	client.httpClient.Transport = &http.Transport{TLSClientConfig: cfg}
+
+	return client
+}
+
+// TestRetryMiddleware_FingerprintMismatchNotRetried verifies that a server
+// whose certificate fails the fingerprint pin is refused after one attempt.
+// The same certificate comes back on every retry, so retrying only adds the
+// handshakes and the backoff.
+func TestRetryMiddleware_FingerprintMismatchNotRetried(t *testing.T) {
+	t.Parallel()
+
+	var calls int32
+
+	client := tlsCountingClient(t, &tls.Config{
+		InsecureSkipVerify: true,
+		VerifyPeerCertificate: func(_ [][]byte, _ [][]*x509.Certificate) error {
+			return fmt.Errorf("%w: AA:BB", issl.ErrCannotVerifyFingerprint)
+		},
+	}, &calls)
+
+	_, err := client.Do("GET", "/version", nil)
+	if err == nil {
+		t.Fatal("expected an error for a certificate that fails the pin")
+	}
+
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Errorf("calls = %d, want 1 (a pin mismatch must not be retried)", got)
+	}
+
+	if !errors.Is(err, issl.ErrCannotVerifyFingerprint) {
+		t.Errorf("error = %v, want it to wrap ErrCannotVerifyFingerprint", err)
+	}
+
+	if !strings.Contains(err.Error(), "request failed after 1 attempt(s)") {
+		t.Errorf("error = %v, want the retry loop's attempt count", err)
+	}
+}
+
+// TestRetryMiddleware_UntrustedChainNotRetried verifies that a certificate
+// standard chain verification rejects is refused after one attempt.
+func TestRetryMiddleware_UntrustedChainNotRetried(t *testing.T) {
+	t.Parallel()
+
+	var calls int32
+
+	client := tlsCountingClient(t, &tls.Config{RootCAs: x509.NewCertPool(), MinVersion: tls.VersionTLS12}, &calls)
+
+	_, err := client.Do("GET", "/version", nil)
+	if err == nil {
+		t.Fatal("expected an error for a certificate from an unknown authority")
+	}
+
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Errorf("calls = %d, want 1 (an untrusted chain must not be retried)", got)
+	}
+}
+
+// TestIsCertificateVerificationError covers the classifier directly,
+// including handshake failures that are not a refusal of the certificate
+// and so stay retryable.
+func TestIsCertificateVerificationError(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"pin mismatch", fmt.Errorf("%w: AA", issl.ErrCannotVerifyFingerprint), true},
+		{"untrusted fingerprint", fmt.Errorf("%w: AA", issl.ErrCertificateFingerprintNotTrusted), true},
+		{"callback refused", fmt.Errorf("%w for fingerprint AA", issl.ErrCertificateVerificationFailed), true},
+		{"unknown fingerprint", fmt.Errorf("%w: AA", issl.ErrUnknownCertificateFingerprint), true},
+		{"no certificate", issl.ErrNoCertificatesProvided, true},
+		{"chain rejected", &tls.CertificateVerificationError{Err: x509.UnknownAuthorityError{}}, true},
+		{"unknown authority", &url.Error{Op: http.MethodGet, URL: "https://pve", Err: x509.UnknownAuthorityError{}}, true},
+		{"wrong hostname", x509.HostnameError{Host: "pve"}, true},
+		{"expired", x509.CertificateInvalidError{Reason: x509.Expired}, true},
+		{"not tls", tls.RecordHeaderError{Msg: "first record does not look like a TLS handshake"}, false},
+		{"handshake timeout", &url.Error{Op: http.MethodGet, URL: "https://pve", Err: context.DeadlineExceeded}, false},
+		{"read reset", &net.OpError{Op: "read", Err: connRefusedError{}}, false},
+		{"nil", nil, false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := isCertificateVerificationError(tc.err); got != tc.want {
+				t.Errorf("isCertificateVerificationError(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+// pinnedCountingClient builds a client through Options against a TLS test
+// server, so the certificate check runs through configureFingerprintVerification
+// exactly as it does in production, and counts transport attempts the way
+// countingClient does.
+func pinnedCountingClient(t *testing.T, configure func(*Options), calls *int32) *Client {
+	t.Helper()
+
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		_, _ = writer.Write([]byte(`{"data":{}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	addr, ok := srv.Listener.Addr().(*net.TCPAddr)
+	if !ok {
+		t.Fatalf("listener address %v is not TCP", srv.Listener.Addr())
+	}
+
+	opts := minimalHTTPOptions()
+	opts.Protocol = testProtoHTTPS
+	opts.Port = addr.Port
+	configure(opts)
+
+	client, err := NewClient(opts)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+
+	client.maxRetries = 3
+	client.retryDelay = time.Millisecond
+	client.middleware = []Middleware{
+		client.retryMiddleware,
+		func(r *http.Request, next Handler) (*http.Response, error) {
+			atomic.AddInt32(calls, 1)
+
+			return next(r)
+		},
+	}
+
+	return client
+}
+
+// TestRetryMiddleware_PinWiringNotRetried drives the production pinning
+// wiring end to end: a cached pin that does not match the server, and a
+// manual-verification callback that rejects it. Each must end after one
+// transport attempt, which fails if the wiring stops carrying the
+// verifier's sentinel to the retry loop.
+func TestRetryMiddleware_PinWiringNotRetried(t *testing.T) {
+	t.Parallel()
+
+	const wrongPin = "00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF"
+
+	t.Run("cached pin mismatch", func(t *testing.T) {
+		t.Parallel()
+
+		var calls int32
+
+		client := pinnedCountingClient(t, func(opts *Options) {
+			opts.CachedFingerprints = map[string]bool{wrongPin: true}
+		}, &calls)
+
+		_, err := client.Do("GET", "/version", nil)
+		if !errors.Is(err, issl.ErrCannotVerifyFingerprint) {
+			t.Fatalf("error = %v, want it to wrap ErrCannotVerifyFingerprint", err)
+		}
+
+		if got := atomic.LoadInt32(&calls); got != 1 {
+			t.Errorf("calls = %d, want 1 (a pin mismatch must not be retried)", got)
+		}
+	})
+
+	t.Run("manual verification rejected", func(t *testing.T) {
+		t.Parallel()
+
+		var calls, asked int32
+
+		client := pinnedCountingClient(t, func(opts *Options) {
+			opts.ManualVerification = true
+			opts.ManualVerifyCallback = func(issl.ManualVerificationRequest) bool {
+				atomic.AddInt32(&asked, 1)
+
+				return false
+			}
+		}, &calls)
+
+		_, err := client.Do("GET", "/version", nil)
+		if !errors.Is(err, issl.ErrUnknownCertificateFingerprint) {
+			t.Fatalf("error = %v, want it to wrap ErrUnknownCertificateFingerprint", err)
+		}
+
+		if got := atomic.LoadInt32(&calls); got != 1 {
+			t.Errorf("calls = %d, want 1 (a rejected certificate must not be retried)", got)
+		}
+
+		if got := atomic.LoadInt32(&asked); got != 1 {
+			t.Errorf("callback asked %d times, want 1", got)
+		}
+	})
+}
