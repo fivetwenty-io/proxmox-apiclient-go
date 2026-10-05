@@ -799,6 +799,42 @@ func TestGenerated_Cluster_Methods(t *testing.T) {
 			t.Errorf("UpdateCephFlags2: expected error for nil context, got nil")
 		}
 	})
+	t.Run("ListCephHealthMute", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListCephHealthMute(ctx)
+		if err != nil {
+			t.Fatalf("ListCephHealthMute: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListCephHealthMute: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/ceph/health-mute")
+
+		var nilCtx context.Context
+		if _, err := svc.ListCephHealthMute(nilCtx); err == nil {
+			t.Errorf("ListCephHealthMute: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateCephHealthMute", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateCephHealthMute(ctx, "sample-code", &cluster.UpdateCephHealthMuteParams{Value: true})
+		if err != nil {
+			t.Fatalf("UpdateCephHealthMute: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/cluster/ceph/health-mute/sample-code")
+		assertParamValue(t, got.form, "value", "1")
+
+		var nilCtx context.Context
+		if err := svc.UpdateCephHealthMute(nilCtx, "sample-code", &cluster.UpdateCephHealthMuteParams{Value: true}); err == nil {
+			t.Errorf("UpdateCephHealthMute: expected error for nil context, got nil")
+		}
+	})
 	t.Run("ListCephMetadata", func(t *testing.T) {
 		harness.set(http.StatusOK, `{"data":{},"success":1}`)
 

@@ -5668,7 +5668,7 @@ type CreateS3Params struct {
 	Port *int64 `json:"port,omitempty"`
 	// ProviderQuirks List of provider specific feature implementation quirks.
 	ProviderQuirks []string `json:"provider-quirks,omitempty"`
-	// PutRateLimit Rate limit for put requests given as #request/s (deprecated: use active-rate-limit instead).
+	// PutRateLimit Rate limit for put requests given as #request/s (deprecated: use limit-active-requests instead).
 	PutRateLimit *int64 `json:"put-rate-limit,omitempty"`
 	// RateIn Byte size with optional unit (B, KB (base 10), MB, GB, ..., KiB (base 2), MiB, Gib, ...).
 	RateIn *string `json:"rate-in,omitempty"`
@@ -5773,7 +5773,7 @@ type GetS3Response struct {
 	Port *client.PVEInt `json:"port,omitempty"`
 	// ProviderQuirks List of provider specific feature implementation quirks.
 	ProviderQuirks []string `json:"provider-quirks,omitempty"`
-	// PutRateLimit Rate limit for put requests given as #request/s (deprecated: use active-rate-limit instead).
+	// PutRateLimit Rate limit for put requests given as #request/s (deprecated: use limit-active-requests instead).
 	PutRateLimit *client.PVEInt `json:"put-rate-limit,omitempty"`
 	// RateIn Byte size with optional unit (B, KB (base 10), MB, GB, ..., KiB (base 2), MiB, Gib, ...).
 	RateIn *string `json:"rate-in,omitempty"`
@@ -5840,7 +5840,7 @@ type UpdateS3Params struct {
 	Port *int64 `json:"port,omitempty"`
 	// ProviderQuirks List of provider specific feature implementation quirks.
 	ProviderQuirks []string `json:"provider-quirks,omitempty"`
-	// PutRateLimit Rate limit for put requests given as #request/s (deprecated: use active-rate-limit instead).
+	// PutRateLimit Rate limit for put requests given as #request/s (deprecated: use limit-active-requests instead).
 	PutRateLimit *int64 `json:"put-rate-limit,omitempty"`
 	// RateIn Byte size with optional unit (B, KB (base 10), MB, GB, ..., KiB (base 2), MiB, Gib, ...).
 	RateIn *string `json:"rate-in,omitempty"`

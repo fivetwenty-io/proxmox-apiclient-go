@@ -22,7 +22,7 @@ generator emits typed bindings for all six top-level namespaces:
   each node has `path`, `text`, `leaf`, `info` (map of HTTP method to
   endpoint definition), and optional `children`.
 
-  **Current pin: fetched 2026-09-03 — PVE 9.2 (pve-docs 9.2.4, pve-manager 9.2.11) — 447 endpoints / 678 method-operations.**
+  **Current pin: fetched 2026-10-04 — PVE 9.2 (pve-docs 9.2.13, pve-manager 9.2.21) — 449 endpoints / 680 method-operations.**
 
 ## Provenance
 
@@ -103,7 +103,7 @@ ten namespaces (`access`, `admin`, `config`, `nodes`, `ping`, `pull`,
 `push`, `status`, `tape`, `version`), skipping the `/backup` and `/reader`
 HTTP/2 chunk-protocol endpoints and the `GET /` directory index.
 
-**Current pin: fetched 2026-09-03 — PBS 4.2.5 — 246 paths / 367 method-operations in
+**Current pin: fetched 2026-10-04 — PBS 4.2.7 — 246 paths / 367 method-operations in
 the API tree (346 generated once the skips above are applied).**
 
 Dialect differences from the PVE spec (all tolerated by the generator):
