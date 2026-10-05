@@ -5,6 +5,21 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v3.11.0] — 2026-10-05
+
+### Added
+
+- Bindings refreshed to the current upstream API specifications, fetched 2026-10-04: Proxmox VE 9.2 (pve-docs 9.2.13, pve-manager 9.2.21) and Proxmox Backup Server 4.2.7. PVE now covers 680 method-operations (was 678), and the PBS count is unchanged. Proxmox Datacenter Manager stays at 1.1.7 because no newer release has shipped.
+- Ceph health mutes: `Cluster().ListCephHealthMute` (`GET /cluster/ceph/health-mute`) lists the muted health checks, and `Cluster().UpdateCephHealthMute` (`PUT /cluster/ceph/health-mute/{code}`) mutes or unmutes a single check. A muted check stops counting towards the cluster status but stays visible. `Value` chooses between muting and unmuting, `Ttl` sets an expiry such as `2h`, and `Sticky` keeps the mute in place when the check gets worse. The list response is `[]json.RawMessage`, where each entry carries `code`, `sticky`, and optionally `summary` and `ttl`.
+
+### Changed
+
+- The `Force` flag on both Ceph restart-bulk endpoints now documents that muted checks, and checks known to be harmless during a rolling restart, never block the restart, and that the OSD map flags are evaluated only for OSD restarts.
+- `Hotstandby` on the Ceph MDS create params is marked deprecated, because Ceph removed the setting in 14.1.1.
+- The PVE `POST /nodes/{node}/vzdump` permission text now states that `stop` requires `Sys.Modify` on `/nodes/{node}`. The three PBS tape backup and restore endpoints name `/tape/device/{drive}` in their permission text instead of `/tape/drive/{drive}`.
+- PBS network interfaces accept `auto` as a `method` and `method6` value. The `put-rate-limit` deprecation note on the PBS S3 shapes now points to `limit-active-requests`.
+- The PBS 4.2.7 spec wraps many list item schemas in `allOf`. The merged fields are identical to the 4.2.5 fields, and those items were already generated as `json.RawMessage`, so none of the generated types change.
+
 ## [v3.10.1] — 2026-09-24
 
 ### Fixed
