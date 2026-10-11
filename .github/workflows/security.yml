@@ -32,6 +32,7 @@ jobs:
       uses: actions/setup-go@v7
       with:
         go-version-file: 'go.mod'
+        cache: false
 
     # @latest is deliberate: govulncheck should always use the fresh vuln DB.
     - name: Run govulncheck
@@ -53,6 +54,7 @@ jobs:
       uses: actions/setup-go@v7
       with:
         go-version-file: 'go.mod'
+        cache: false
 
     # Installed with the setup-go toolchain rather than the container action:
     # the container pins its own Go with GOTOOLCHAIN=local, which breaks when

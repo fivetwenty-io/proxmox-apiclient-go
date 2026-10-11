@@ -30,6 +30,7 @@ jobs:
       uses: actions/setup-go@v7
       with:
         go-version-file: 'go.mod'
+        cache: false
 
     - name: Verify dependencies
       run: go mod verify
@@ -58,6 +59,7 @@ jobs:
       uses: actions/setup-go@v7
       with:
         go-version-file: 'go.mod'
+        cache: false
 
     # The v2 standard default set covers govet and staticcheck; the enable
     # list in .golangci.yml adds the rest. Bump the pin deliberately.
@@ -65,6 +67,7 @@ jobs:
       uses: golangci/golangci-lint-action@v9
       with:
         version: v2.13.2
+        skip-cache: true
 
   build:
     name: Build
@@ -80,6 +83,7 @@ jobs:
       uses: actions/setup-go@v7
       with:
         go-version-file: 'go.mod'
+        cache: false
 
     # Compiles the library, cmd/pvegen, and every example (all one module)
     # for each supported platform. Pure cross-compiles need no matching
