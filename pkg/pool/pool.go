@@ -1,7 +1,7 @@
 // Package pool wraps a single shared *http.Client (and its *http.Transport)
 // behind a Get/Put/Do API, plus request-level accounting. It does not
-// maintain a pool of distinct client instances: every Get returns the shared
-// *http.Client in effect, and Put only decrements a counter. Actual TCP connection
+// maintain a pool of distinct client instances: every Get returns the same
+// *http.Client, and Put only decrements a counter. Actual TCP connection
 // reuse across concurrent requests comes from http.Transport's own internal
 // idle-connection pool (configured here via MaxConnections and
 // MaxConnectionsPerHost), not from anything this package does itself.
@@ -15,29 +15,18 @@
 // Do/DoWithContext methods, or pull the *http.Client via Get, when you want
 // this accounting layer around outbound HTTP calls.
 //
-// net/http reads a transport's idle limits while requests run, so
-// SetMaxConnections and SetMaxConnectionsPerHost never write the transport in
-// use. They copy the shared *http.Client, give the copy a Clone of its
-// *http.Transport with only the requested limit changed, and make that pair
-// the shared client, which later Get calls return. Everything else a caller
-// configured on the client or transport obtained from Get, such as a cookie
-// jar, a redirect policy, a timeout, TLS settings, a proxy, or a dial
-// function, carries over. A client obtained earlier keeps working on its own
-// transport. That transport's idle connections are closed when it is
-// replaced. The transport New builds has a finite IdleConnTimeout
-// (Config.IdleTimeout, or 90 seconds when that is zero or negative), and its
-// clones keep it, so a connection a replaced transport pools afterwards is
-// closed at the latest that long after its request ends. A caller that sets
-// IdleConnTimeout to zero through Get gives up that bound.
+// SetMaxConnections and SetMaxConnectionsPerHost change the idle limits of
+// the *http.Transport the pool created, in place. net/http reads those limits
+// while requests run and offers no way to change them on a transport in use
+// without a data race, so call the setters before requests are in flight, or
+// while none are. The setters are safe to call concurrently with each other
+// and with Get, Put, Stats, IsHealthy, and Close.
 //
-// When a caller has replaced the shared client's Transport with something
-// other than an *http.Transport, the setters record the new limit in the
-// pool's configuration and leave the client and its Transport unchanged,
-// because the pool cannot clone or retune a RoundTripper it did not build.
-//
-// Closing idle connections calls the Close method of each net.Conn, which a
-// caller's dial function supplies and which may call back into the pool. The
-// pool therefore closes connections only after releasing its own locks.
+// Close closes the idle connections of the transport the pool created, even
+// when a caller has replaced or wrapped the shared client's Transport through
+// Get. Closing a connection calls its net.Conn's Close method, which a
+// caller's dial function supplies and which may call back into the pool, so
+// Close closes connections only after releasing the pool's lock.
 package pool
 
 import (
@@ -49,7 +38,6 @@ import (
 	"time"
 
 	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/constants"
-	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/swaptransport"
 )
 
 var (
@@ -68,7 +56,6 @@ type Config struct {
 	MaxConnectionsPerHost int
 
 	// IdleTimeout is the maximum amount of time a connection may be idle.
-	// Zero or negative means 90 seconds, net/http's DefaultTransport value.
 	IdleTimeout time.Duration
 
 	// ConnectionTimeout is the maximum amount of time to wait for a connection.
@@ -102,13 +89,15 @@ type Pool struct {
 	// setters record their limits in it under mu.
 	config Config
 
-	// client is the shared client in effect. The setters replace it, and its
-	// transport, under mu rather than writing either.
-	client *http.Client
+	// transport is the transport New created. The pool keeps its own
+	// reference, so the setters and Close reach it even after a caller
+	// replaces or wraps client.Transport. The setters write its idle limits
+	// under mu.
+	transport *http.Transport
 
-	// retired holds the most recent transports the setters replaced, so Close
-	// still reaches connections released to them afterwards.
-	retired swaptransport.Retired
+	// client is the shared client Get returns for the life of the pool. The
+	// pool never replaces it.
+	client *http.Client
 
 	mu     sync.RWMutex
 	stats  *poolStats
@@ -163,20 +152,26 @@ func New(config *Config) *Pool {
 	// Copy the caller's Config so pools built from the same one share no
 	// state; see Config.
 	own := *config
+	transport := newTransport(&own)
 
 	return &Pool{
-		config: own,
-		client: newClient(&own),
+		config:    own,
+		transport: transport,
+		client: &http.Client{
+			Transport:     transport,
+			CheckRedirect: nil,
+			Jar:           nil,
+			Timeout:       own.ConnectionTimeout,
+		},
 		mu:     sync.RWMutex{},
 		stats:  &poolStats{},
 		closed: false,
 	}
 }
 
-// newClient builds a new *http.Client and *http.Transport from config. The
-// transport's IdleConnTimeout is always finite; see the package doc.
-func newClient(config *Config) *http.Client {
-	transport := &http.Transport{
+// newTransport builds the pool's *http.Transport from config.
+func newTransport(config *Config) *http.Transport {
+	return &http.Transport{
 		Proxy:                  nil,
 		OnProxyConnectResponse: nil,
 		DialContext:            nil,
@@ -188,7 +183,7 @@ func newClient(config *Config) *http.Client {
 		MaxIdleConns:           config.MaxConnections,
 		MaxIdleConnsPerHost:    config.MaxConnectionsPerHost,
 		MaxConnsPerHost:        0,
-		IdleConnTimeout:        swaptransport.FiniteIdleTimeout(config.IdleTimeout),
+		IdleConnTimeout:        config.IdleTimeout,
 		ResponseHeaderTimeout:  config.ConnectionTimeout,
 		ExpectContinueTimeout:  time.Duration(0),
 		TLSNextProto:           nil,
@@ -201,23 +196,13 @@ func newClient(config *Config) *http.Client {
 		HTTP2:                  nil,
 		Protocols:              nil,
 	}
-
-	return &http.Client{
-		Transport:     transport,
-		CheckRedirect: nil,
-		Jar:           nil,
-		Timeout:       config.ConnectionTimeout,
-	}
 }
 
-// Get returns the shared *http.Client in effect and increments the
-// active/total usage counters. Its Transport is an *http.Transport unless the
-// caller replaced it. Get returns the same *http.Client until
-// SetMaxConnections or SetMaxConnectionsPerHost changes a limit, and the new
-// shared client after that, which carries over what the caller configured on
-// the old one; it does not check out a distinct connection. Configure the
-// client before other goroutines use it or call the setters, because the
-// setters copy it and the pool does not guard writes to it.
+// Get returns the shared *http.Client and increments the active/total usage
+// counters. It always returns the same *http.Client instance for the life
+// of the Pool; it does not check out a distinct connection. The pool does not
+// guard writes to the client or its Transport, so configure them before other
+// goroutines use the client.
 func (p *Pool) Get() (*http.Client, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
@@ -321,44 +306,48 @@ func (p *Pool) Stats() Stats {
 	return p.stats.Stats
 }
 
-// Close closes the connection pool and the idle connections of the shared
-// client and of the most recent transports the setters replaced. It marks the
-// pool closed under its lock and closes the connections after releasing it,
-// because closing a connection runs caller code that may call back into the
-// pool. It is safe to call Close more than once.
+// Close closes the connection pool and the idle connections of the transport
+// New created, reached through the pool's own reference so a caller that
+// replaced or wrapped the shared client's Transport cannot hide it. When that
+// Transport is a different RoundTripper with a CloseIdleConnections method,
+// Close calls it too. Close marks the pool closed under its lock and closes
+// the connections after releasing it, because closing a connection runs
+// caller code that may call back into the pool. It is safe to call Close more
+// than once.
 func (p *Pool) Close() error {
-	client, retired := p.markClosed()
-	if client == nil {
-		return nil
+	for _, closer := range p.markClosed() {
+		closer.CloseIdleConnections()
 	}
-
-	client.CloseIdleConnections()
-	retired.CloseIdleConnections()
 
 	return nil
 }
 
 // SetMaxConnections updates the maximum number of idle connections
-// (MaxIdleConns) for subsequent requests. It is safe to call while requests
-// run: when the limit changes, it installs a copy of the shared client with a
-// Clone of its transport carrying the new limit, rather than writing the
-// transport in use, as the package doc describes. Requests already in flight,
-// and clients obtained from Get before the call, keep using the replaced
-// transport. When the shared client's Transport is not an *http.Transport,
-// it records the limit and changes nothing else.
+// (MaxIdleConns). It records the limit in the pool's configuration and
+// changes the shared transport in place, so the client Get returns stays the
+// same and every caller sees the new limit, including through a wrapper a
+// caller installed around the pool's transport. net/http reads the limit
+// while requests run, so call SetMaxConnections before requests are in
+// flight, or while none are; it is safe against concurrent setter, Get, Put,
+// Stats, IsHealthy, and Close calls.
 func (p *Pool) SetMaxConnections(maxConns int) {
-	p.retune(maxConns,
-		func(config *Config) *int { return &config.MaxConnections },
-		func(transport *http.Transport) *int { return &transport.MaxIdleConns })
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	p.config.MaxConnections = maxConns
+	p.transport.MaxIdleConns = maxConns
 }
 
 // SetMaxConnectionsPerHost updates the maximum idle connections per host
-// (MaxIdleConnsPerHost) for subsequent requests, in the same way as
-// SetMaxConnections.
+// (MaxIdleConnsPerHost). Like SetMaxConnections, it changes the shared
+// transport in place and must be called before requests are in flight, or
+// while none are.
 func (p *Pool) SetMaxConnectionsPerHost(maxConnsPerHost int) {
-	p.retune(maxConnsPerHost,
-		func(config *Config) *int { return &config.MaxConnectionsPerHost },
-		func(transport *http.Transport) *int { return &transport.MaxIdleConnsPerHost })
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	p.config.MaxConnectionsPerHost = maxConnsPerHost
+	p.transport.MaxIdleConnsPerHost = maxConnsPerHost
 }
 
 // IsHealthy checks if the pool is healthy.
@@ -382,64 +371,38 @@ func (p *Pool) IsHealthy() bool {
 	return true
 }
 
-// markClosed marks the pool closed and returns the shared client and the
-// retired transports for Close to close, or a nil client when the pool was
-// already closed.
-func (p *Pool) markClosed() (*http.Client, swaptransport.Idle) {
+// idleCloser is a RoundTripper that can close its idle connections, as
+// *http.Transport and well-behaved wrappers can.
+type idleCloser interface {
+	CloseIdleConnections()
+}
+
+// markClosed marks the pool closed and returns what Close closes: the
+// transport New created, and the shared client's Transport when a caller
+// replaced it with a different RoundTripper that has a CloseIdleConnections
+// method. It returns nothing when the pool was already closed. A nil
+// Transport means http.DefaultTransport, which the pool does not own and so
+// never closes.
+func (p *Pool) markClosed() []idleCloser {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
 	if p.closed {
-		return nil, nil
+		return nil
 	}
 
 	p.closed = true
 
-	return p.client, p.retired.Snapshot()
-}
+	closers := []idleCloser{p.transport}
 
-// retune records value in the configuration field configField selects and,
-// on an open pool whose shared client sends through an *http.Transport whose
-// transportField differs from value, installs a copy of the client with a
-// Clone of that transport carrying value. It closes the replaced transports'
-// idle connections after releasing mu.
-func (p *Pool) retune(value int, configField func(*Config) *int, transportField func(*http.Transport) *int) {
-	p.swapClient(value, configField, transportField).CloseIdleConnections()
-}
-
-// swapClient does retune's work under mu and returns the transports whose idle
-// connections retune closes once mu is released.
-func (p *Pool) swapClient(
-	value int,
-	configField func(*Config) *int,
-	transportField func(*http.Transport) *int,
-) swaptransport.Idle {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	*configField(&p.config) = value
-
-	if p.closed {
-		return nil
+	current := p.client.Transport
+	if current == nil || current == http.RoundTripper(p.transport) {
+		return closers
 	}
 
-	// A caller may have replaced the Transport through Get. Only an
-	// *http.Transport can be cloned without losing its configuration; any
-	// other RoundTripper, including a nil one that means
-	// http.DefaultTransport, is left alone.
-	current, ok := p.client.Transport.(*http.Transport)
-	if !ok || current == nil || *transportField(current) == value {
-		return nil
+	if closer, ok := current.(idleCloser); ok {
+		closers = append(closers, closer)
 	}
 
-	nextTransport := current.Clone()
-	*transportField(nextTransport) = value
-
-	// Copy the client so its Jar, CheckRedirect, Timeout, and any other field
-	// a caller set carry over.
-	nextClient := *p.client
-	nextClient.Transport = nextTransport
-	p.client = &nextClient
-
-	return p.retired.Add(current)
+	return closers
 }

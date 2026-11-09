@@ -112,10 +112,12 @@ type reentrantCase struct {
 
 // TestIdleClose_ReentrantConnectionDoesNotDeadlock leaves a connection from a
 // reentrant dial function idle on the client or the pool, then closes it
-// through each SDK path that closes idle connections. The connection's Close
-// calls SetTimeout, SetKeepAlive, and both pool setters, which deadlocks if
-// the closing path still holds tuneMu, the swap transport's lock, the retired
-// list's lock, or the pool's lock.
+// through each SDK path that closes idle connections: the client's
+// SetKeepAlive and Close, and the pool's Close. The pool setters change the
+// pool's transport in place and close no connection, so they are not closing
+// paths. The connection's Close calls SetTimeout, SetKeepAlive, and both pool
+// setters, which deadlocks if the closing path still holds tuneMu, the swap
+// transport's lock, the retired list's lock, or the pool's lock.
 func TestIdleClose_ReentrantConnectionDoesNotDeadlock(t *testing.T) {
 	t.Parallel()
 
@@ -126,16 +128,6 @@ func TestIdleClose_ReentrantConnectionDoesNotDeadlock(t *testing.T) {
 		},
 		"client Close": {
 			trigger:     func(client *Client, _ *pool.Pool) { _ = client.Close() },
-			poolStaysUp: true,
-		},
-		"pool SetMaxConnections": {
-			viaPool:     true,
-			trigger:     func(_ *Client, poolInstance *pool.Pool) { poolInstance.SetMaxConnections(11) },
-			poolStaysUp: true,
-		},
-		"pool SetMaxConnectionsPerHost": {
-			viaPool:     true,
-			trigger:     func(_ *Client, poolInstance *pool.Pool) { poolInstance.SetMaxConnectionsPerHost(11) },
 			poolStaysUp: true,
 		},
 		"pool Close": {

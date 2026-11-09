@@ -1,10 +1,7 @@
 package pool_test
 
 import (
-	"context"
-	"io"
 	"net/http"
-	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
@@ -32,90 +29,34 @@ func sharedClient(t *testing.T, poolInstance *pool.Pool) (*http.Client, *http.Tr
 	return client, transport
 }
 
-// TestPoolSetters_InstallNewClient verifies the setters make a new client and
-// transport carrying the new limits the shared client, leave the replaced pair
-// untouched, and skip a call that changes nothing.
-func TestPoolSetters_InstallNewClient(t *testing.T) {
+// TestPoolNew_UsesConfiguredIdleTimeout verifies the pool's transport takes
+// Config.IdleTimeout as it is, so zero keeps idle connections without a time
+// limit, as net/http defines for IdleConnTimeout.
+func TestPoolNew_UsesConfiguredIdleTimeout(t *testing.T) {
 	t.Parallel()
 
-	poolInstance := pool.New(pool.DefaultConfig())
-
-	t.Cleanup(func() { _ = poolInstance.Close() })
-
-	original, originalTransport := sharedClient(t, poolInstance)
-	originalIdle, originalPerHost := originalTransport.MaxIdleConns, originalTransport.MaxIdleConnsPerHost
-
-	poolInstance.SetMaxConnections(originalIdle + 7)
-	poolInstance.SetMaxConnectionsPerHost(originalPerHost + 3)
-
-	current, currentTransport := sharedClient(t, poolInstance)
-
-	if current == original || currentTransport == originalTransport {
-		t.Fatal("the setters did not install a new client and transport")
-	}
-
-	if currentTransport.MaxIdleConns != originalIdle+7 || currentTransport.MaxIdleConnsPerHost != originalPerHost+3 {
-		t.Errorf("current idle limits = %d/%d, want %d/%d",
-			currentTransport.MaxIdleConns, currentTransport.MaxIdleConnsPerHost, originalIdle+7, originalPerHost+3)
-	}
-
-	if originalTransport.MaxIdleConns != originalIdle || originalTransport.MaxIdleConnsPerHost != originalPerHost {
-		t.Error("a setter wrote the transport that was in use")
-	}
-
-	if original.Transport != originalTransport {
-		t.Error("a setter changed the Transport of a client already handed out")
-	}
-
-	poolInstance.SetMaxConnections(originalIdle + 7)
-	poolInstance.SetMaxConnectionsPerHost(originalPerHost + 3)
-
-	if again, _ := sharedClient(t, poolInstance); again != current {
-		t.Error("a setter that changed nothing replaced the shared client")
-	}
-}
-
-// TestPool_TransportsHaveFiniteIdleTimeout verifies every transport the pool
-// builds, at New and after a setter, has an IdleConnTimeout, falling back to
-// 90 seconds when Config.IdleTimeout is zero.
-func TestPool_TransportsHaveFiniteIdleTimeout(t *testing.T) {
-	t.Parallel()
-
-	cases := map[string]struct {
-		configured time.Duration
-		want       time.Duration
-	}{
-		"configured": {configured: 7 * time.Second, want: 7 * time.Second},
-		"zero":       {configured: 0, want: 90 * time.Second},
-		"negative":   {configured: -time.Second, want: 90 * time.Second},
-	}
-
-	for name, tc := range cases {
+	for name, timeout := range map[string]time.Duration{"configured": 7 * time.Second, "zero": 0} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
 			config := pool.DefaultConfig()
-			config.IdleTimeout = tc.configured
+			config.IdleTimeout = timeout
 
 			poolInstance := pool.New(config)
 
 			t.Cleanup(func() { _ = poolInstance.Close() })
 
-			_, initial := sharedClient(t, poolInstance)
-			poolInstance.SetMaxConnections(config.MaxConnections + 1)
-			_, retuned := sharedClient(t, poolInstance)
-
-			if initial.IdleConnTimeout != tc.want || retuned.IdleConnTimeout != tc.want {
-				t.Errorf("IdleConnTimeout initial/retuned = %v/%v, want %v",
-					initial.IdleConnTimeout, retuned.IdleConnTimeout, tc.want)
+			_, transport := sharedClient(t, poolInstance)
+			if transport.IdleConnTimeout != timeout {
+				t.Errorf("IdleConnTimeout = %v, want %v", transport.IdleConnTimeout, timeout)
 			}
 		})
 	}
 }
 
-// TestPoolSetters_ClosedPoolRecordsOnly verifies a setter on a closed pool
-// builds no client.
-func TestPoolSetters_ClosedPoolRecordsOnly(t *testing.T) {
+// TestPoolSetters_AfterClose verifies the setters on a closed pool return
+// without panicking and leave the pool closed.
+func TestPoolSetters_AfterClose(t *testing.T) {
 	t.Parallel()
 
 	poolInstance := pool.New(pool.DefaultConfig())
@@ -134,76 +75,91 @@ func TestPoolSetters_ClosedPoolRecordsOnly(t *testing.T) {
 	}
 }
 
-// TestPoolSetters_RaceWithRequests calls both setters while requests run and
-// their response bodies close, so go test -race catches a write to the
-// transport or client in use.
-func TestPoolSetters_RaceWithRequests(t *testing.T) {
+// TestPoolSetters_ConcurrentWithPoolMethods runs both setters from several
+// goroutines alongside Get, Put, Stats, IsHealthy, and finally Close, with no
+// request in flight, so go test -race catches an unguarded write to the
+// pool's configuration or transport.
+func TestPoolSetters_ConcurrentWithPoolMethods(t *testing.T) {
 	t.Parallel()
-
-	srv := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
-		_, _ = io.WriteString(writer, "ok")
-	}))
-	t.Cleanup(srv.Close)
 
 	poolInstance := pool.New(pool.DefaultConfig())
 
-	t.Cleanup(func() { _ = poolInstance.Close() })
+	var group sync.WaitGroup
 
-	stop := make(chan struct{})
-	tuned := make(chan struct{})
-
-	go func() {
-		defer close(tuned)
-
-		for i := 0; ; i++ {
-			select {
-			case <-stop:
-				return
-			default:
-				poolInstance.SetMaxConnections(1 + i%4)
-				poolInstance.SetMaxConnectionsPerHost(1 + i%3)
+	for i := range 4 {
+		group.Go(func() {
+			for j := range 200 {
+				poolInstance.SetMaxConnections(1 + (i+j)%7)
+				poolInstance.SetMaxConnectionsPerHost(1 + (i+j)%5)
 			}
+		})
+	}
+
+	group.Go(func() {
+		for range 200 {
+			client, err := poolInstance.Get()
+			if err != nil {
+				return
+			}
+
+			poolInstance.Put(client)
 		}
-	}()
+	})
+
+	group.Go(func() {
+		for range 200 {
+			_ = poolInstance.Stats()
+			_ = poolInstance.IsHealthy()
+		}
+	})
+
+	group.Go(func() {
+		time.Sleep(time.Millisecond)
+
+		_ = poolInstance.Close()
+	})
+
+	group.Wait()
+
+	if poolInstance.IsHealthy() {
+		t.Error("the pool reports healthy after Close")
+	}
+}
+
+// TestPoolNew_CopiesConfig verifies two pools built from one *Config share
+// nothing: setters on both run concurrently without a race, and neither
+// writes the caller's Config.
+func TestPoolNew_CopiesConfig(t *testing.T) {
+	t.Parallel()
+
+	config := pool.DefaultConfig()
+	wantMax, wantPerHost := config.MaxConnections, config.MaxConnectionsPerHost
+
+	first := pool.New(config)
+	second := pool.New(config)
+
+	t.Cleanup(func() {
+		_ = first.Close()
+		_ = second.Close()
+	})
 
 	var group sync.WaitGroup
 
-	for range 4 {
+	for i := range 4 {
 		group.Go(func() {
-			for range 25 {
-				if !sendThroughPool(t, poolInstance, srv.URL) {
-					return
-				}
+			for j := range 50 {
+				first.SetMaxConnections(1 + (i+j)%7)
+				second.SetMaxConnectionsPerHost(1 + (i+j)%5)
+				first.SetMaxConnectionsPerHost(1 + (i+j)%3)
+				second.SetMaxConnections(1 + (i+j)%6)
 			}
 		})
 	}
 
 	group.Wait()
-	close(stop)
-	<-tuned
-}
 
-// sendThroughPool sends one GET through the pool and drains and closes the
-// body, reporting failures with t.Errorf so it is safe off the test goroutine.
-func sendThroughPool(t *testing.T, poolInstance *pool.Pool, url string) bool {
-	t.Helper()
-
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
-	if err != nil {
-		t.Errorf("NewRequest: %v", err)
-
-		return false
+	if config.MaxConnections != wantMax || config.MaxConnectionsPerHost != wantPerHost {
+		t.Errorf("caller Config = %d/%d after the setters, want it unchanged at %d/%d",
+			config.MaxConnections, config.MaxConnectionsPerHost, wantMax, wantPerHost)
 	}
-
-	resp, err := poolInstance.Do(req)
-	if err != nil {
-		t.Errorf("Do during the setters: %v", err)
-
-		return false
-	}
-
-	_, _ = io.Copy(io.Discard, resp.Body)
-	_ = resp.Body.Close()
-
-	return true
 }
