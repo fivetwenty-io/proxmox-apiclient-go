@@ -100,7 +100,8 @@ type Client struct {
 	// writing one that requests are using. Nil when a wrapper is installed.
 	swap *swaptransport.Transport
 
-	// tuneMu serializes SetTimeout and SetKeepAlive.
+	// tuneMu serializes SetTimeout and SetKeepAlive. It is never held while
+	// calling caller code such as the logger, which may call either setter.
 	tuneMu sync.Mutex
 }
 
@@ -766,37 +767,14 @@ func (c *Client) SetTimeout(timeout time.Duration) {
 // needs other limits sets them on the base, or on its clone, inside the hook.
 // It is safe to call while requests are in flight.
 func (c *Client) SetKeepAlive(connections int) {
-	c.tuneMu.Lock()
-	defer c.tuneMu.Unlock()
-
-	if c.options != nil {
-		c.options.KeepAlive = connections
-	}
-
-	if c.swap == nil {
+	if !c.setKeepAlive(connections) {
+		// Logged after tuneMu is released: the logger is caller code and may
+		// call SetTimeout or SetKeepAlive itself.
 		c.logWarn("SetKeepAlive left the transport unchanged", map[string]interface{}{
 			"keep_alive": connections,
 			"reason":     "the client's transport comes from WrapTransport, which owns its idle limits",
 		})
-
-		return
 	}
-
-	perHost := c.options == nil || c.options.MaxIdleConnsPerHost <= 0
-
-	c.swap.Update(func(next *http.Transport) bool {
-		if next.MaxIdleConns == connections && (!perHost || next.MaxIdleConnsPerHost == connections) {
-			return false
-		}
-
-		next.MaxIdleConns = connections
-
-		if perHost {
-			next.MaxIdleConnsPerHost = connections
-		}
-
-		return true
-	})
 }
 
 // SetMaxRetries sets the maximum number of retries for subsequent requests. A
@@ -924,6 +902,39 @@ func (c *Client) CacheStats() *cache.CacheStats {
 	}
 
 	return nil
+}
+
+// setKeepAlive records connections and retunes the transport under tuneMu,
+// reporting false when there is no swappable transport to retune.
+func (c *Client) setKeepAlive(connections int) bool {
+	c.tuneMu.Lock()
+	defer c.tuneMu.Unlock()
+
+	if c.options != nil {
+		c.options.KeepAlive = connections
+	}
+
+	if c.swap == nil {
+		return false
+	}
+
+	perHost := c.options == nil || c.options.MaxIdleConnsPerHost <= 0
+
+	c.swap.Update(func(next *http.Transport) bool {
+		if next.MaxIdleConns == connections && (!perHost || next.MaxIdleConnsPerHost == connections) {
+			return false
+		}
+
+		next.MaxIdleConns = connections
+
+		if perHost {
+			next.MaxIdleConnsPerHost = connections
+		}
+
+		return true
+	})
+
+	return true
 }
 
 // tfa returns the TFA handler in effect, or nil when none is set.

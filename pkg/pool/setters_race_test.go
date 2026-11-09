@@ -7,14 +7,14 @@ import (
 	"net/http/httptest"
 	"sync"
 	"testing"
+	"time"
 
-	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/swaptransport"
 	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/pool"
 )
 
-// sharedTransport returns the swappable transport behind the pool's shared
-// client.
-func sharedTransport(t *testing.T, poolInstance *pool.Pool) (*http.Client, *swaptransport.Transport) {
+// sharedClient returns the pool's shared client and its *http.Transport,
+// failing the test if the Transport is anything else.
+func sharedClient(t *testing.T, poolInstance *pool.Pool) (*http.Client, *http.Transport) {
 	t.Helper()
 
 	client, err := poolInstance.Get()
@@ -24,58 +24,119 @@ func sharedTransport(t *testing.T, poolInstance *pool.Pool) (*http.Client, *swap
 
 	poolInstance.Put(client)
 
-	swap, ok := client.Transport.(*swaptransport.Transport)
+	transport, ok := client.Transport.(*http.Transport)
 	if !ok {
-		t.Fatalf("Transport is %T, want *swaptransport.Transport", client.Transport)
+		t.Fatalf("Transport is %T, want *http.Transport", client.Transport)
 	}
 
-	return client, swap
+	return client, transport
 }
 
-// TestPoolSetters_InstallRetunedTransport verifies the setters reach the
-// transport later requests use, leave the replaced one untouched, keep the
-// same shared client, and skip a call that changes nothing.
-func TestPoolSetters_InstallRetunedTransport(t *testing.T) {
+// TestPoolSetters_InstallNewClient verifies the setters make a new client and
+// transport carrying the new limits the shared client, leave the replaced pair
+// untouched, and skip a call that changes nothing.
+func TestPoolSetters_InstallNewClient(t *testing.T) {
 	t.Parallel()
 
 	poolInstance := pool.New(pool.DefaultConfig())
 
 	t.Cleanup(func() { _ = poolInstance.Close() })
 
-	client, swap := sharedTransport(t, poolInstance)
-	original := swap.Load()
-	originalIdle, originalPerHost := original.MaxIdleConns, original.MaxIdleConnsPerHost
+	original, originalTransport := sharedClient(t, poolInstance)
+	originalIdle, originalPerHost := originalTransport.MaxIdleConns, originalTransport.MaxIdleConnsPerHost
 
 	poolInstance.SetMaxConnections(originalIdle + 7)
 	poolInstance.SetMaxConnectionsPerHost(originalPerHost + 3)
 
-	current := swap.Load()
-	if current.MaxIdleConns != originalIdle+7 || current.MaxIdleConnsPerHost != originalPerHost+3 {
-		t.Errorf("current idle limits = %d/%d, want %d/%d",
-			current.MaxIdleConns, current.MaxIdleConnsPerHost, originalIdle+7, originalPerHost+3)
+	current, currentTransport := sharedClient(t, poolInstance)
+
+	if current == original || currentTransport == originalTransport {
+		t.Fatal("the setters did not install a new client and transport")
 	}
 
-	if original.MaxIdleConns != originalIdle || original.MaxIdleConnsPerHost != originalPerHost {
+	if currentTransport.MaxIdleConns != originalIdle+7 || currentTransport.MaxIdleConnsPerHost != originalPerHost+3 {
+		t.Errorf("current idle limits = %d/%d, want %d/%d",
+			currentTransport.MaxIdleConns, currentTransport.MaxIdleConnsPerHost, originalIdle+7, originalPerHost+3)
+	}
+
+	if originalTransport.MaxIdleConns != originalIdle || originalTransport.MaxIdleConnsPerHost != originalPerHost {
 		t.Error("a setter wrote the transport that was in use")
 	}
 
-	if again, _ := sharedTransport(t, poolInstance); again != client {
-		t.Error("Get returned a different *http.Client after the setters ran")
+	if original.Transport != originalTransport {
+		t.Error("a setter changed the Transport of a client already handed out")
 	}
-
-	retired := swap.RetiredCount()
 
 	poolInstance.SetMaxConnections(originalIdle + 7)
 	poolInstance.SetMaxConnectionsPerHost(originalPerHost + 3)
 
-	if swap.RetiredCount() != retired {
-		t.Error("a setter that changed nothing replaced the transport")
+	if again, _ := sharedClient(t, poolInstance); again != current {
+		t.Error("a setter that changed nothing replaced the shared client")
+	}
+}
+
+// TestPool_TransportsHaveFiniteIdleTimeout verifies every transport the pool
+// builds, at New and after a setter, has an IdleConnTimeout, falling back to
+// 90 seconds when Config.IdleTimeout is zero.
+func TestPool_TransportsHaveFiniteIdleTimeout(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]struct {
+		configured time.Duration
+		want       time.Duration
+	}{
+		"configured": {configured: 7 * time.Second, want: 7 * time.Second},
+		"zero":       {configured: 0, want: 90 * time.Second},
+		"negative":   {configured: -time.Second, want: 90 * time.Second},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			config := pool.DefaultConfig()
+			config.IdleTimeout = tc.configured
+
+			poolInstance := pool.New(config)
+
+			t.Cleanup(func() { _ = poolInstance.Close() })
+
+			_, initial := sharedClient(t, poolInstance)
+			poolInstance.SetMaxConnections(config.MaxConnections + 1)
+			_, retuned := sharedClient(t, poolInstance)
+
+			if initial.IdleConnTimeout != tc.want || retuned.IdleConnTimeout != tc.want {
+				t.Errorf("IdleConnTimeout initial/retuned = %v/%v, want %v",
+					initial.IdleConnTimeout, retuned.IdleConnTimeout, tc.want)
+			}
+		})
+	}
+}
+
+// TestPoolSetters_ClosedPoolRecordsOnly verifies a setter on a closed pool
+// builds no client.
+func TestPoolSetters_ClosedPoolRecordsOnly(t *testing.T) {
+	t.Parallel()
+
+	poolInstance := pool.New(pool.DefaultConfig())
+
+	err := poolInstance.Close()
+	if err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	poolInstance.SetMaxConnections(1)
+	poolInstance.SetMaxConnectionsPerHost(1)
+
+	_, err = poolInstance.Get()
+	if err == nil {
+		t.Fatal("Get on a closed pool succeeded")
 	}
 }
 
 // TestPoolSetters_RaceWithRequests calls both setters while requests run and
 // their response bodies close, so go test -race catches a write to the
-// transport in use.
+// transport or client in use.
 func TestPoolSetters_RaceWithRequests(t *testing.T) {
 	t.Parallel()
 

@@ -326,3 +326,69 @@ func hammerPublicSetters(cli pve.Client, workers, requests int) int32 {
 
 	return failures.Load()
 }
+
+// reentrantPublicLogger calls back into the public client from Warn, once.
+type reentrantPublicLogger struct {
+	cli     atomic.Pointer[pve.Client]
+	entered atomic.Bool
+	warns   atomic.Int32
+}
+
+func (*reentrantPublicLogger) Debug(string, map[string]interface{}) {}
+func (*reentrantPublicLogger) Info(string, map[string]interface{})  {}
+func (*reentrantPublicLogger) Error(string, map[string]interface{}) {}
+
+func (l *reentrantPublicLogger) Warn(string, map[string]interface{}) {
+	l.warns.Add(1)
+
+	if l.entered.Swap(true) {
+		return
+	}
+
+	cli := *l.cli.Load()
+	cli.SetTimeout(3 * time.Second)
+	cli.SetKeepAlive(2)
+}
+
+// TestSetKeepAlive_ReentrantLoggerDoesNotDeadlock verifies the public
+// SetKeepAlive holds no lock while the inner client warns, so a logger whose
+// Warn calls SetTimeout and SetKeepAlive returns instead of blocking forever.
+func TestSetKeepAlive_ReentrantLoggerDoesNotDeadlock(t *testing.T) {
+	t.Parallel()
+
+	srv := newWrapTestServer(t)
+	host, port := parseHostPort(srv.URL)
+
+	cli, err := pve.NewClient(pve.Options{
+		Host:          host,
+		Port:          port,
+		Protocol:      testProtoHTTP,
+		APIToken:      testAPIToken,
+		WrapTransport: func(b *http.Transport) http.RoundTripper { return &pathRecorder{base: b} },
+	})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+
+	logger := &reentrantPublicLogger{}
+	logger.cli.Store(&cli)
+	cli.SetLogger(logger)
+
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+
+		cli.SetKeepAlive(4)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("SetKeepAlive deadlocked when its logger called SetTimeout and SetKeepAlive")
+	}
+
+	if got := logger.warns.Load(); got != 2 {
+		t.Errorf("Warn calls = %d, want 2 (the outer call and the reentrant one)", got)
+	}
+}

@@ -102,7 +102,8 @@ type client struct {
 	options    *Options
 	httpClient HTTPClient
 
-	// tuneMu serializes SetTimeout and SetKeepAlive, which write options.
+	// tuneMu guards the options writes in SetTimeout and SetKeepAlive. It is
+	// never held while calling the inner client, which may call caller code.
 	tuneMu sync.Mutex
 }
 
@@ -389,9 +390,11 @@ func (c *client) UpdateCSRFToken(token string) {
 // Options.WrapTransport, because the timeout applies above the transport.
 func (c *client) SetTimeout(timeout time.Duration) {
 	c.tuneMu.Lock()
-	defer c.tuneMu.Unlock()
-
 	c.options.Timeout = timeout
+	c.tuneMu.Unlock()
+
+	// Called after tuneMu is released: the inner client may call the
+	// caller's logger, which may call back into this client.
 	c.httpClient.SetTimeout(timeout)
 }
 
@@ -403,9 +406,11 @@ func (c *client) SetTimeout(timeout time.Duration) {
 // describes.
 func (c *client) SetKeepAlive(connections int) {
 	c.tuneMu.Lock()
-	defer c.tuneMu.Unlock()
-
 	c.options.KeepAlive = connections
+	c.tuneMu.Unlock()
+
+	// Called after tuneMu is released: the inner client may call the
+	// caller's logger, which may call back into this client.
 	c.httpClient.SetKeepAlive(connections)
 }
 

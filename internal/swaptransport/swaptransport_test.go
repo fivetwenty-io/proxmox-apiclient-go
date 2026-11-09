@@ -1,10 +1,12 @@
 package swaptransport_test
 
 import (
+	"context"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httptrace"
 	"sync"
 	"testing"
 	"time"
@@ -214,4 +216,154 @@ func TestUpdate_RaceWithRequests(t *testing.T) {
 	<-tuned
 
 	client.CloseIdleConnections()
+}
+
+func TestNew_GivesTransportWithoutIdleTimeoutTheDefault(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]struct {
+		configured time.Duration
+		want       time.Duration
+	}{
+		"configured": {configured: 7 * time.Second, want: 7 * time.Second},
+		"zero":       {configured: 0, want: swaptransport.DefaultIdleConnTimeout},
+		"negative":   {configured: -time.Second, want: swaptransport.DefaultIdleConnTimeout},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			swap := swaptransport.New(&http.Transport{IdleConnTimeout: tc.configured})
+			if got := swap.Load().IdleConnTimeout; got != tc.want {
+				t.Errorf("IdleConnTimeout after New = %v, want %v", got, tc.want)
+			}
+
+			swap.Update(func(next *http.Transport) bool {
+				next.IdleConnTimeout = 0
+
+				return true
+			})
+
+			if got := swap.Load().IdleConnTimeout; got != swaptransport.DefaultIdleConnTimeout {
+				t.Errorf("IdleConnTimeout after an Update that cleared it = %v, want %v",
+					got, swaptransport.DefaultIdleConnTimeout)
+			}
+		})
+	}
+}
+
+func TestDefaultIdleConnTimeout_MatchesDefaultTransport(t *testing.T) {
+	t.Parallel()
+
+	defaultTransport, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		t.Skipf("http.DefaultTransport is %T", http.DefaultTransport)
+	}
+
+	if defaultTransport.IdleConnTimeout != swaptransport.DefaultIdleConnTimeout {
+		t.Errorf("DefaultIdleConnTimeout = %v, net/http uses %v",
+			swaptransport.DefaultIdleConnTimeout, defaultTransport.IdleConnTimeout)
+	}
+}
+
+// pausedGet sends a GET on client whose first GetConn trace pauses, closing
+// reached when it pauses and resuming when release closes. The result arrives
+// on the returned channel.
+func pausedGet(client *http.Client, url string, reached, release chan struct{}) <-chan error {
+	var once sync.Once
+
+	trace := &httptrace.ClientTrace{
+		GetConn: func(string) {
+			once.Do(func() {
+				close(reached)
+				<-release
+			})
+		},
+	}
+
+	done := make(chan error, 1)
+
+	go func() {
+		req, err := http.NewRequestWithContext(
+			httptrace.WithClientTrace(context.Background(), trace), http.MethodGet, url, nil)
+		if err != nil {
+			done <- err
+
+			return
+		}
+
+		resp, err := client.Do(req)
+		if err != nil {
+			done <- err
+
+			return
+		}
+
+		_, _ = io.Copy(io.Discard, resp.Body)
+		done <- resp.Body.Close()
+	}()
+
+	return done
+}
+
+// TestUpdate_ConnectionOfRequestPausedAcrossEvictionTimesOut pauses a request
+// in GetConn, after it loaded the original transport but before it asked that
+// transport for a connection, while more than maxRetired updates evict the
+// original from the retired list. Resuming resets the original's close-idle
+// state, so the connection it releases is pooled where no
+// CloseIdleConnections call can reach it. The test shows the connection is
+// still closed, by the finite IdleConnTimeout.
+func TestUpdate_ConnectionOfRequestPausedAcrossEvictionTimesOut(t *testing.T) {
+	t.Parallel()
+
+	const idleTimeout = 100 * time.Millisecond
+
+	srv, states := newStateServer(t)
+	swap := swaptransport.New(&http.Transport{IdleConnTimeout: idleTimeout})
+	client := &http.Client{Transport: swap}
+
+	reached := make(chan struct{})
+	release := make(chan struct{})
+	done := pausedGet(client, srv.URL, reached, release)
+
+	select {
+	case <-reached:
+	case <-time.After(5 * time.Second):
+		close(release)
+		t.Fatal("the request never reached GetConn")
+	}
+
+	for i := range 10 {
+		swap.Update(func(next *http.Transport) bool {
+			next.MaxIdleConns = i + 1
+
+			return true
+		})
+	}
+
+	if got := swap.RetiredCount(); got != 8 {
+		t.Fatalf("RetiredCount = %d, want 8 with the original evicted", got)
+	}
+
+	close(release)
+
+	err := <-done
+	if err != nil {
+		t.Fatalf("paused request: %v", err)
+	}
+
+	waitForState(t, states, http.StateIdle)
+
+	// Closing every transport the swap still reaches cannot touch the
+	// evicted original; only its idle timer can close the connection.
+	client.CloseIdleConnections()
+
+	idleAt := time.Now()
+
+	waitForState(t, states, http.StateClosed)
+
+	if elapsed := time.Since(idleAt); elapsed > 5*time.Second {
+		t.Errorf("connection closed after %v, want about the %v idle timeout", elapsed, idleTimeout)
+	}
 }

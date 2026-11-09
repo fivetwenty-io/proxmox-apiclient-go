@@ -90,8 +90,10 @@ func redact(in map[string][]string, redactKeys []string) map[string]interface{} 
 
 // logState is the logger, logging configuration, and hook list requests read.
 // A published logState is never modified: SetLogger, SetLogConfig, and AddHook
-// install a changed copy, so each request reads one consistent set without a
-// lock while those setters run.
+// install a changed copy, so each logging call, such as one request log line
+// or one round of hooks, reads one consistent set without a lock while those
+// setters run. The separate calls a request makes may see different sets when
+// a setter runs during the request.
 type logState struct {
 	logger Logger
 	config LogConfig
