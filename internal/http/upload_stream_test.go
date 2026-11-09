@@ -346,7 +346,7 @@ func TestRetryMiddleware_SkipsCaptureWhenRetryImpossible(t *testing.T) {
 		t.Fatalf("NewClient: %v", err)
 	}
 
-	client.maxRetries = 3
+	client.SetMaxRetries(3)
 
 	tracker := &bodyReadTracker{data: strings.NewReader("streamed payload")}
 

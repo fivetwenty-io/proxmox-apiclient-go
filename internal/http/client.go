@@ -57,19 +57,25 @@ type Client struct {
 	authenticator auth.Authenticator
 	middleware    []Middleware
 	timeout       time.Duration
-	maxRetries    int
-	retryDelay    time.Duration
 
-	metrics   ClientMetrics
-	logger    Logger
-	logConfig LogConfig
-	hooks     []Hook
+	// maxRetries and retryDelay (a time.Duration) are read by every request
+	// and may be changed while requests run, so they are atomic.
+	maxRetries atomic.Int64
+	retryDelay atomic.Int64
+
+	metrics ClientMetrics
+
+	// logs holds the logger, logging configuration, and hooks; see logState.
+	// logMu serializes the setters that replace it.
+	logs  atomic.Pointer[logState]
+	logMu sync.Mutex
 
 	// Optional Prometheus-friendly metrics collector
-	prom *pmetrics.DefaultMetrics
+	prom atomic.Pointer[pmetrics.DefaultMetrics]
 
-	// Optional TFA handler for auto-completion of two-factor challenges
-	tfaHandler auth.TFAHandler
+	// Optional TFA handler for auto-completion of two-factor challenges,
+	// held by pointer because atomic.Pointer cannot hold an interface.
+	tfaHandler atomic.Pointer[auth.TFAHandler]
 
 	// Auto-login state management
 	options        *Options
@@ -140,15 +146,15 @@ func NewClient(options *Options) (*Client, error) {
 		baseURL:       options.BaseURL(),
 		authenticator: authenticator,
 		timeout:       options.Timeout,
-		maxRetries:    constants.DefaultMaxRetries,
-		retryDelay:    time.Second,
-		logConfig:     defaultLogConfig(),
 		options:       options,
 
 		baseTransport: transport,
 		swap:          swap,
 	}
 	client.httpClient.Store(httpClient)
+	client.maxRetries.Store(constants.DefaultMaxRetries)
+	client.retryDelay.Store(int64(time.Second))
+	client.logs.Store(&logState{config: defaultLogConfig()})
 
 	// Initialize cache if configured
 	if options.CacheConfig != nil && options.CacheConfig.Enabled {
@@ -578,11 +584,11 @@ func (c *Client) DoWithContext(ctx context.Context, method, path string, params 
 
 	start := time.Now()
 
-	c.recordRequestStart(req)
+	prom := c.recordRequestStart(req)
 
 	resp, err := c.executeWithMiddleware(req)
 	if err != nil {
-		c.recordRequestError(start)
+		recordRequestError(prom, start)
 
 		return nil, err
 	}
@@ -590,16 +596,14 @@ func (c *Client) DoWithContext(ctx context.Context, method, path string, params 
 	defer func() {
 		closeErr := resp.Body.Close()
 		if closeErr != nil {
-			if c.logger != nil && c.logConfig.Enabled {
-				c.logger.Warn("failed to close response body", map[string]interface{}{
-					logFieldError: closeErr.Error(),
-				})
-			}
+			c.logWarn("failed to close response body", map[string]interface{}{
+				logFieldError: closeErr.Error(),
+			})
 		}
 	}()
 
 	r, bodyBytes, perr := c.parseResponse(resp)
-	c.recordRequestComplete(req, resp, bodyBytes, start, perr)
+	c.recordRequestComplete(prom, req, resp, bodyBytes, start, perr)
 
 	return r, perr
 }
@@ -620,11 +624,11 @@ func (c *Client) DoBytesWithContext(ctx context.Context, method, path string, pa
 
 	start := time.Now()
 
-	c.recordRequestStart(req)
+	prom := c.recordRequestStart(req)
 
 	resp, err := c.executeWithMiddleware(req)
 	if err != nil {
-		c.recordRequestError(start)
+		recordRequestError(prom, start)
 
 		return nil, err
 	}
@@ -632,29 +636,27 @@ func (c *Client) DoBytesWithContext(ctx context.Context, method, path string, pa
 	defer func() {
 		closeErr := resp.Body.Close()
 		if closeErr != nil {
-			if c.logger != nil && c.logConfig.Enabled {
-				c.logger.Warn("failed to close response body", map[string]interface{}{
-					logFieldError: closeErr.Error(),
-				})
-			}
+			c.logWarn("failed to close response body", map[string]interface{}{
+				logFieldError: closeErr.Error(),
+			})
 		}
 	}()
 
 	body, readErr := io.ReadAll(resp.Body)
 	if readErr != nil {
-		c.recordRequestComplete(req, resp, nil, start, readErr)
+		c.recordRequestComplete(prom, req, resp, nil, start, readErr)
 
 		return nil, fmt.Errorf("failed to read response body: %w", readErr)
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		apiErr := fmt.Errorf("API request failed: %w", apierrors.ParseAPIError(resp.StatusCode, body))
-		c.recordRequestComplete(req, resp, body, start, apiErr)
+		c.recordRequestComplete(prom, req, resp, body, start, apiErr)
 
 		return nil, apiErr
 	}
 
-	c.recordRequestComplete(req, resp, body, start, nil)
+	c.recordRequestComplete(prom, req, resp, body, start, nil)
 
 	return body, nil
 }
@@ -668,7 +670,7 @@ func (c *Client) UploadWithContext(ctx context.Context, path string, fields map[
 
 	start := time.Now()
 
-	c.recordRequestStart(req)
+	prom := c.recordRequestStart(req)
 
 	resp, err := c.executeWithMiddleware(req)
 	if err != nil {
@@ -680,7 +682,7 @@ func (c *Client) UploadWithContext(ctx context.Context, path string, fields map[
 			_ = req.Body.Close()
 		}
 
-		c.recordRequestError(start)
+		recordRequestError(prom, start)
 
 		return nil, err
 	}
@@ -688,16 +690,14 @@ func (c *Client) UploadWithContext(ctx context.Context, path string, fields map[
 	defer func() {
 		closeErr := resp.Body.Close()
 		if closeErr != nil {
-			if c.logger != nil && c.logConfig.Enabled {
-				c.logger.Warn("failed to close response body", map[string]interface{}{
-					logFieldError: closeErr.Error(),
-				})
-			}
+			c.logWarn("failed to close response body", map[string]interface{}{
+				logFieldError: closeErr.Error(),
+			})
 		}
 	}()
 
 	r, bodyBytes, perr := c.parseResponse(resp)
-	c.recordRequestComplete(req, resp, bodyBytes, start, perr)
+	c.recordRequestComplete(prom, req, resp, bodyBytes, start, perr)
 
 	return r, perr
 }
@@ -774,12 +774,10 @@ func (c *Client) SetKeepAlive(connections int) {
 	}
 
 	if c.swap == nil {
-		if c.logger != nil && c.logConfig.Enabled {
-			c.logger.Warn("SetKeepAlive left the transport unchanged", map[string]interface{}{
-				"keep_alive": connections,
-				"reason":     "the client's transport comes from WrapTransport, which owns its idle limits",
-			})
-		}
+		c.logWarn("SetKeepAlive left the transport unchanged", map[string]interface{}{
+			"keep_alive": connections,
+			"reason":     "the client's transport comes from WrapTransport, which owns its idle limits",
+		})
 
 		return
 	}
@@ -801,14 +799,18 @@ func (c *Client) SetKeepAlive(connections int) {
 	})
 }
 
-// SetMaxRetries sets the maximum number of retries.
+// SetMaxRetries sets the maximum number of retries for subsequent requests. A
+// request already retrying keeps the count it started with. It is safe to call
+// while requests are in flight.
 func (c *Client) SetMaxRetries(retries int) {
-	c.maxRetries = retries
+	c.maxRetries.Store(int64(retries))
 }
 
-// SetRetryDelay sets the delay between retries.
+// SetRetryDelay sets the delay between retries for subsequent requests. A
+// request already retrying keeps the delay it started with. It is safe to call
+// while requests are in flight.
 func (c *Client) SetRetryDelay(delay time.Duration) {
-	c.retryDelay = delay
+	c.retryDelay.Store(int64(delay))
 }
 
 // ClientMetrics holds simple counters and durations.
@@ -839,11 +841,16 @@ func (c *Client) Metrics() ClientMetrics {
 	return ClientMetrics{Requests: c.metrics.Requests, Errors: c.metrics.Errors, TotalDuration: c.metrics.TotalDuration}
 }
 
-// SetMetrics attaches a Prometheus-friendly metrics collector.
-func (c *Client) SetMetrics(m *pmetrics.DefaultMetrics) { c.prom = m }
+// SetMetrics attaches a Prometheus-friendly metrics collector, or detaches it
+// when m is nil. A request records its whole lifecycle on the collector in
+// effect when it started, so the active-connections gauge stays balanced. It
+// is safe to call while requests are in flight.
+func (c *Client) SetMetrics(m *pmetrics.DefaultMetrics) { c.prom.Store(m) }
 
-// SetTFAHandler installs a handler to automatically complete two-factor authentication challenges.
-func (c *Client) SetTFAHandler(h auth.TFAHandler) { c.tfaHandler = h }
+// SetTFAHandler installs a handler to automatically complete two-factor
+// authentication challenges, or removes it when h is nil. It is safe to call
+// while requests are in flight.
+func (c *Client) SetTFAHandler(h auth.TFAHandler) { c.tfaHandler.Store(&h) }
 
 // Authenticate performs explicit authentication with the PVE API.
 // This is a public wrapper around ensureAuthentication for use by the client package.
@@ -914,6 +921,15 @@ func (c *Client) CacheStats() *cache.CacheStats {
 		stats := c.cache.Stats()
 
 		return &stats
+	}
+
+	return nil
+}
+
+// tfa returns the TFA handler in effect, or nil when none is set.
+func (c *Client) tfa() auth.TFAHandler { //nolint:ireturn // the handler is caller-supplied; its type is unknown
+	if handler := c.tfaHandler.Load(); handler != nil {
+		return *handler
 	}
 
 	return nil
@@ -1000,50 +1016,59 @@ func (c *Client) buildUploadRequest(ctx context.Context, path string, fields map
 	return req, nil
 }
 
-func (c *Client) recordRequestStart(req *http.Request) {
-	if c.prom != nil {
-		c.prom.ActiveConnections.Inc()
+// recordRequestStart records a request's start on the metrics collector in
+// effect and returns that collector, which may be nil, so the request records
+// its end on the same one even if SetMetrics runs in between.
+func (c *Client) recordRequestStart(req *http.Request) *pmetrics.DefaultMetrics {
+	prom := c.prom.Load()
+	if prom != nil {
+		prom.ActiveConnections.Inc()
 
 		if req != nil && req.ContentLength > 0 {
-			c.prom.BytesSent.Add(req.ContentLength)
+			prom.BytesSent.Add(req.ContentLength)
 		}
 	}
+
+	return prom
 }
 
-func (c *Client) recordRequestError(start time.Time) {
-	if c.prom != nil {
-		c.prom.RequestsTotal.Inc()
-		c.prom.RequestsFailedTotal.Inc()
-		c.prom.RequestDuration.Observe(time.Since(start).Seconds())
-		c.prom.ActiveConnections.Dec()
+func recordRequestError(prom *pmetrics.DefaultMetrics, start time.Time) {
+	if prom != nil {
+		prom.RequestsTotal.Inc()
+		prom.RequestsFailedTotal.Inc()
+		prom.RequestDuration.Observe(time.Since(start).Seconds())
+		prom.ActiveConnections.Dec()
 	}
 }
 
-func (c *Client) recordRequestComplete(req *http.Request, resp *http.Response, bodyBytes []byte, start time.Time, perr error) {
+func (c *Client) recordRequestComplete(
+	prom *pmetrics.DefaultMetrics, req *http.Request, resp *http.Response, bodyBytes []byte, start time.Time, perr error,
+) {
 	dur := time.Since(start)
 	c.metrics.addRequest(dur, perr)
 
-	if c.prom != nil {
-		c.prom.RequestsTotal.Inc()
+	if prom != nil {
+		prom.RequestsTotal.Inc()
 
 		if perr != nil || resp.StatusCode >= 400 {
-			c.prom.RequestsFailedTotal.Inc()
+			prom.RequestsFailedTotal.Inc()
 		}
 
-		c.prom.RequestDuration.Observe(dur.Seconds())
+		prom.RequestDuration.Observe(dur.Seconds())
 
 		if bodyBytes != nil {
-			c.prom.BytesReceived.Add(int64(len(bodyBytes)))
+			prom.BytesReceived.Add(int64(len(bodyBytes)))
 		}
 
-		c.prom.ActiveConnections.Dec()
+		prom.ActiveConnections.Dec()
 	}
 
 	c.logResponse(req, resp, bodyBytes, start, perr)
 }
 
 func (c *Client) logResponse(req *http.Request, resp *http.Response, bodyBytes []byte, start time.Time, perr error) {
-	if c.logger == nil || !c.logConfig.Enabled {
+	logs := c.logging()
+	if !logs.active() {
 		return
 	}
 
@@ -1054,12 +1079,12 @@ func (c *Client) logResponse(req *http.Request, resp *http.Response, bodyBytes [
 		"duration":     int64(time.Since(start) / time.Millisecond),
 	}
 
-	if c.logConfig.LogResponseHeader {
-		fields["resp_headers"] = redact(resp.Header, c.logConfig.RedactHeaders)
+	if logs.config.LogResponseHeader {
+		fields["resp_headers"] = redact(resp.Header, logs.config.RedactHeaders)
 	}
 
-	if c.logConfig.LogResponseBody && len(bodyBytes) > 0 {
-		limit := c.logConfig.MaxBodyBytes
+	if logs.config.LogResponseBody && len(bodyBytes) > 0 {
+		limit := logs.config.MaxBodyBytes
 		if limit <= 0 || limit > len(bodyBytes) {
 			limit = len(bodyBytes)
 		}
@@ -1068,9 +1093,9 @@ func (c *Client) logResponse(req *http.Request, resp *http.Response, bodyBytes [
 	}
 
 	if perr != nil {
-		c.logger.Error("http.response", fields)
+		logs.logger.Error("http.response", fields)
 	} else {
-		c.logger.Info("http.response", fields)
+		logs.logger.Info("http.response", fields)
 	}
 }
 
@@ -1273,7 +1298,8 @@ func (c *Client) ensureAuthentication() error {
 
 // handleTFAAuthentication processes TFA challenges if a TFA handler is configured.
 func (c *Client) handleTFAAuthentication(authErr error) error {
-	if c.tfaHandler == nil {
+	tfaHandler := c.tfa()
+	if tfaHandler == nil {
 		return nil
 	}
 
@@ -1293,7 +1319,7 @@ func (c *Client) handleTFAAuthentication(authErr error) error {
 		Types:     tferr.Types,
 	}
 
-	response, err := c.tfaHandler.HandleTFAChallenge(challenge)
+	response, err := tfaHandler.HandleTFAChallenge(challenge)
 	if err != nil {
 		return fmt.Errorf("tfa handling failed: %w", err)
 	}
@@ -1561,11 +1587,7 @@ func (c *Client) renewTicketIfNeeded() {
 
 // logTicketRenewalFailure logs ticket renewal failures if logging is enabled.
 func (c *Client) logTicketRenewalFailure(err error) {
-	if c.logger == nil || !c.logConfig.Enabled {
-		return
-	}
-
-	c.logger.Warn("automatic ticket renewal failed", map[string]interface{}{
+	c.logWarn("automatic ticket renewal failed", map[string]interface{}{
 		"error": err.Error(),
 	})
 }
@@ -1917,8 +1939,8 @@ func newConnectionError(req *http.Request, cause error) error {
 // resolveRetryPolicy returns the effective retry count, delay, and force-retry
 // flag for a request, applying any per-request context overrides.
 func (c *Client) resolveRetryPolicy(req *http.Request) (int, time.Duration, bool) {
-	retries := c.maxRetries
-	delay := c.retryDelay
+	retries := int(c.maxRetries.Load())
+	delay := time.Duration(c.retryDelay.Load())
 	force := false
 
 	if opts := FromContext(req.Context()); opts != nil {
@@ -2028,7 +2050,7 @@ func (c *Client) loggingMiddleware(req *http.Request, next Handler) (*http.Respo
 		event.Status = resp.StatusCode
 	}
 
-	if c.logger != nil && c.logConfig.Enabled {
+	if logs := c.logging(); logs.active() {
 		fields := map[string]interface{}{
 			logFieldMethod: event.Method,
 			logFieldURL:    event.URL,
@@ -2041,9 +2063,9 @@ func (c *Client) loggingMiddleware(req *http.Request, next Handler) (*http.Respo
 		}
 
 		if err != nil {
-			c.logger.Error("http.response", fields)
+			logs.logger.Error("http.response", fields)
 		} else {
-			c.logger.Info("http.response", fields)
+			logs.logger.Info("http.response", fields)
 		}
 	}
 

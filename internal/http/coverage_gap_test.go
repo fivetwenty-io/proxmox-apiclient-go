@@ -86,7 +86,7 @@ func TestHandleTFAAuthentication_NoHandler_ReturnsNil(t *testing.T) {
 	t.Parallel()
 
 	client := clientPointedAt(t, "http://127.0.0.1:1")
-	client.tfaHandler = nil
+	client.SetTFAHandler(nil)
 
 	err := client.handleTFAAuthentication(errTestBoom)
 	if err != nil {
@@ -98,7 +98,7 @@ func TestHandleTFAAuthentication_NonTFAError_ReturnsNil(t *testing.T) {
 	t.Parallel()
 
 	client := clientPointedAt(t, "http://127.0.0.1:1")
-	client.tfaHandler = fakeTFAHandler{}
+	client.SetTFAHandler(fakeTFAHandler{})
 
 	err := client.handleTFAAuthentication(errTestPlainFail)
 	if err != nil {
@@ -117,7 +117,7 @@ func TestHandleTFAAuthentication_NonTicketAuthenticator_ReturnsNil(t *testing.T)
 		t.Fatalf("NewClient: %v", err)
 	}
 
-	client.tfaHandler = fakeTFAHandler{}
+	client.SetTFAHandler(fakeTFAHandler{})
 
 	tferr := &apierrors.TFARequiredError{Types: []string{testTFATypeTOTP}}
 
@@ -139,7 +139,7 @@ func TestHandleTFAAuthentication_HandlerError(t *testing.T) {
 		t.Fatalf("NewClient: %v", err)
 	}
 
-	client.tfaHandler = fakeTFAHandler{err: errTestFakeTFA}
+	client.SetTFAHandler(fakeTFAHandler{err: errTestFakeTFA})
 
 	tferr := &apierrors.TFARequiredError{Ticket: testTFAPartialTicket, Challenge: testTFAChallenge, Types: []string{testTFATypeTOTP}}
 
@@ -175,7 +175,7 @@ func TestHandleTFAAuthentication_CompleteTFAError(t *testing.T) {
 		o.Password = testPassword
 	})
 
-	client.tfaHandler = fakeTFAHandler{response: &auth.TFAResponse{Response: "123456"}}
+	client.SetTFAHandler(fakeTFAHandler{response: &auth.TFAResponse{Response: "123456"}})
 
 	tferr := &apierrors.TFARequiredError{Ticket: testTFAPartialTicket, Challenge: testTFAChallenge, Types: []string{testTFATypeTOTP}}
 
@@ -206,7 +206,7 @@ func TestHandleTFAAuthentication_Success(t *testing.T) {
 		o.Password = testPassword
 	})
 
-	client.tfaHandler = fakeTFAHandler{response: &auth.TFAResponse{Response: "123456"}}
+	client.SetTFAHandler(fakeTFAHandler{response: &auth.TFAResponse{Response: "123456"}})
 
 	tferr := &apierrors.TFARequiredError{Ticket: testTFAPartialTicket, Challenge: testTFAChallenge, Types: []string{testTFATypeTOTP}}
 
@@ -644,8 +644,8 @@ func TestRetryMiddleware_JitterVariesDelay(t *testing.T) {
 	})
 
 	client := clientPointedAt(t, srv.URL)
-	client.maxRetries = 5
-	client.retryDelay = 20 * time.Millisecond
+	client.SetMaxRetries(5)
+	client.SetRetryDelay(20 * time.Millisecond)
 
 	start := time.Now()
 

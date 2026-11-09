@@ -170,7 +170,10 @@ func (c *client) Get(path string, params map[string]interface{}) (interface{}, e
 	return resp.Data, nil
 }
 
-// SetMetrics attaches a Prometheus-friendly metrics collector. Optional.
+// SetMetrics attaches a Prometheus-friendly metrics collector, or detaches it
+// when m is nil. Optional. A request records its whole lifecycle on the
+// collector in effect when it started. It is safe to call while requests are
+// in flight.
 func (c *client) SetMetrics(m *pmetrics.DefaultMetrics) {
 	if a, ok := c.httpClient.(*internalHTTPAdapter); ok && a.inner != nil {
 		a.inner.SetMetrics(m)
@@ -406,7 +409,8 @@ func (c *client) SetKeepAlive(connections int) {
 	c.httpClient.SetKeepAlive(connections)
 }
 
-// SetLogger installs a structured logger for HTTP requests.
+// SetLogger installs a structured logger for HTTP requests. It is safe to call
+// while requests are in flight.
 func (c *client) SetLogger(l Logger) {
 	if a, ok := c.httpClient.(*internalHTTPAdapter); ok && a.inner != nil {
 		a.inner.SetLogger(l)
@@ -414,20 +418,25 @@ func (c *client) SetLogger(l Logger) {
 }
 
 // SetLogConfig configures logging behavior (redaction, body sampling, etc.).
+// The client keeps its own copy of the redaction lists. It is safe to call
+// while requests are in flight.
 func (c *client) SetLogConfig(cfg LogConfig) {
 	if a, ok := c.httpClient.(*internalHTTPAdapter); ok && a.inner != nil {
 		a.inner.SetLogConfig(cfg)
 	}
 }
 
-// AddLogHook adds a logging event hook.
+// AddLogHook adds a logging event hook. It is safe to call while requests are
+// in flight.
 func (c *client) AddLogHook(h Hook) {
 	if a, ok := c.httpClient.(*internalHTTPAdapter); ok && a.inner != nil {
 		a.inner.AddHook(h)
 	}
 }
 
-// GetLogConfig returns the current logging config snapshot.
+// GetLogConfig returns a copy of the current logging config, including its
+// redaction lists, so changing it does not change the client's until it is
+// passed to SetLogConfig.
 func (c *client) GetLogConfig() LogConfig {
 	if a, ok := c.httpClient.(*internalHTTPAdapter); ok && a.inner != nil {
 		return a.inner.LogConfig()
@@ -438,7 +447,8 @@ func (c *client) GetLogConfig() LogConfig {
 	return zero
 }
 
-// SetTFAHandler installs a TFA handler used by the underlying HTTP client to auto-complete challenges.
+// SetTFAHandler installs a TFA handler used by the underlying HTTP client to auto-complete challenges, or
+// removes it when h is nil. It is safe to call while requests are in flight.
 func (c *client) SetTFAHandler(h TFAHandler) {
 	if a, ok := c.httpClient.(*internalHTTPAdapter); ok && a.inner != nil {
 		a.inner.SetTFAHandler(h)

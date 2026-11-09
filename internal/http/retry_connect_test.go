@@ -30,8 +30,8 @@ func countingClient(t *testing.T, addr string, calls *int32) *Client {
 	t.Helper()
 
 	client := clientPointedAt(t, addr)
-	client.maxRetries = 3
-	client.retryDelay = time.Millisecond
+	client.SetMaxRetries(3)
+	client.SetRetryDelay(time.Millisecond)
 	client.middleware = []Middleware{
 		client.retryMiddleware,
 		func(r *http.Request, next Handler) (*http.Response, error) {
@@ -155,8 +155,8 @@ func TestRetryMiddleware_BackoffHonorsCancellation(t *testing.T) {
 	})
 
 	client := clientPointedAt(t, srv.URL)
-	client.maxRetries = 3
-	client.retryDelay = time.Hour // would hang effectively forever if not cancellable
+	client.SetMaxRetries(3)
+	client.SetRetryDelay(time.Hour) // would hang effectively forever if not cancellable
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -349,8 +349,8 @@ func pinnedCountingClient(t *testing.T, configure func(*Options), calls *int32) 
 		t.Fatalf("NewClient: %v", err)
 	}
 
-	client.maxRetries = 3
-	client.retryDelay = time.Millisecond
+	client.SetMaxRetries(3)
+	client.SetRetryDelay(time.Millisecond)
 	client.middleware = []Middleware{
 		client.retryMiddleware,
 		func(r *http.Request, next Handler) (*http.Response, error) {

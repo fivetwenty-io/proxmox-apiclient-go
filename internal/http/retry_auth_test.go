@@ -34,8 +34,8 @@ func TestRetryMiddleware_NoAutoRetryPOSTOn5xx(t *testing.T) {
 	})
 
 	client := clientPointedAt(t, srv.URL)
-	client.maxRetries = 3
-	client.retryDelay = time.Millisecond
+	client.SetMaxRetries(3)
+	client.SetRetryDelay(time.Millisecond)
 
 	_, _ = client.Do("POST", "/nodes/n1/qemu", map[string]interface{}{keyVMID: 100})
 
@@ -115,8 +115,8 @@ func TestRetryMiddleware_POSTOptInRetryResendsBody(t *testing.T) {
 	})
 
 	client := clientPointedAt(t, srv.URL)
-	client.maxRetries = 0
-	client.retryDelay = time.Millisecond
+	client.SetMaxRetries(0)
+	client.SetRetryDelay(time.Millisecond)
 
 	ctx := WithForceRetry(context.Background(), true)
 	ctx = WithRetries(ctx, 3)
@@ -155,8 +155,8 @@ func TestRetryMiddleware_596MappedToConnectionError(t *testing.T) {
 	})
 
 	client := clientPointedAt(t, srv.URL)
-	client.maxRetries = 0
-	client.retryDelay = time.Millisecond
+	client.SetMaxRetries(0)
+	client.SetRetryDelay(time.Millisecond)
 
 	_, err := client.Do("GET", "/version", nil)
 	if err == nil {

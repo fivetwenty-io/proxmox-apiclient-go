@@ -251,8 +251,8 @@ func TestNewClient_DefaultMaxRetries(t *testing.T) {
 		t.Fatalf("NewClient: %v", err)
 	}
 
-	if client.maxRetries != constants.DefaultMaxRetries {
-		t.Errorf("maxRetries = %d, want %d", client.maxRetries, constants.DefaultMaxRetries)
+	if client.maxRetries.Load() != constants.DefaultMaxRetries {
+		t.Errorf("maxRetries = %d, want %d", client.maxRetries.Load(), constants.DefaultMaxRetries)
 	}
 }
 
@@ -681,7 +681,7 @@ func TestDo_404_ReturnsError(t *testing.T) {
 	})
 
 	client := clientPointedAt(t, srv.URL)
-	client.maxRetries = 0
+	client.SetMaxRetries(0)
 
 	_, err := client.Do("GET", "/nonexistent", nil)
 	if err == nil {
@@ -698,7 +698,7 @@ func TestDo_500_ReturnsError(t *testing.T) {
 	})
 
 	client := clientPointedAt(t, srv.URL)
-	client.maxRetries = 0
+	client.SetMaxRetries(0)
 
 	_, err := client.Do("GET", "/crash", nil)
 	if err == nil {
@@ -716,7 +716,7 @@ func TestDo_401_ReturnsError(t *testing.T) {
 	})
 
 	client := clientPointedAt(t, srv.URL)
-	client.maxRetries = 0
+	client.SetMaxRetries(0)
 
 	_, err := client.Do("GET", "/nodes", nil)
 	if err == nil {
@@ -772,7 +772,7 @@ func TestDoWithContext_Cancellation(t *testing.T) {
 	})
 
 	client := clientPointedAt(t, srv.URL)
-	client.maxRetries = 0
+	client.SetMaxRetries(0)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -810,7 +810,7 @@ func TestDoWithContext_Deadline(t *testing.T) {
 	})
 
 	client := clientPointedAt(t, srv.URL)
-	client.maxRetries = 0
+	client.SetMaxRetries(0)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
@@ -844,8 +844,8 @@ func TestRetryMiddleware_RetriesOn5xx(t *testing.T) {
 	})
 
 	client := clientPointedAt(t, srv.URL)
-	client.maxRetries = 3
-	client.retryDelay = time.Millisecond // fast for test
+	client.SetMaxRetries(3)
+	client.SetRetryDelay(time.Millisecond) // fast for test
 
 	resp, err := client.Do("GET", "/version", nil)
 	if err != nil {
@@ -873,8 +873,8 @@ func TestRetryMiddleware_NoRetryOn4xx(t *testing.T) {
 	})
 
 	client := clientPointedAt(t, srv.URL)
-	client.maxRetries = 3
-	client.retryDelay = time.Millisecond
+	client.SetMaxRetries(3)
+	client.SetRetryDelay(time.Millisecond)
 
 	_, err := client.Do("GET", "/bad", nil)
 	if err == nil {
@@ -898,8 +898,8 @@ func TestRetryMiddleware_PerRequestRetryOverride(t *testing.T) {
 	})
 
 	client := clientPointedAt(t, srv.URL)
-	client.maxRetries = 5
-	client.retryDelay = time.Millisecond
+	client.SetMaxRetries(5)
+	client.SetRetryDelay(time.Millisecond)
 
 	// Override to 1 retry via context.
 	ctx := WithRetries(context.Background(), 1)
@@ -922,8 +922,8 @@ func TestRetryMiddleware_ExhaustedReturnsError(t *testing.T) {
 	})
 
 	client := clientPointedAt(t, srv.URL)
-	client.maxRetries = 2
-	client.retryDelay = time.Millisecond
+	client.SetMaxRetries(2)
+	client.SetRetryDelay(time.Millisecond)
 
 	// retryMiddleware returns last retryable response after exhausting attempts;
 	// parseResponse then wraps 5xx into an API error.
@@ -946,7 +946,7 @@ func TestLoggingMiddleware_WritesWhenEnabled(t *testing.T) {
 	})
 
 	client := clientPointedAt(t, srv.URL)
-	client.maxRetries = 0
+	client.SetMaxRetries(0)
 
 	logger := &testLogger{}
 	client.SetLogger(logger)
@@ -975,7 +975,7 @@ func TestLoggingMiddleware_SilentWhenDisabled(t *testing.T) {
 	})
 
 	client := clientPointedAt(t, srv.URL)
-	client.maxRetries = 0
+	client.SetMaxRetries(0)
 
 	logger := &testLogger{}
 	client.SetLogger(logger)
@@ -1005,7 +1005,7 @@ func TestLoggingMiddleware_SuppressedByContext(t *testing.T) {
 	})
 
 	client := clientPointedAt(t, srv.URL)
-	client.maxRetries = 0
+	client.SetMaxRetries(0)
 
 	logger := &testLogger{}
 	client.SetLogger(logger)
@@ -1041,7 +1041,7 @@ func TestHook_Fired(t *testing.T) {
 	})
 
 	client := clientPointedAt(t, srv.URL)
-	client.maxRetries = 0
+	client.SetMaxRetries(0)
 
 	var fired bool
 
@@ -1063,7 +1063,7 @@ func TestHook_PanickingHookDoesNotCrash(t *testing.T) {
 	})
 
 	client := clientPointedAt(t, srv.URL)
-	client.maxRetries = 0
+	client.SetMaxRetries(0)
 	client.AddHook(func(_ *Event) { panic("hook panic") })
 
 	// Should not panic.
@@ -1086,7 +1086,7 @@ func TestMetrics_Increments(t *testing.T) {
 	})
 
 	client := clientPointedAt(t, srv.URL)
-	client.maxRetries = 0
+	client.SetMaxRetries(0)
 
 	before := client.Metrics()
 
@@ -1111,7 +1111,7 @@ func TestMetrics_ErrorIncrement(t *testing.T) {
 	})
 
 	client := clientPointedAt(t, srv.URL)
-	client.maxRetries = 0
+	client.SetMaxRetries(0)
 
 	before := client.Metrics()
 	_, _ = client.Do("GET", "/bad", nil)
@@ -1156,8 +1156,8 @@ func TestSetMaxRetries(t *testing.T) {
 	client, _ := NewClient(opts)
 	client.SetMaxRetries(7)
 
-	if client.maxRetries != 7 {
-		t.Errorf("maxRetries = %d, want 7", client.maxRetries)
+	if client.maxRetries.Load() != 7 {
+		t.Errorf("maxRetries = %d, want 7", client.maxRetries.Load())
 	}
 }
 
@@ -1169,8 +1169,8 @@ func TestSetRetryDelay(t *testing.T) {
 	client, _ := NewClient(opts)
 	client.SetRetryDelay(200 * time.Millisecond)
 
-	if client.retryDelay != 200*time.Millisecond {
-		t.Errorf("retryDelay = %v, want 200ms", client.retryDelay)
+	if time.Duration(client.retryDelay.Load()) != 200*time.Millisecond {
+		t.Errorf("retryDelay = %v, want 200ms", time.Duration(client.retryDelay.Load()))
 	}
 }
 
@@ -2176,7 +2176,7 @@ func TestDo_APILevelError_SuccessZeroWithMessage(t *testing.T) {
 	})
 
 	client := clientPointedAt(t, srv.URL)
-	client.maxRetries = 0
+	client.SetMaxRetries(0)
 
 	_, err := client.Do("GET", "/nodes", nil)
 	if err == nil {
@@ -2201,7 +2201,7 @@ func TestDo_ConcurrentRequests(t *testing.T) {
 	})
 
 	client := clientPointedAt(t, srv.URL)
-	client.maxRetries = 0
+	client.SetMaxRetries(0)
 
 	var waitGroup sync.WaitGroup
 
@@ -2522,7 +2522,7 @@ func TestRecordRequestError_OnNetworkFailure(t *testing.T) {
 	}
 
 	client.baseURL = "http://127.0.0.1:1" // no listener
-	client.maxRetries = 0
+	client.SetMaxRetries(0)
 
 	// recordRequestError is called when executeWithMiddleware fails.
 	// The ClientMetrics.Errors counter is NOT updated by recordRequestError
@@ -2546,7 +2546,7 @@ func TestLogRequest_WithHeaders(t *testing.T) {
 	})
 
 	client := clientPointedAt(t, srv.URL)
-	client.maxRetries = 0
+	client.SetMaxRetries(0)
 
 	logger := &testLogger{}
 	client.SetLogger(logger)
@@ -2603,7 +2603,7 @@ func TestLogResponse_WithBody(t *testing.T) {
 	})
 
 	client := clientPointedAt(t, srv.URL)
-	client.maxRetries = 0
+	client.SetMaxRetries(0)
 
 	logger := &testLogger{}
 	client.SetLogger(logger)
@@ -2942,7 +2942,7 @@ func TestSetMetrics_RecordRequestComplete(t *testing.T) {
 	})
 
 	client := clientPointedAt(t, srv.URL)
-	client.maxRetries = 0
+	client.SetMaxRetries(0)
 
 	m := pmetrics.NewDefaultMetrics()
 	client.SetMetrics(m)
@@ -2962,7 +2962,7 @@ func TestSetMetrics_RecordRequestError(t *testing.T) {
 
 	client, _ := NewClient(minimalHTTPOptions())
 	client.baseURL = "http://127.0.0.1:1" // no listener
-	client.maxRetries = 0
+	client.SetMaxRetries(0)
 
 	m := pmetrics.NewDefaultMetrics()
 	client.SetMetrics(m)
@@ -2980,7 +2980,7 @@ func TestSetMetrics_RecordRequestStart_ContentLength(t *testing.T) {
 	})
 
 	client := clientPointedAt(t, srv.URL)
-	client.maxRetries = 0
+	client.SetMaxRetries(0)
 
 	m := pmetrics.NewDefaultMetrics()
 	client.SetMetrics(m)
@@ -3280,7 +3280,7 @@ func TestDoWithContext_ResponseBodyClose_NilLogger(t *testing.T) {
 	})
 
 	client := clientPointedAt(t, srv.URL)
-	client.maxRetries = 0
+	client.SetMaxRetries(0)
 	// No logger set → body close error warning code path (logger == nil branch).
 
 	_, err := client.Do("GET", "/version", nil)
@@ -3320,7 +3320,7 @@ func TestHandleAuthenticationRetry_401_WithAuth(t *testing.T) {
 	}
 
 	client.baseURL = srv.URL
-	client.maxRetries = 0
+	client.SetMaxRetries(0)
 	_ = client.authenticator.Authenticate()
 
 	// The auth middleware calls handleAuthenticationRetry on 401.
@@ -3451,7 +3451,7 @@ func TestCachingMiddleware_POST_NotCached(t *testing.T) {
 	}
 
 	client.baseURL = srv.URL
-	client.maxRetries = 0
+	client.SetMaxRetries(0)
 
 	// Two POST requests to same path — both should hit server (not cached).
 	_, _ = client.Do("POST", "/access/ticket", map[string]interface{}{testFormKeyUsername: testUsername, testFormKeyPassword: "x"})
@@ -3489,7 +3489,7 @@ func TestUploadWithContext_Cancelled(t *testing.T) {
 	t.Cleanup(func() { close(testDone) })
 
 	client := clientPointedAt(t, srv.URL)
-	client.maxRetries = 0
+	client.SetMaxRetries(0)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
