@@ -562,10 +562,7 @@ func TestSetKeepAlive_UpdatesLiveTransport(t *testing.T) {
 
 	client.SetKeepAlive(42)
 
-	transport, ok := client.httpClient.Transport.(*http.Transport)
-	if !ok {
-		t.Fatalf("Transport is %T, want *http.Transport", client.httpClient.Transport)
-	}
+	transport := liveTransport(t, client)
 
 	if transport.MaxIdleConns != 42 {
 		t.Errorf("MaxIdleConns = %d, want 42", transport.MaxIdleConns)
@@ -589,10 +586,7 @@ func TestSetKeepAlive_RespectsExplicitMaxIdleConnsPerHost(t *testing.T) {
 
 	client.SetKeepAlive(42)
 
-	transport, ok := client.httpClient.Transport.(*http.Transport)
-	if !ok {
-		t.Fatalf("Transport is %T, want *http.Transport", client.httpClient.Transport)
-	}
+	transport := liveTransport(t, client)
 
 	if transport.MaxIdleConns != 42 {
 		t.Errorf("MaxIdleConns = %d, want 42", transport.MaxIdleConns)

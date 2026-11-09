@@ -381,9 +381,12 @@ func (c *client) SetTimeout(timeout time.Duration) {
 	c.httpClient.SetTimeout(timeout)
 }
 
-// SetKeepAlive sets the number of keep-alive connections, applying it to the
-// live transport so it takes effect for subsequent requests without
-// reconstructing the client.
+// SetKeepAlive sets the number of keep-alive connections for subsequent
+// requests without reconstructing the client. It is safe to call while
+// requests are in flight: it switches later requests to a retuned copy of the
+// transport rather than writing the one in use. When Options.WrapTransport is
+// set it records the value and changes no transport, as that option
+// describes.
 func (c *client) SetKeepAlive(connections int) {
 	c.options.KeepAlive = connections
 	c.httpClient.SetKeepAlive(connections)

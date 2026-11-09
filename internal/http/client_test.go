@@ -312,10 +312,7 @@ func TestNewClient_TLS_InsecureSkipVerify(t *testing.T) {
 		t.Fatalf("NewClient: %v", err)
 	}
 
-	transport, ok := client.httpClient.Transport.(*http.Transport)
-	if !ok {
-		t.Fatal("transport is not *http.Transport")
-	}
+	transport := liveTransport(t, client)
 
 	if transport.TLSClientConfig == nil {
 		t.Fatal("TLSClientConfig is nil")
@@ -345,10 +342,7 @@ func TestNewClient_TLS_StrictVerify(t *testing.T) {
 		t.Fatalf("NewClient: %v", err)
 	}
 
-	transport, ok := client.httpClient.Transport.(*http.Transport)
-	if !ok {
-		t.Fatal("transport is not *http.Transport")
-	}
+	transport := liveTransport(t, client)
 
 	if transport.TLSClientConfig == nil {
 		t.Fatal("TLSClientConfig is nil")
@@ -386,10 +380,7 @@ func TestNewClient_TLS_FingerprintCallback(t *testing.T) {
 		t.Fatalf("NewClient: %v", err)
 	}
 
-	transport, ok := client.httpClient.Transport.(*http.Transport)
-	if !ok {
-		t.Fatal("transport is not *http.Transport")
-	}
+	transport := liveTransport(t, client)
 
 	// VerifyPeerCertificate should be set (even if we don't call it here)
 	if transport.TLSClientConfig == nil || transport.TLSClientConfig.VerifyPeerCertificate == nil {
@@ -2661,10 +2652,7 @@ func TestNewClient_CachedFingerprints(t *testing.T) {
 		t.Fatalf("NewClient with CachedFingerprints: %v", err)
 	}
 
-	transport, ok := client.httpClient.Transport.(*http.Transport)
-	if !ok {
-		t.Fatal("transport is not *http.Transport")
-	}
+	transport := liveTransport(t, client)
 
 	// VerifyPeerCertificate must be set when fingerprints provided.
 	if transport.TLSClientConfig == nil || transport.TLSClientConfig.VerifyPeerCertificate == nil {
@@ -2689,10 +2677,7 @@ func TestNewClient_ManualVerification(t *testing.T) {
 		t.Fatalf("NewClient with ManualVerification: %v", err)
 	}
 
-	transport, ok := client.httpClient.Transport.(*http.Transport)
-	if !ok {
-		t.Fatal("transport is not *http.Transport")
-	}
+	transport := liveTransport(t, client)
 
 	if transport.TLSClientConfig == nil || transport.TLSClientConfig.VerifyPeerCertificate == nil {
 		t.Error("VerifyPeerCertificate should be set when ManualVerification=true")

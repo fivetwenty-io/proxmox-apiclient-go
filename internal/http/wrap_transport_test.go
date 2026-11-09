@@ -17,6 +17,8 @@ import (
 const (
 	wrapTestPathTicket  = "/api2/json/access/ticket"
 	wrapTestPathVersion = "/api2/json/version"
+	wrapTestLoopback    = "127.0.0.1"
+	wrapTestPVEVersion  = "8.0"
 )
 
 var errWrapTestDial = errors.New("dial stub")
@@ -96,9 +98,34 @@ func installRecorder(opts *Options, calls *int32) **recordingWrapper {
 	return &wrapper
 }
 
-// TestNewClient_NilWrapTransportKeepsPlainTransport verifies the default: with
-// no wrapper the http.Client carries the bare *http.Transport.
-func TestNewClient_NilWrapTransportKeepsPlainTransport(t *testing.T) {
+// versionEnvelope is the PVE envelope a test server answers GET /version with.
+func versionEnvelope(t *testing.T) []byte {
+	t.Helper()
+
+	return pveEnvelope(t, map[string]string{"version": wrapTestPVEVersion})
+}
+
+// liveTransport returns the *http.Transport that later requests use on a
+// client built without WrapTransport.
+func liveTransport(t *testing.T, client *Client) *http.Transport {
+	t.Helper()
+
+	swap, ok := client.httpClient.Transport.(*swappableTransport)
+	if !ok {
+		t.Fatalf("Transport is %T, want *swappableTransport", client.httpClient.Transport)
+	}
+
+	if swap != client.swap {
+		t.Fatal("the http.Client's swappableTransport is not the one the client retunes")
+	}
+
+	return swap.load()
+}
+
+// TestNewClient_NilWrapTransportSendsOnBuiltTransport verifies the default:
+// with no wrapper the http.Client sends on the *http.Transport NewClient
+// built, through the swappable holder SetKeepAlive retunes.
+func TestNewClient_NilWrapTransportSendsOnBuiltTransport(t *testing.T) {
 	t.Parallel()
 
 	client, err := NewClient(minimalHTTPOptions())
@@ -106,12 +133,7 @@ func TestNewClient_NilWrapTransportKeepsPlainTransport(t *testing.T) {
 		t.Fatalf("NewClient: %v", err)
 	}
 
-	transport, ok := client.httpClient.Transport.(*http.Transport)
-	if !ok {
-		t.Fatalf("Transport is %T, want *http.Transport", client.httpClient.Transport)
-	}
-
-	if transport != client.baseTransport {
+	if liveTransport(t, client) != client.baseTransport {
 		t.Error("baseTransport is not the transport the http.Client uses")
 	}
 }
@@ -141,26 +163,80 @@ func TestNewClient_WrapTransportInstalledOnceAndSharedWithAuthenticator(t *testi
 		t.Errorf("Transport is %T, want the wrapper's result", client.httpClient.Transport)
 	}
 
+	if client.swap != nil {
+		t.Error("a wrapped client must not hold a swappableTransport")
+	}
+
 	if (*wrapper).base != client.baseTransport {
 		t.Error("the wrapper was not handed the transport NewClient built")
 	}
 }
 
+// roundTripFunc adapts a function to http.RoundTripper, so a test can return a
+// typed nil of a func kind.
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
 // TestNewClient_WrapTransportReturningNilFails verifies a wrapper that returns
-// nil is an error rather than a client with no transport.
+// nil, or a RoundTripper holding a nil value, is an error rather than a client
+// that panics on its first request or in Close.
 func TestNewClient_WrapTransportReturningNilFails(t *testing.T) {
 	t.Parallel()
 
-	opts := minimalHTTPOptions()
-	opts.WrapTransport = func(*http.Transport) http.RoundTripper { return nil }
-
-	client, err := NewClient(opts)
-	if !errors.Is(err, ErrWrapTransportNil) {
-		t.Fatalf("NewClient error = %v, want ErrWrapTransportNil", err)
+	cases := map[string]http.RoundTripper{
+		"literal nil":             nil,
+		"nil *http.Transport":     (*http.Transport)(nil),
+		"nil *recordingWrapper":   (*recordingWrapper)(nil),
+		"nil RoundTripper func":   roundTripFunc(nil),
+		"nil *swappableTransport": (*swappableTransport)(nil),
 	}
 
-	if client != nil {
-		t.Error("NewClient returned a client alongside the error")
+	for name, result := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			opts := minimalHTTPOptions()
+			opts.WrapTransport = func(*http.Transport) http.RoundTripper { return result }
+
+			client, err := NewClient(opts)
+			if !errors.Is(err, ErrWrapTransportNil) {
+				t.Fatalf("NewClient error = %v, want ErrWrapTransportNil", err)
+			}
+
+			if client != nil {
+				t.Error("NewClient returned a client alongside the error")
+			}
+		})
+	}
+}
+
+// TestNewClient_WrapTransportAcceptsNonNilValues verifies the nil check does
+// not reject a usable RoundTripper, whether a pointer, a struct value, or a
+// func.
+func TestNewClient_WrapTransportAcceptsNonNilValues(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]func(*http.Transport) http.RoundTripper{
+		"base itself":  func(b *http.Transport) http.RoundTripper { return b },
+		"struct value": func(b *http.Transport) http.RoundTripper { return roundTripOnly{inner: b} },
+		"func":         func(b *http.Transport) http.RoundTripper { return roundTripFunc(b.RoundTrip) },
+	}
+
+	for name, wrap := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			opts := minimalHTTPOptions()
+			opts.WrapTransport = wrap
+
+			_, err := NewClient(opts)
+			if err != nil {
+				t.Fatalf("NewClient: %v", err)
+			}
+		})
 	}
 }
 
@@ -196,7 +272,7 @@ func TestNewClient_WrapTransportBaseCarriesTLSAndTimeouts(t *testing.T) {
 	t.Parallel()
 
 	base := captureBase(t, &Options{
-		Host:                   "127.0.0.1",
+		Host:                   wrapTestLoopback,
 		Port:                   8006,
 		Protocol:               protoHTTPS,
 		Timeout:                5 * time.Second,
@@ -252,7 +328,7 @@ func TestNewClient_WrapTransportBaseCarriesDialAndProxy(t *testing.T) {
 		t.Fatal("the base transport has no dial function")
 	}
 
-	_, err := base.DialContext(context.Background(), "tcp", "127.0.0.1:8006")
+	_, err := base.DialContext(context.Background(), "tcp", wrapTestLoopback+":8006")
 	if !errors.Is(err, errWrapTestDial) || atomic.LoadInt32(&dialed) != 1 {
 		t.Errorf("the base transport does not dial through Options.DialContext (err=%v)", err)
 	}
@@ -314,7 +390,7 @@ func TestWrapTransport_SeesEveryRequestIncludingLogin(t *testing.T) {
 			}
 
 			writer.Header().Set(testHeaderContentType, testContentTypeJSON)
-			_, _ = writer.Write(pveEnvelope(t, map[string]string{"version": "8.0"}))
+			_, _ = writer.Write(versionEnvelope(t))
 		default:
 			writer.WriteHeader(http.StatusNotFound)
 		}
@@ -369,7 +445,7 @@ func TestWrapTransport_WithHostRequestCarriesOverrideHost(t *testing.T) {
 	var calls int32
 
 	client := newClientForServerURL(t, baseSrv.URL, func(o *Options) {
-		o.APIToken = "root@pam!tok=secret"
+		o.APIToken = testAPITokenShort
 		installRecorder(o, &calls)
 	})
 
@@ -456,7 +532,7 @@ func TestWrapTransport_UploadStreamReachesWrapperUnbuffered(t *testing.T) {
 	var calls int32
 
 	client := newClientForServerURL(t, srv.URL, func(o *Options) {
-		o.APIToken = "root@pam!tok=secret"
+		o.APIToken = testAPITokenShort
 		installRecorder(o, &calls)
 	})
 
@@ -511,124 +587,463 @@ func assertSingleUpload(t *testing.T, rec *recordingWrapper, minSize, received i
 	}
 }
 
-// TestSetKeepAlive_ReachesBaseTransportBehindWrapper verifies SetKeepAlive
-// still tunes the real transport when a wrapper hides it.
-func TestSetKeepAlive_ReachesBaseTransportBehindWrapper(t *testing.T) {
+// TestSetKeepAlive_LeavesWrapperTransportsUnchanged verifies that with a
+// wrapper installed SetKeepAlive records the value and writes no transport,
+// neither the base the wrapper was handed nor a clone it installed.
+func TestSetKeepAlive_LeavesWrapperTransportsUnchanged(t *testing.T) {
 	t.Parallel()
 
-	opts := minimalHTTPOptions()
-
-	var calls int32
-
-	wrapper := installRecorder(opts, &calls)
-
-	client, err := NewClient(opts)
-	if err != nil {
-		t.Fatalf("NewClient: %v", err)
+	cases := map[string]func(*http.Transport) http.RoundTripper{
+		"wrapper around base":   func(b *http.Transport) http.RoundTripper { return &recordingWrapper{base: b} },
+		"wrapper returns clone": func(b *http.Transport) http.RoundTripper { return b.Clone() },
 	}
 
-	client.SetKeepAlive(11)
+	for name, wrap := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-	if got := (*wrapper).base.MaxIdleConns; got != 11 {
-		t.Errorf("MaxIdleConns = %d, want 11", got)
-	}
+			opts := minimalHTTPOptions()
 
-	if got := (*wrapper).base.MaxIdleConnsPerHost; got != 11 {
-		t.Errorf("MaxIdleConnsPerHost = %d, want 11", got)
+			var base *http.Transport
+
+			opts.WrapTransport = func(b *http.Transport) http.RoundTripper {
+				base = b
+
+				return wrap(b)
+			}
+
+			client, err := NewClient(opts)
+			if err != nil {
+				t.Fatalf("NewClient: %v", err)
+			}
+
+			logger := &testLogger{}
+			client.SetLogger(logger)
+			client.SetLogConfig(LogConfig{Enabled: true})
+
+			installed := client.httpClient.Transport
+
+			client.SetKeepAlive(11)
+
+			if client.httpClient.Transport != installed {
+				t.Error("SetKeepAlive replaced the wrapper's RoundTripper")
+			}
+
+			assertIdleLimitsUnchanged(t, base, installed)
+
+			if opts.KeepAlive != 11 {
+				t.Errorf("Options.KeepAlive = %d, want 11 recorded", opts.KeepAlive)
+			}
+
+			logger.mu.Lock()
+			defer logger.mu.Unlock()
+
+			if len(logger.warns) != 1 || logger.warns[0] != "SetKeepAlive left the transport unchanged" {
+				t.Errorf("warnings = %q, want one saying the transport was left unchanged", logger.warns)
+			}
+		})
 	}
 }
 
-// TestSetKeepAlive_FallsBackToTypeAssertion verifies a Client whose
-// baseTransport is unset still tunes a plain *http.Transport.
-func TestSetKeepAlive_FallsBackToTypeAssertion(t *testing.T) {
-	t.Parallel()
+// assertIdleLimitsUnchanged checks that base, and installed when it is a
+// *http.Transport, still carry the 5/5 idle limits minimalHTTPOptions sets.
+func assertIdleLimitsUnchanged(t *testing.T, base *http.Transport, installed http.RoundTripper) {
+	t.Helper()
 
-	client := clientPointedAt(t, "http://127.0.0.1:1")
-	client.baseTransport = nil
-
-	client.SetKeepAlive(13)
-
-	transport, ok := client.httpClient.Transport.(*http.Transport)
-	if !ok {
-		t.Fatalf("Transport is %T, want *http.Transport", client.httpClient.Transport)
+	transports := map[string]*http.Transport{"base": base}
+	if clone, ok := installed.(*http.Transport); ok {
+		transports["installed clone"] = clone
 	}
 
-	if transport.MaxIdleConns != 13 {
-		t.Errorf("MaxIdleConns = %d, want 13", transport.MaxIdleConns)
-	}
-
-	client.httpClient.Transport = &recordingWrapper{}
-	client.SetKeepAlive(17) // an unknown transport with no base is left alone
-
-	if transport.MaxIdleConns != 13 {
-		t.Errorf("MaxIdleConns = %d after a no-op SetKeepAlive, want 13", transport.MaxIdleConns)
-	}
-}
-
-// TestSetKeepAlive_ReachesClonedTransportInstalledByWrapper verifies
-// SetKeepAlive tunes the transport the http.Client really uses when the
-// wrapper returns a clone of the base.
-func TestSetKeepAlive_ReachesClonedTransportInstalledByWrapper(t *testing.T) {
-	t.Parallel()
-
-	opts := minimalHTTPOptions()
-
-	var base *http.Transport
-
-	opts.WrapTransport = func(b *http.Transport) http.RoundTripper {
-		base = b
-
-		return b.Clone()
-	}
-
-	client, err := NewClient(opts)
-	if err != nil {
-		t.Fatalf("NewClient: %v", err)
-	}
-
-	installed, ok := client.httpClient.Transport.(*http.Transport)
-	if !ok {
-		t.Fatalf("Transport is %T, want *http.Transport", client.httpClient.Transport)
-	}
-
-	if installed == base {
-		t.Fatal("the wrapper returned the base itself, want a clone")
-	}
-
-	client.SetKeepAlive(19)
-
-	for name, tr := range map[string]*http.Transport{"installed clone": installed, "base": base} {
-		if tr.MaxIdleConns != 19 || tr.MaxIdleConnsPerHost != 19 {
-			t.Errorf("%s: MaxIdleConns = %d, MaxIdleConnsPerHost = %d, want 19 and 19",
-				name, tr.MaxIdleConns, tr.MaxIdleConnsPerHost)
+	for label, tr := range transports {
+		if tr.MaxIdleConns != 5 || tr.MaxIdleConnsPerHost != 5 {
+			t.Errorf("%s: MaxIdleConns = %d, MaxIdleConnsPerHost = %d, want 5 and 5 (unchanged)",
+				label, tr.MaxIdleConns, tr.MaxIdleConnsPerHost)
 		}
 	}
 }
 
-// TestSetKeepAlive_ClonedTransportKeepsExplicitPerHostCap verifies the
-// explicit MaxIdleConnsPerHost option still wins on the installed clone.
-func TestSetKeepAlive_ClonedTransportKeepsExplicitPerHostCap(t *testing.T) {
+// TestSetKeepAlive_WithoutNewClientRecordsOnly verifies a Client built without
+// NewClient, which has no swappable transport, takes the call without panicking.
+func TestSetKeepAlive_WithoutNewClientRecordsOnly(t *testing.T) {
 	t.Parallel()
 
-	opts := minimalHTTPOptions()
-	opts.MaxIdleConnsPerHost = 3
-	opts.WrapTransport = func(b *http.Transport) http.RoundTripper { return b.Clone() }
+	(&Client{}).SetKeepAlive(3)
+
+	opts := &Options{}
+	client := &Client{options: opts}
+	client.SetKeepAlive(3)
+
+	if opts.KeepAlive != 3 {
+		t.Errorf("Options.KeepAlive = %d, want 3", opts.KeepAlive)
+	}
+}
+
+// TestSetKeepAlive_InstallsRetunedClone verifies SetKeepAlive installs a new
+// transport carrying the new limits and the original configuration, and
+// leaves the replaced transport's fields untouched.
+func TestSetKeepAlive_InstallsRetunedClone(t *testing.T) {
+	t.Parallel()
+
+	opts := &Options{
+		Host:                   wrapTestLoopback,
+		Port:                   8006,
+		Protocol:               protoHTTPS,
+		Timeout:                5 * time.Second,
+		KeepAlive:              5,
+		TLSHandshakeTimeoutSec: 4,
+		IdleConnTimeoutSec:     9,
+		DialContext: func(context.Context, string, string) (net.Conn, error) {
+			return nil, errWrapTestDial
+		},
+		SSLOptions: &SSLOptions{VerifyMode: SSLVerifyNone},
+	}
 
 	client, err := NewClient(opts)
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
 
-	client.SetKeepAlive(19)
+	before := liveTransport(t, client)
 
-	installed, ok := client.httpClient.Transport.(*http.Transport)
-	if !ok {
-		t.Fatalf("Transport is %T, want *http.Transport", client.httpClient.Transport)
+	client.SetKeepAlive(42)
+
+	after := liveTransport(t, client)
+
+	if after == before {
+		t.Fatal("SetKeepAlive wrote the transport in use instead of installing a clone")
 	}
 
-	if installed.MaxIdleConns != 19 || installed.MaxIdleConnsPerHost != 3 {
-		t.Errorf("MaxIdleConns = %d, MaxIdleConnsPerHost = %d, want 19 and 3",
-			installed.MaxIdleConns, installed.MaxIdleConnsPerHost)
+	if before.MaxIdleConns != 5 || before.MaxIdleConnsPerHost != 5 {
+		t.Errorf("replaced transport changed to %d/%d, want 5/5", before.MaxIdleConns, before.MaxIdleConnsPerHost)
+	}
+
+	if after.MaxIdleConns != 42 || after.MaxIdleConnsPerHost != 42 {
+		t.Errorf("new transport idle limits = %d/%d, want 42/42", after.MaxIdleConns, after.MaxIdleConnsPerHost)
+	}
+
+	assertCloneKeepsConfiguration(t, after)
+
+	client.swap.mu.Lock()
+	retired := append([]*http.Transport(nil), client.swap.retired...)
+	client.swap.mu.Unlock()
+
+	if len(retired) != 1 || retired[0] != before {
+		t.Errorf("retired transports = %d, want the one replaced transport", len(retired))
+	}
+
+	if opts.KeepAlive != 42 {
+		t.Errorf("Options.KeepAlive = %d, want 42", opts.KeepAlive)
+	}
+}
+
+// assertCloneKeepsConfiguration checks that a retuned transport still carries
+// the TLS configuration, timeouts, and dial function TestSetKeepAlive_InstallsRetunedClone
+// configured.
+func assertCloneKeepsConfiguration(t *testing.T, after *http.Transport) {
+	t.Helper()
+
+	if after.TLSClientConfig == nil || !after.TLSClientConfig.InsecureSkipVerify {
+		t.Error("the new transport lost the TLS configuration")
+	}
+
+	if after.TLSHandshakeTimeout != 4*time.Second || after.IdleConnTimeout != 9*time.Second {
+		t.Errorf("new transport timeouts = %v/%v, want 4s/9s", after.TLSHandshakeTimeout, after.IdleConnTimeout)
+	}
+
+	if after.DialContext == nil {
+		t.Fatal("the new transport lost the dial function")
+	}
+
+	_, dialErr := after.DialContext(context.Background(), "tcp", wrapTestLoopback+":8006")
+	if !errors.Is(dialErr, errWrapTestDial) {
+		t.Errorf("the new transport does not dial through Options.DialContext (err=%v)", dialErr)
+	}
+}
+
+// TestSetKeepAlive_RepeatedLimitsKeepTransport verifies a call that changes no
+// limit keeps the current transport and retires nothing.
+func TestSetKeepAlive_RepeatedLimitsKeepTransport(t *testing.T) {
+	t.Parallel()
+
+	client, err := NewClient(minimalHTTPOptions())
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+
+	before := liveTransport(t, client)
+
+	client.SetKeepAlive(5)
+
+	if liveTransport(t, client) != before {
+		t.Error("SetKeepAlive with the current limits replaced the transport")
+	}
+
+	client.swap.mu.Lock()
+	defer client.swap.mu.Unlock()
+
+	if len(client.swap.retired) != 0 {
+		t.Errorf("retired transports = %d, want 0", len(client.swap.retired))
+	}
+}
+
+// connStateServer starts a server answering /version with a PVE envelope and
+// reporting every connection state change on the returned channel. A request
+// to /slow waits until release closes.
+func connStateServer(t *testing.T, entered chan<- struct{}, release <-chan struct{}) (*httptest.Server, <-chan http.ConnState) {
+	t.Helper()
+
+	states := make(chan http.ConnState, 64)
+
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/api2/json/slow" {
+			entered <- struct{}{}
+
+			<-release
+		}
+
+		writer.Header().Set(testHeaderContentType, testContentTypeJSON)
+		_, _ = writer.Write(versionEnvelope(t))
+	}))
+	srv.Config.ConnState = func(_ net.Conn, state http.ConnState) { states <- state }
+	srv.Start()
+	t.Cleanup(srv.Close)
+
+	return srv, states
+}
+
+// TestSetKeepAlive_ClosesReplacedTransportIdleConnections verifies the idle
+// connection pooled by the replaced transport is closed by the swap.
+func TestSetKeepAlive_ClosesReplacedTransportIdleConnections(t *testing.T) {
+	t.Parallel()
+
+	srv, states := connStateServer(t, nil, nil)
+
+	client := newClientForServerURL(t, srv.URL, func(o *Options) { o.APIToken = testAPITokenShort })
+
+	_, err := client.Do("GET", "/version", nil)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+
+	waitForConnState(t, states, http.StateIdle)
+
+	client.SetKeepAlive(9)
+
+	waitForConnState(t, states, http.StateClosed)
+
+	_, err = client.Do("GET", "/version", nil)
+	if err != nil {
+		t.Fatalf("Do after SetKeepAlive: %v", err)
+	}
+
+	waitForConnState(t, states, http.StateNew)
+}
+
+// TestSetKeepAlive_InFlightRequestFinishesOnReplacedTransport verifies a
+// request in flight across the swap completes on the replaced transport,
+// which then closes its connection instead of pooling it.
+func TestSetKeepAlive_InFlightRequestFinishesOnReplacedTransport(t *testing.T) {
+	t.Parallel()
+
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+
+	srv, states := connStateServer(t, entered, release)
+
+	client := newClientForServerURL(t, srv.URL, func(o *Options) { o.APIToken = testAPITokenShort })
+
+	done := make(chan error, 1)
+
+	go func() {
+		_, err := client.Do("GET", "/slow", nil)
+		done <- err
+	}()
+
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the slow request never reached the server")
+	}
+
+	client.SetKeepAlive(9)
+	close(release)
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("in-flight Do: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the in-flight request never finished")
+	}
+
+	waitForConnState(t, states, http.StateClosed)
+
+	if liveTransport(t, client).MaxIdleConns != 9 {
+		t.Error("later requests do not use the retuned transport")
+	}
+
+	closeErr := client.Close()
+	if closeErr != nil {
+		t.Fatalf("Close: %v", closeErr)
+	}
+}
+
+// TestSetKeepAlive_RaceWithRequests calls SetKeepAlive while requests run and
+// their response bodies close, so go test -race catches any write to a
+// transport net/http is reading.
+func TestSetKeepAlive_RaceWithRequests(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]func(*http.Transport) http.RoundTripper{
+		"no wrapper":            nil,
+		"wrapper around base":   func(b *http.Transport) http.RoundTripper { return &recordingWrapper{base: b} },
+		"wrapper returns clone": func(b *http.Transport) http.RoundTripper { return b.Clone() },
+	}
+
+	for name, wrap := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var calls int32
+
+			srv := newEnvelopeCountingServer(t, testDataBase, &calls)
+
+			client := newClientForServerURL(t, srv.URL, func(o *Options) {
+				o.APIToken = testAPITokenShort
+				o.WrapTransport = wrap
+			})
+
+			const (
+				workers  = 4
+				requests = 25
+			)
+
+			err := hammerSetKeepAlive(client.SetKeepAlive, workers, requests, func() error {
+				_, doErr := client.Do("GET", "/version", nil)
+
+				return doErr
+			})
+			if err != nil {
+				t.Fatalf("Do during SetKeepAlive: %v", err)
+			}
+
+			if got := atomic.LoadInt32(&calls); got != workers*requests {
+				t.Errorf("server saw %d requests, want %d", got, workers*requests)
+			}
+
+			closeErr := client.Close()
+			if closeErr != nil {
+				t.Fatalf("Close: %v", closeErr)
+			}
+		})
+	}
+}
+
+// hammerSetKeepAlive runs workers goroutines that each send requests
+// through send while another goroutine calls setKeepAlive with changing
+// values, and returns the first request error.
+func hammerSetKeepAlive(setKeepAlive func(int), workers, requests int, send func() error) error {
+	var (
+		group    sync.WaitGroup
+		stop     = make(chan struct{})
+		tuned    = make(chan struct{})
+		failures = make(chan error, 1)
+	)
+
+	go func() {
+		defer close(tuned)
+
+		for i := 0; ; i++ {
+			select {
+			case <-stop:
+				return
+			default:
+				setKeepAlive(1 + i%4)
+			}
+		}
+	}()
+
+	for range workers {
+		group.Go(func() {
+			for range requests {
+				err := send()
+				if err != nil {
+					select {
+					case failures <- err:
+					default:
+					}
+
+					return
+				}
+			}
+		})
+	}
+
+	group.Wait()
+	close(stop)
+	<-tuned
+
+	select {
+	case err := <-failures:
+		return err
+	default:
+		return nil
+	}
+}
+
+// TestWrapTransport_SeesEachRetryAttempt verifies an ordinary SDK retry passes
+// through the wrapper: a GET answered 503 and then 200 reaches the wrapper
+// twice, while NewClient still calls the hook only once.
+func TestWrapTransport_SeesEachRetryAttempt(t *testing.T) {
+	t.Parallel()
+
+	var versionCalls int32
+
+	srv := newTestServer(t, func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != wrapTestPathVersion {
+			writer.WriteHeader(http.StatusNotFound)
+
+			return
+		}
+
+		if atomic.AddInt32(&versionCalls, 1) == 1 {
+			writer.WriteHeader(http.StatusServiceUnavailable)
+
+			return
+		}
+
+		writer.Header().Set(testHeaderContentType, testContentTypeJSON)
+		_, _ = writer.Write(versionEnvelope(t))
+	})
+
+	var (
+		calls   int32
+		wrapper **recordingWrapper
+	)
+
+	client := newClientForServerURL(t, srv.URL, func(o *Options) {
+		o.APIToken = testAPITokenShort
+		wrapper = installRecorder(o, &calls)
+	})
+	client.SetRetryDelay(time.Millisecond)
+
+	_, err := client.Do("GET", "/version", nil)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+
+	if got := (*wrapper).countPath(wrapTestPathVersion); got != 2 {
+		t.Errorf("wrapper saw %d GET /version attempts, want 2 (the 503 and the retry)", got)
+	}
+
+	if got := atomic.LoadInt32(&versionCalls); got != 2 {
+		t.Errorf("server saw %d GET /version requests, want 2", got)
+	}
+
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Errorf("WrapTransport calls = %d, want 1", got)
 	}
 }
 

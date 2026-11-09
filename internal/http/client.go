@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -37,7 +38,9 @@ var ErrHostOverrideFingerprint = errors.New(
 	"per-request host override is not supported with TLS fingerprint pinning")
 
 // ErrWrapTransportNil is returned by NewClient when Options.WrapTransport
-// returns a nil RoundTripper, which would leave the client without a transport.
+// returns a nil RoundTripper, or a RoundTripper holding a nil pointer, map,
+// slice, func, or channel such as (*http.Transport)(nil), which would leave
+// the client without a usable transport.
 var ErrWrapTransportNil = errors.New("WrapTransport returned a nil RoundTripper")
 
 // Client implements the HTTP client for PVE API communication.
@@ -73,10 +76,19 @@ type Client struct {
 	// Caching
 	cache *cache.Cache
 
-	// baseTransport is the *http.Transport NewClient built, kept so
-	// SetKeepAlive still reaches it when WrapTransport hides it behind
-	// another RoundTripper. Nil only for a Client built without NewClient.
+	// baseTransport is the *http.Transport NewClient built and handed to
+	// WrapTransport, kept so Close reaches its idle connections when a
+	// wrapper hides it behind another RoundTripper. Nil only for a Client
+	// built without NewClient.
 	baseTransport *http.Transport
+
+	// swap is the RoundTripper NewClient installs when no WrapTransport
+	// option is set, so SetKeepAlive can replace the transport without
+	// writing one that requests are using. Nil when a wrapper is installed.
+	swap *swappableTransport
+
+	// keepAliveMu serializes SetKeepAlive.
+	keepAliveMu sync.Mutex
 }
 
 // Middleware defines a function that can modify requests or responses.
@@ -98,15 +110,9 @@ func NewClient(options *Options) (*Client, error) {
 		transport.TLSClientConfig = tlsConfig
 	}
 
-	var roundTripper http.RoundTripper = transport
-
-	if options.WrapTransport != nil {
-		wrapped := options.WrapTransport(transport)
-		if wrapped == nil {
-			return nil, ErrWrapTransportNil
-		}
-
-		roundTripper = wrapped
+	roundTripper, swap, err := installTransport(options, transport)
+	if err != nil {
+		return nil, err
 	}
 
 	httpClient := &http.Client{
@@ -127,6 +133,7 @@ func NewClient(options *Options) (*Client, error) {
 		options:       options,
 
 		baseTransport: transport,
+		swap:          swap,
 	}
 
 	// Initialize cache if configured
@@ -149,6 +156,43 @@ func NewClient(options *Options) (*Client, error) {
 	}
 
 	return client, nil
+}
+
+// installTransport returns the RoundTripper the http.Client uses. With a
+// WrapTransport option that is the wrapper's result, called once with
+// transport; otherwise it is a swappableTransport holding transport, which it
+// also returns so SetKeepAlive can retune it.
+func installTransport(options *Options, transport *http.Transport) (http.RoundTripper, *swappableTransport, error) {
+	if options.WrapTransport == nil {
+		swap := newSwappableTransport(transport)
+
+		return swap, swap, nil
+	}
+
+	wrapped := options.WrapTransport(transport)
+	if isNilRoundTripper(wrapped) {
+		return nil, nil, fmt.Errorf("%w (got %T)", ErrWrapTransportNil, wrapped)
+	}
+
+	return wrapped, nil, nil
+}
+
+// isNilRoundTripper reports whether rt is nil or an interface holding a nil
+// value of a kind that can be nil. A typed nil passes a plain nil check and
+// panics on the first request or in Close, so NewClient rejects both forms.
+func isNilRoundTripper(rt http.RoundTripper) bool {
+	if rt == nil {
+		return true
+	}
+
+	v := reflect.ValueOf(rt)
+
+	switch v.Kind() { //nolint:exhaustive // only these kinds can hold nil
+	case reflect.Pointer, reflect.UnsafePointer, reflect.Map, reflect.Func, reflect.Chan, reflect.Slice:
+		return v.IsNil()
+	default:
+		return false
+	}
 }
 
 func createHTTPTransport(options *Options) *http.Transport {
@@ -667,39 +711,40 @@ func (c *Client) SetTimeout(timeout time.Duration) {
 	c.httpClient.Timeout = timeout
 }
 
-// SetKeepAlive updates the number of idle keep-alive connections retained by
-// the live transport (MaxIdleConns, and MaxIdleConnsPerHost when no explicit
-// MaxIdleConnsPerHost override was configured), taking effect for subsequent
-// requests without reconstructing the client. It tunes the *http.Transport
-// NewClient built and, when a WrapTransport option installed a different
-// *http.Transport (for example a Clone of the base), that transport as well.
-// A transport that a wrapper keeps inside its own RoundTripper is out of
-// reach, so such a wrapper applies its own tuning. It is a no-op if the client
-// holds no *http.Transport.
+// SetKeepAlive sets the number of idle keep-alive connections the client
+// retains (MaxIdleConns, and MaxIdleConnsPerHost when no explicit
+// MaxIdleConnsPerHost override was configured) for subsequent requests,
+// without reconstructing the client. net/http reads those fields while
+// requests run, so SetKeepAlive never writes a transport in use. Without a
+// WrapTransport option it installs a Clone of the current transport carrying
+// the new limits, which later requests and logins use, and closes the idle
+// connections of the transport it replaced; requests already in flight finish
+// on the replaced transport. With a WrapTransport option it records the value
+// in the options and leaves every transport unchanged, because NewClient
+// calls the wrapper once and the wrapper keeps the base it was handed. Such a
+// wrapper keeps the idle limits it had when NewClient returned, and one that
+// needs other limits sets them on the base, or on its clone, inside the hook.
+// It is safe to call while requests are in flight.
 func (c *Client) SetKeepAlive(connections int) {
+	c.keepAliveMu.Lock()
+	defer c.keepAliveMu.Unlock()
+
 	if c.options != nil {
 		c.options.KeepAlive = connections
 	}
 
-	perHost := c.options == nil || c.options.MaxIdleConnsPerHost <= 0
-
-	apply := func(t *http.Transport) {
-		t.MaxIdleConns = connections
-
-		if perHost {
-			t.MaxIdleConnsPerHost = connections
+	if c.swap == nil {
+		if c.logger != nil && c.logConfig.Enabled {
+			c.logger.Warn("SetKeepAlive left the transport unchanged", map[string]interface{}{
+				"keep_alive": connections,
+				"reason":     "the client's transport comes from WrapTransport, which owns its idle limits",
+			})
 		}
+
+		return
 	}
 
-	installed, _ := c.httpClient.Transport.(*http.Transport)
-
-	if c.baseTransport != nil {
-		apply(c.baseTransport)
-	}
-
-	if installed != nil && installed != c.baseTransport {
-		apply(installed)
-	}
+	c.swap.retune(connections, c.options == nil || c.options.MaxIdleConnsPerHost <= 0)
 }
 
 // SetMaxRetries sets the maximum number of retries.
@@ -770,7 +815,8 @@ func (c *Client) Logout() error {
 // cleanup goroutine (if caching is enabled) and closes idle HTTP connections.
 // It closes the idle connections of the transport NewClient built as well as
 // those the http.Client reaches, because a WrapTransport wrapper that
-// implements only RoundTrip hides the base from the http.Client.
+// implements only RoundTrip hides the base from the http.Client. Without a
+// wrapper that includes every transport a SetKeepAlive call replaced.
 // It is safe to call Close more than once. After Close the client should not
 // be used for further requests.
 func (c *Client) Close() error {
