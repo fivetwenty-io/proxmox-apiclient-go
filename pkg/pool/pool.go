@@ -1,5 +1,5 @@
-// Package pool wraps a single shared *http.Client (and its *http.Transport)
-// behind a Get/Put/Do API, plus request-level accounting. It does not
+// Package pool wraps a single shared *http.Client (and the *http.Transport it
+// sends on) behind a Get/Put/Do API, plus request-level accounting. It does not
 // maintain a pool of distinct client instances: every Get returns the same
 // *http.Client, and Put only decrements a counter. Actual TCP connection
 // reuse across concurrent requests comes from http.Transport's own internal
@@ -14,6 +14,11 @@
 // pkg/client.Client. Construct one directly (pool.New(cfg)) and use its
 // Do/DoWithContext methods, or pull the *http.Client via Get, when you want
 // this accounting layer around outbound HTTP calls.
+//
+// The shared client's Transport is an internal round tripper that holds the
+// current *http.Transport, not the *http.Transport itself, so
+// SetMaxConnections and SetMaxConnectionsPerHost can install a retuned copy
+// without writing fields net/http reads while requests run.
 package pool
 
 import (
@@ -25,6 +30,7 @@ import (
 	"time"
 
 	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/constants"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/swaptransport"
 )
 
 var (
@@ -70,7 +76,7 @@ func DefaultConfig() *Config {
 // http.Transport's internal idle-connection pool.
 type Pool struct {
 	config    *Config
-	transport *http.Transport
+	transport *swaptransport.Transport
 	client    *http.Client
 	mu        sync.RWMutex
 	stats     *poolStats
@@ -148,11 +154,13 @@ func New(config *Config) *Pool {
 		Protocols:              nil,
 	}
 
+	swap := swaptransport.New(transport)
+
 	return &Pool{
 		config:    config,
-		transport: transport,
+		transport: swap,
 		client: &http.Client{
-			Transport:     transport,
+			Transport:     swap,
 			CheckRedirect: nil,
 			Jar:           nil,
 			Timeout:       config.ConnectionTimeout,
@@ -284,22 +292,45 @@ func (p *Pool) Close() error {
 	return nil
 }
 
-// SetMaxConnections updates the maximum number of connections.
+// SetMaxConnections updates the maximum number of idle connections
+// (MaxIdleConns) for subsequent requests. It is safe to call while requests
+// run: it installs a retuned copy of the transport behind the shared client
+// rather than writing the transport in use, and closes the idle connections
+// of the one it replaced. Requests already in flight finish on the replaced
+// transport.
 func (p *Pool) SetMaxConnections(maxConns int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
 	p.config.MaxConnections = maxConns
-	p.transport.MaxIdleConns = maxConns
+	p.transport.Update(func(next *http.Transport) bool {
+		if next.MaxIdleConns == maxConns {
+			return false
+		}
+
+		next.MaxIdleConns = maxConns
+
+		return true
+	})
 }
 
-// SetMaxConnectionsPerHost updates the maximum connections per host.
+// SetMaxConnectionsPerHost updates the maximum idle connections per host
+// (MaxIdleConnsPerHost) for subsequent requests, in the same way as
+// SetMaxConnections.
 func (p *Pool) SetMaxConnectionsPerHost(maxConnsPerHost int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
 	p.config.MaxConnectionsPerHost = maxConnsPerHost
-	p.transport.MaxIdleConnsPerHost = maxConnsPerHost
+	p.transport.Update(func(next *http.Transport) bool {
+		if next.MaxIdleConnsPerHost == maxConnsPerHost {
+			return false
+		}
+
+		next.MaxIdleConnsPerHost = maxConnsPerHost
+
+		return true
+	})
 }
 
 // IsHealthy checks if the pool is healthy.

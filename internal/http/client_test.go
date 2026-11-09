@@ -220,8 +220,8 @@ func TestNewClient_DefaultTimeout(t *testing.T) {
 		t.Errorf("client.timeout = %v, want 30s", client.timeout)
 	}
 
-	if client.httpClient.Timeout != 30*time.Second {
-		t.Errorf("httpClient.Timeout = %v, want 30s", client.httpClient.Timeout)
+	if client.httpClient.Load().Timeout != 30*time.Second {
+		t.Errorf("httpClient.Timeout = %v, want 30s", client.httpClient.Load().Timeout)
 	}
 }
 
@@ -236,8 +236,8 @@ func TestNewClient_ZeroTimeout(t *testing.T) {
 		t.Fatalf("NewClient: %v", err)
 	}
 
-	if client.httpClient.Timeout != 0 {
-		t.Errorf("expected zero timeout, got %v", client.httpClient.Timeout)
+	if client.httpClient.Load().Timeout != 0 {
+		t.Errorf("expected zero timeout, got %v", client.httpClient.Load().Timeout)
 	}
 }
 
@@ -1143,8 +1143,8 @@ func TestSetTimeout(t *testing.T) {
 		t.Errorf("timeout = %v, want 42s", client.timeout)
 	}
 
-	if client.httpClient.Timeout != 42*time.Second {
-		t.Errorf("httpClient.Timeout = %v, want 42s", client.httpClient.Timeout)
+	if client.httpClient.Load().Timeout != 42*time.Second {
+		t.Errorf("httpClient.Timeout = %v, want 42s", client.httpClient.Load().Timeout)
 	}
 }
 

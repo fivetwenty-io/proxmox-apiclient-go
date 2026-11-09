@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync"
 	"time"
 
 	pvehttp "github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/http"
@@ -100,6 +101,9 @@ type Response struct {
 type client struct {
 	options    *Options
 	httpClient HTTPClient
+
+	// tuneMu serializes SetTimeout and SetKeepAlive, which write options.
+	tuneMu sync.Mutex
 }
 
 // HTTPClient defines the interface for HTTP operations.
@@ -373,10 +377,17 @@ func (c *client) UpdateCSRFToken(token string) {
 	}
 }
 
-// SetTimeout sets the request timeout, applying it to the live HTTP client
-// (both the request deadline and the underlying transport) so it takes
-// effect for subsequent requests without reconstructing the client.
+// SetTimeout sets the request timeout (http.Client.Timeout) for subsequent
+// requests, including ticket logins, without reconstructing the client. It is
+// safe to call while requests are in flight: it switches later requests to a
+// copy of the underlying http.Client carrying the new timeout rather than
+// writing the one in use, and requests already in flight keep the timeout
+// they started with. It works the same with and without
+// Options.WrapTransport, because the timeout applies above the transport.
 func (c *client) SetTimeout(timeout time.Duration) {
+	c.tuneMu.Lock()
+	defer c.tuneMu.Unlock()
+
 	c.options.Timeout = timeout
 	c.httpClient.SetTimeout(timeout)
 }
@@ -388,6 +399,9 @@ func (c *client) SetTimeout(timeout time.Duration) {
 // set it records the value and changes no transport, as that option
 // describes.
 func (c *client) SetKeepAlive(connections int) {
+	c.tuneMu.Lock()
+	defer c.tuneMu.Unlock()
+
 	c.options.KeepAlive = connections
 	c.httpClient.SetKeepAlive(connections)
 }

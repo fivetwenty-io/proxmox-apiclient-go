@@ -82,7 +82,7 @@ func TestRetryMiddleware_DNSFailureNotRetried(t *testing.T) {
 	var calls int32
 
 	client := countingClient(t, "http://pmx-nonexistent.invalid:8006", &calls)
-	client.httpClient.Transport = &http.Transport{
+	client.httpClient.Load().Transport = &http.Transport{
 		DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
 			return nil, &net.DNSError{Err: "no such host", Name: "pmx-nonexistent.invalid", IsNotFound: true}
 		},
@@ -227,7 +227,7 @@ func tlsCountingClient(t *testing.T, cfg *tls.Config, calls *int32) *Client {
 	t.Cleanup(srv.Close)
 
 	client := countingClient(t, srv.URL, calls)
-	client.httpClient.Transport = &http.Transport{TLSClientConfig: cfg}
+	client.httpClient.Load().Transport = &http.Transport{TLSClientConfig: cfg}
 
 	return client
 }

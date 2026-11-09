@@ -10,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	pve "github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/client"
 )
@@ -242,9 +243,10 @@ func TestWrapTransport_NilResultFailsNewClient(t *testing.T) {
 	}
 }
 
-// TestSetKeepAlive_RaceWithRequests calls SetKeepAlive through the public
-// client while requests run and their response bodies close, with and
-// without a wrapper, so go test -race catches a write to a transport in use.
+// TestSetKeepAlive_RaceWithRequests calls SetKeepAlive and SetTimeout through
+// the public client while requests run and their response bodies close, with
+// and without a wrapper, so go test -race catches a write to an http.Client
+// or transport in use.
 func TestSetKeepAlive_RaceWithRequests(t *testing.T) {
 	t.Parallel()
 
@@ -271,18 +273,18 @@ func TestSetKeepAlive_RaceWithRequests(t *testing.T) {
 				t.Fatalf("NewClient: %v", err)
 			}
 
-			failures := hammerPublicSetKeepAlive(cli, 4, 25)
+			failures := hammerPublicSetters(cli, 4, 25)
 			if failures != 0 {
-				t.Errorf("%d requests failed while SetKeepAlive ran", failures)
+				t.Errorf("%d requests failed while SetKeepAlive and SetTimeout ran", failures)
 			}
 		})
 	}
 }
 
-// hammerPublicSetKeepAlive sends workers*requests GET /version requests on cli
-// while another goroutine calls SetKeepAlive with changing values, and returns
-// how many requests failed.
-func hammerPublicSetKeepAlive(cli pve.Client, workers, requests int) int32 {
+// hammerPublicSetters sends workers*requests GET /version requests on cli
+// while another goroutine alternates SetKeepAlive and SetTimeout with changing
+// values, and returns how many requests failed.
+func hammerPublicSetters(cli pve.Client, workers, requests int) int32 {
 	var (
 		group    sync.WaitGroup
 		failures atomic.Int32
@@ -298,7 +300,11 @@ func hammerPublicSetKeepAlive(cli pve.Client, workers, requests int) int32 {
 			case <-stop:
 				return
 			default:
-				cli.SetKeepAlive(1 + i%4)
+				if i%2 == 0 {
+					cli.SetKeepAlive(1 + i%4)
+				} else {
+					cli.SetTimeout(time.Duration(5+i%3) * time.Second)
+				}
 			}
 		}
 	}()

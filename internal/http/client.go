@@ -17,11 +17,13 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"crypto/x509"
 	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/constants"
 	issl "github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/ssl"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/swaptransport"
 	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/auth"
 	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/cache"
 	apierrors "github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/errors"
@@ -45,8 +47,13 @@ var ErrWrapTransportNil = errors.New("WrapTransport returned a nil RoundTripper"
 
 // Client implements the HTTP client for PVE API communication.
 type Client struct {
-	baseURL       string
-	httpClient    *http.Client
+	baseURL string
+
+	// httpClient is the *http.Client requests are sent with. SetTimeout
+	// replaces it with a copy rather than writing the Timeout field that
+	// http.Client.Do reads, so it is loaded atomically on every request.
+	httpClient atomic.Pointer[http.Client]
+
 	authenticator auth.Authenticator
 	middleware    []Middleware
 	timeout       time.Duration
@@ -85,10 +92,17 @@ type Client struct {
 	// swap is the RoundTripper NewClient installs when no WrapTransport
 	// option is set, so SetKeepAlive can replace the transport without
 	// writing one that requests are using. Nil when a wrapper is installed.
-	swap *swappableTransport
+	swap *swaptransport.Transport
 
-	// keepAliveMu serializes SetKeepAlive.
-	keepAliveMu sync.Mutex
+	// tuneMu serializes SetTimeout and SetKeepAlive.
+	tuneMu sync.Mutex
+}
+
+// httpClientSetter is implemented by authenticators that send requests with
+// their own reference to the client's *http.Client, such as the ticket
+// authenticator, so SetTimeout can hand them the replacement.
+type httpClientSetter interface {
+	SetHTTPClient(httpClient *http.Client)
 }
 
 // Middleware defines a function that can modify requests or responses.
@@ -124,7 +138,6 @@ func NewClient(options *Options) (*Client, error) {
 
 	client := &Client{
 		baseURL:       options.BaseURL(),
-		httpClient:    httpClient,
 		authenticator: authenticator,
 		timeout:       options.Timeout,
 		maxRetries:    constants.DefaultMaxRetries,
@@ -135,6 +148,7 @@ func NewClient(options *Options) (*Client, error) {
 		baseTransport: transport,
 		swap:          swap,
 	}
+	client.httpClient.Store(httpClient)
 
 	// Initialize cache if configured
 	if options.CacheConfig != nil && options.CacheConfig.Enabled {
@@ -160,11 +174,14 @@ func NewClient(options *Options) (*Client, error) {
 
 // installTransport returns the RoundTripper the http.Client uses. With a
 // WrapTransport option that is the wrapper's result, called once with
-// transport; otherwise it is a swappableTransport holding transport, which it
-// also returns so SetKeepAlive can retune it.
-func installTransport(options *Options, transport *http.Transport) (http.RoundTripper, *swappableTransport, error) {
+// transport; otherwise it is a swaptransport.Transport holding transport,
+// which it also returns so SetKeepAlive can retune it.
+func installTransport(
+	options *Options,
+	transport *http.Transport,
+) (http.RoundTripper, *swaptransport.Transport, error) {
 	if options.WrapTransport == nil {
-		swap := newSwappableTransport(transport)
+		swap := swaptransport.New(transport)
 
 		return swap, swap, nil
 	}
@@ -705,10 +722,33 @@ func (c *Client) RemoveHeader(key string) {
 	delete(c.headers, key)
 }
 
-// SetTimeout sets the request timeout.
+// SetTimeout sets the request timeout (http.Client.Timeout) for subsequent
+// requests, including ticket logins, without reconstructing the client.
+// http.Client.Do reads Timeout while requests run, so SetTimeout never writes
+// the http.Client in use: it installs a copy carrying the new timeout, which
+// shares the transport or WrapTransport wrapper, and hands that copy to the
+// ticket authenticator. Requests already in flight keep the timeout they
+// started with. It behaves the same with and without a WrapTransport option,
+// because the timeout applies above the transport. It is safe to call while
+// requests are in flight.
 func (c *Client) SetTimeout(timeout time.Duration) {
+	c.tuneMu.Lock()
+	defer c.tuneMu.Unlock()
+
 	c.timeout = timeout
-	c.httpClient.Timeout = timeout
+
+	current := c.httpClient.Load()
+	if current == nil || current.Timeout == timeout {
+		return
+	}
+
+	next := *current
+	next.Timeout = timeout
+	c.httpClient.Store(&next)
+
+	if setter, ok := c.authenticator.(httpClientSetter); ok {
+		setter.SetHTTPClient(&next)
+	}
 }
 
 // SetKeepAlive sets the number of idle keep-alive connections the client
@@ -726,8 +766,8 @@ func (c *Client) SetTimeout(timeout time.Duration) {
 // needs other limits sets them on the base, or on its clone, inside the hook.
 // It is safe to call while requests are in flight.
 func (c *Client) SetKeepAlive(connections int) {
-	c.keepAliveMu.Lock()
-	defer c.keepAliveMu.Unlock()
+	c.tuneMu.Lock()
+	defer c.tuneMu.Unlock()
 
 	if c.options != nil {
 		c.options.KeepAlive = connections
@@ -744,7 +784,21 @@ func (c *Client) SetKeepAlive(connections int) {
 		return
 	}
 
-	c.swap.retune(connections, c.options == nil || c.options.MaxIdleConnsPerHost <= 0)
+	perHost := c.options == nil || c.options.MaxIdleConnsPerHost <= 0
+
+	c.swap.Update(func(next *http.Transport) bool {
+		if next.MaxIdleConns == connections && (!perHost || next.MaxIdleConnsPerHost == connections) {
+			return false
+		}
+
+		next.MaxIdleConns = connections
+
+		if perHost {
+			next.MaxIdleConnsPerHost = connections
+		}
+
+		return true
+	})
 }
 
 // SetMaxRetries sets the maximum number of retries.
@@ -816,7 +870,7 @@ func (c *Client) Logout() error {
 // It closes the idle connections of the transport NewClient built as well as
 // those the http.Client reaches, because a WrapTransport wrapper that
 // implements only RoundTrip hides the base from the http.Client. Without a
-// wrapper that includes every transport a SetKeepAlive call replaced.
+// wrapper that includes the most recent transports SetKeepAlive replaced.
 // It is safe to call Close more than once. After Close the client should not
 // be used for further requests.
 func (c *Client) Close() error {
@@ -824,8 +878,8 @@ func (c *Client) Close() error {
 		c.cache.Close()
 	}
 
-	if c.httpClient != nil {
-		c.httpClient.CloseIdleConnections()
+	if httpClient := c.httpClient.Load(); httpClient != nil {
+		httpClient.CloseIdleConnections()
 	}
 
 	if c.baseTransport != nil {
@@ -1128,7 +1182,7 @@ func (c *Client) buildRequestWithContext(ctx context.Context, method, path strin
 func (c *Client) executeWithMiddleware(req *http.Request) (*http.Response, error) {
 	// Create the final handler that executes the actual request
 	finalHandler := func(r *http.Request) (*http.Response, error) {
-		return c.httpClient.Do(r)
+		return c.httpClient.Load().Do(r)
 	}
 
 	// Build the middleware chain in reverse order

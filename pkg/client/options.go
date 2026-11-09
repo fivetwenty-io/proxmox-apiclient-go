@@ -150,7 +150,9 @@ type Options struct {
 	// the wrapper keeps the base it was handed and net/http reads a
 	// transport's idle limits while requests run. A wrapper that needs other
 	// idle limits sets MaxIdleConns and MaxIdleConnsPerHost on the base, or on
-	// its clone, inside the hook before it returns.
+	// its clone, inside the hook before it returns. Client.SetTimeout works
+	// the same with or without a wrapper, because the timeout applies in the
+	// http.Client above it.
 	// Client.Close closes the idle connections of the base transport, so a
 	// wrapper that owns additional transports should also implement
 	// CloseIdleConnections and the client reaches it through the http.Client.
