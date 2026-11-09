@@ -15,10 +15,18 @@
 // A connection pooled on a replaced transport is therefore closed by
 // net/http's idle timer at the latest IdleConnTimeout after its request ends,
 // and sooner when CloseIdleConnections reaches that transport.
+//
+// Closing an idle connection calls its net.Conn's Close method, which can be
+// caller code, such as a connection returned by a caller's DialContext, and
+// that code may call back into the SDK. This package therefore never closes a
+// connection while it holds a lock. Update and Retired.Add hand the caller an
+// Idle to close instead, and a caller that holds a lock of its own closes it
+// only after releasing that lock.
 package swaptransport
 
 import (
 	"net/http"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -42,40 +50,64 @@ func FiniteIdleTimeout(timeout time.Duration) time.Duration {
 	return DefaultIdleConnTimeout
 }
 
+// Idle is a set of transports whose idle connections still need closing.
+// Code that collects an Idle while holding a lock calls CloseIdleConnections
+// only after releasing every lock it holds, as the package doc explains.
+type Idle []*http.Transport
+
+// CloseIdleConnections closes the idle connections of every transport in the
+// set. The caller must hold no lock that a net.Conn's Close method could need.
+func (idle Idle) CloseIdleConnections() {
+	for _, t := range idle {
+		t.CloseIdleConnections()
+	}
+}
+
 // Retired holds the most recent replaced transports, at most maxRetired, so
 // CloseIdleConnections can still reach connections released to them after the
 // swap. A transport dropped from the list has its idle connections closed as
 // it is dropped; anything it pools later is closed by its IdleConnTimeout.
-// The zero value is ready to use.
+// Retired never closes a connection while holding its lock. The zero value is
+// ready to use.
 type Retired struct {
 	mu   sync.Mutex
 	list []*http.Transport
 }
 
-// Add closes old's idle connections and keeps it, dropping the oldest kept
-// transport when the list is full.
-func (r *Retired) Add(old *http.Transport) {
-	old.CloseIdleConnections()
-
+// Add keeps old, dropping the oldest kept transport when the list is full,
+// and returns the transports whose idle connections the caller must close:
+// old, and the dropped transport when there is one. Add closes nothing itself,
+// so the caller can call it under a lock and close the result after releasing
+// that lock.
+func (r *Retired) Add(old *http.Transport) Idle {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	idle := Idle{old}
+
 	if len(r.list) == maxRetired {
-		r.list[0].CloseIdleConnections()
+		idle = append(idle, r.list[0])
 		r.list = append(r.list[:0], r.list[1:]...)
 	}
 
 	r.list = append(r.list, old)
+
+	return idle
 }
 
-// CloseIdleConnections closes the idle connections of every kept transport.
-func (r *Retired) CloseIdleConnections() {
+// Snapshot returns the kept transports, for the caller to close after
+// releasing any lock it holds.
+func (r *Retired) Snapshot() Idle {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	for _, t := range r.list {
-		t.CloseIdleConnections()
-	}
+	return slices.Clone(Idle(r.list))
+}
+
+// CloseIdleConnections closes the idle connections of every kept transport.
+// It holds no lock while closing, so the caller must hold none either.
+func (r *Retired) CloseIdleConnections() {
+	r.Snapshot().CloseIdleConnections()
 }
 
 // Len reports how many replaced transports are kept, at most maxRetired.
@@ -116,7 +148,7 @@ func (s *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 }
 
 // CloseIdleConnections closes the idle connections of the current transport
-// and of the retired transports Update keeps.
+// and of the retired transports Update keeps. It holds no lock while closing.
 func (s *Transport) CloseIdleConnections() {
 	s.current.Load().CloseIdleConnections()
 	s.retired.CloseIdleConnections()
@@ -130,11 +162,18 @@ func (s *Transport) Load() *http.Transport {
 
 // Update passes apply a Clone of the current transport. When apply changes
 // the clone and returns true, Update installs the clone for later requests,
-// with a finite IdleConnTimeout as the package doc describes, and retires the
-// transport it replaced. Requests already in flight finish on the replaced
-// transport. When apply returns false, the current transport stays in place
-// and the clone is discarded.
-func (s *Transport) Update(apply func(next *http.Transport) bool) {
+// with a finite IdleConnTimeout as the package doc describes, retires the
+// transport it replaced, and returns the transports whose idle connections
+// the caller must close: the replaced one, and a retired one the bound
+// dropped. Requests already in flight finish on the replaced transport. When
+// apply returns false, the current transport stays in place, the clone is
+// discarded, and Update returns nil.
+//
+// Update closes no connection itself, so the caller may hold a lock around
+// it. The caller calls CloseIdleConnections on the result once it holds no
+// lock, because closing a connection runs caller code. apply runs under
+// Update's lock and must not call Update.
+func (s *Transport) Update(apply func(next *http.Transport) bool) Idle {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -142,13 +181,14 @@ func (s *Transport) Update(apply func(next *http.Transport) bool) {
 	next := old.Clone()
 
 	if !apply(next) {
-		return
+		return nil
 	}
 
 	next.IdleConnTimeout = FiniteIdleTimeout(next.IdleConnTimeout)
 
 	s.current.Store(next)
-	s.retired.Add(old)
+
+	return s.retired.Add(old)
 }
 
 // RetiredCount reports how many replaced transports the Transport keeps,

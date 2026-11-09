@@ -385,8 +385,10 @@ func (c *client) UpdateCSRFToken(token string) {
 // requests, including ticket logins, without reconstructing the client. It is
 // safe to call while requests are in flight: it switches later requests to a
 // copy of the underlying http.Client carrying the new timeout rather than
-// writing the one in use, and requests already in flight keep the timeout
-// they started with. It works the same with and without
+// writing the one in use. The timeout applies to each HTTP attempt, not to a
+// whole SDK request: an attempt already in flight keeps the timeout it started
+// with, and a later attempt of the same request, such as a retry or the resend
+// after a forced re-login, uses the new one. It works the same with and without
 // Options.WrapTransport, because the timeout applies above the transport.
 func (c *client) SetTimeout(timeout time.Duration) {
 	c.tuneMu.Lock()

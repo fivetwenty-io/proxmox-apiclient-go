@@ -85,7 +85,7 @@ func TestUpdate_InstallsChangedCloneAndRetiresOld(t *testing.T) {
 		next.MaxIdleConns = 7
 
 		return true
-	})
+	}).CloseIdleConnections()
 
 	current := swap.Load()
 
@@ -113,7 +113,7 @@ func TestUpdate_BoundsRetiredTransports(t *testing.T) {
 			next.MaxIdleConns = i + 1
 
 			return true
-		})
+		}).CloseIdleConnections()
 	}
 
 	if got := swap.RetiredCount(); got != 8 {
@@ -131,9 +131,9 @@ func TestUpdate_UnchangedKeepsCurrent(t *testing.T) {
 	original := &http.Transport{}
 	swap := swaptransport.New(original)
 
-	swap.Update(func(*http.Transport) bool { return false })
+	idle := swap.Update(func(*http.Transport) bool { return false })
 
-	if swap.Load() != original || swap.RetiredCount() != 0 {
+	if idle != nil || swap.Load() != original || swap.RetiredCount() != 0 {
 		t.Error("an Update that changed nothing replaced the transport")
 	}
 }
@@ -152,7 +152,7 @@ func TestUpdate_ClosesReplacedIdleConnectionsAndSendsOnNew(t *testing.T) {
 		next.MaxIdleConns = 1
 
 		return true
-	})
+	}).CloseIdleConnections()
 
 	waitForState(t, states, http.StateClosed)
 
@@ -191,7 +191,7 @@ func TestUpdate_RaceWithRequests(t *testing.T) {
 					next.MaxIdleConnsPerHost = 1 + i%4
 
 					return true
-				})
+				}).CloseIdleConnections()
 			}
 		}
 	}()
@@ -243,7 +243,7 @@ func TestNew_GivesTransportWithoutIdleTimeoutTheDefault(t *testing.T) {
 				next.IdleConnTimeout = 0
 
 				return true
-			})
+			}).CloseIdleConnections()
 
 			if got := swap.Load().IdleConnTimeout; got != swaptransport.DefaultIdleConnTimeout {
 				t.Errorf("IdleConnTimeout after an Update that cleared it = %v, want %v",
@@ -339,7 +339,7 @@ func TestUpdate_ConnectionOfRequestPausedAcrossEvictionTimesOut(t *testing.T) {
 			next.MaxIdleConns = i + 1
 
 			return true
-		})
+		}).CloseIdleConnections()
 	}
 
 	if got := swap.RetiredCount(); got != 8 {

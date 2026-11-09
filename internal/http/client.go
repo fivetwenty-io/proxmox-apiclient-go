@@ -101,7 +101,8 @@ type Client struct {
 	swap *swaptransport.Transport
 
 	// tuneMu serializes SetTimeout and SetKeepAlive. It is never held while
-	// calling caller code such as the logger, which may call either setter.
+	// calling caller code, such as the logger or the Close method of a
+	// connection from a caller's DialContext, which may call either setter.
 	tuneMu sync.Mutex
 }
 
@@ -728,8 +729,11 @@ func (c *Client) RemoveHeader(key string) {
 // http.Client.Do reads Timeout while requests run, so SetTimeout never writes
 // the http.Client in use: it installs a copy carrying the new timeout, which
 // shares the transport or WrapTransport wrapper, and hands that copy to the
-// ticket authenticator. Requests already in flight keep the timeout they
-// started with. It behaves the same with and without a WrapTransport option,
+// ticket authenticator. The timeout applies to each HTTP attempt, not to a
+// whole SDK request: an attempt already in flight keeps the timeout it
+// started with, and a later attempt of the same request, such as a retry or
+// the resend after a forced re-login, uses the new one. It behaves the same
+// with and without a WrapTransport option,
 // because the timeout applies above the transport. It is safe to call while
 // requests are in flight.
 func (c *Client) SetTimeout(timeout time.Duration) {
@@ -767,9 +771,15 @@ func (c *Client) SetTimeout(timeout time.Duration) {
 // needs other limits sets them on the base, or on its clone, inside the hook.
 // It is safe to call while requests are in flight.
 func (c *Client) SetKeepAlive(connections int) {
-	if !c.setKeepAlive(connections) {
-		// Logged after tuneMu is released: the logger is caller code and may
-		// call SetTimeout or SetKeepAlive itself.
+	retuned, idle := c.setKeepAlive(connections)
+
+	// Closed and logged after tuneMu is released: closing a connection runs
+	// its net.Conn's Close, which may come from a caller's DialContext, and
+	// the logger is caller code, and either may call SetTimeout or
+	// SetKeepAlive itself.
+	idle.CloseIdleConnections()
+
+	if !retuned {
 		c.logWarn("SetKeepAlive left the transport unchanged", map[string]interface{}{
 			"keep_alive": connections,
 			"reason":     "the client's transport comes from WrapTransport, which owns its idle limits",
@@ -777,16 +787,19 @@ func (c *Client) SetKeepAlive(connections int) {
 	}
 }
 
-// SetMaxRetries sets the maximum number of retries for subsequent requests. A
-// request already retrying keeps the count it started with. It is safe to call
-// while requests are in flight.
+// SetMaxRetries sets the maximum number of retries for subsequent requests.
+// The count is read once when a request starts its round of retries, so a
+// round already running keeps the count it started with. The resend after a
+// forced re-login starts a new round and reads the count again. It is safe to
+// call while requests are in flight.
 func (c *Client) SetMaxRetries(retries int) {
 	c.maxRetries.Store(int64(retries))
 }
 
-// SetRetryDelay sets the delay between retries for subsequent requests. A
-// request already retrying keeps the delay it started with. It is safe to call
-// while requests are in flight.
+// SetRetryDelay sets the delay between retries for subsequent requests. Like
+// the retry count, the delay is read once when a request starts its round of
+// retries, so a round already running keeps the delay it started with. It is
+// safe to call while requests are in flight.
 func (c *Client) SetRetryDelay(delay time.Duration) {
 	c.retryDelay.Store(int64(delay))
 }
@@ -905,8 +918,9 @@ func (c *Client) CacheStats() *cache.CacheStats {
 }
 
 // setKeepAlive records connections and retunes the transport under tuneMu,
-// reporting false when there is no swappable transport to retune.
-func (c *Client) setKeepAlive(connections int) bool {
+// reporting false when there is no swappable transport to retune. It returns
+// the replaced transports for SetKeepAlive to close once tuneMu is released.
+func (c *Client) setKeepAlive(connections int) (bool, swaptransport.Idle) {
 	c.tuneMu.Lock()
 	defer c.tuneMu.Unlock()
 
@@ -915,12 +929,12 @@ func (c *Client) setKeepAlive(connections int) bool {
 	}
 
 	if c.swap == nil {
-		return false
+		return false, nil
 	}
 
 	perHost := c.options == nil || c.options.MaxIdleConnsPerHost <= 0
 
-	c.swap.Update(func(next *http.Transport) bool {
+	idle := c.swap.Update(func(next *http.Transport) bool {
 		if next.MaxIdleConns == connections && (!perHost || next.MaxIdleConnsPerHost == connections) {
 			return false
 		}
@@ -934,7 +948,7 @@ func (c *Client) setKeepAlive(connections int) bool {
 		return true
 	})
 
-	return true
+	return true, idle
 }
 
 // tfa returns the TFA handler in effect, or nil when none is set.
