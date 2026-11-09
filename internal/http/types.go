@@ -109,6 +109,13 @@ type Options struct {
 	// http.ProxyFromEnvironment to honour those variables.
 	Proxy func(*http.Request) (*url.URL, error)
 
+	// WrapTransport, when non-nil, is called once by NewClient with the
+	// *http.Transport it built, after the TLS configuration is applied. The
+	// returned RoundTripper replaces that transport on the http.Client shared
+	// with the authenticator, so ticket login and forced re-login go through
+	// it as well. Opt-in; nil (default) leaves the transport untouched.
+	WrapTransport func(base *http.Transport) http.RoundTripper
+
 	// Caching configuration
 	CacheConfig *cache.Config
 

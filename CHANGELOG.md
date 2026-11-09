@@ -5,6 +5,12 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v3.12.0] — Unreleased
+
+### Added
+
+- `Options.WrapTransport`, an opt-in hook for the HTTP transport. `NewClient` calls it once with the `*http.Transport` it built, after the TLS configuration, dial function, proxy, and timeouts are applied, and installs the returned `http.RoundTripper` as the client's transport. The ticket login and the forced re-login share that transport, so the wrapper sees every request, including `POST /access/ticket`, and it sits below the retry layer, so it sees each attempt separately. Requests routed with `WithHost` reach it addressed to the override host, and an upload stream reaches it unbuffered. The wrapper may `Clone` the base transport, and a wrapper that returns nil makes `NewClient` fail. A nil option leaves the transport exactly as it was in v3.11.0, and `SetKeepAlive` still tunes the base transport when a wrapper hides it.
+
 ## [v3.11.0] — 2026-10-05
 
 ### Added

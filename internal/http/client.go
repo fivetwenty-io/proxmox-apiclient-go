@@ -36,6 +36,10 @@ import (
 var ErrHostOverrideFingerprint = errors.New(
 	"per-request host override is not supported with TLS fingerprint pinning")
 
+// ErrWrapTransportNil is returned by NewClient when Options.WrapTransport
+// returns a nil RoundTripper, which would leave the client without a transport.
+var ErrWrapTransportNil = errors.New("WrapTransport returned a nil RoundTripper")
+
 // Client implements the HTTP client for PVE API communication.
 type Client struct {
 	baseURL       string
@@ -68,6 +72,11 @@ type Client struct {
 
 	// Caching
 	cache *cache.Cache
+
+	// baseTransport is the *http.Transport NewClient built, kept so
+	// SetKeepAlive still reaches it when WrapTransport hides it behind
+	// another RoundTripper. Nil only for a Client built without NewClient.
+	baseTransport *http.Transport
 }
 
 // Middleware defines a function that can modify requests or responses.
@@ -89,8 +98,19 @@ func NewClient(options *Options) (*Client, error) {
 		transport.TLSClientConfig = tlsConfig
 	}
 
+	var roundTripper http.RoundTripper = transport
+
+	if options.WrapTransport != nil {
+		wrapped := options.WrapTransport(transport)
+		if wrapped == nil {
+			return nil, ErrWrapTransportNil
+		}
+
+		roundTripper = wrapped
+	}
+
 	httpClient := &http.Client{
-		Transport: transport,
+		Transport: roundTripper,
 		Timeout:   options.Timeout,
 	}
 
@@ -105,6 +125,8 @@ func NewClient(options *Options) (*Client, error) {
 		retryDelay:    time.Second,
 		logConfig:     defaultLogConfig(),
 		options:       options,
+
+		baseTransport: transport,
 	}
 
 	// Initialize cache if configured
@@ -656,9 +678,14 @@ func (c *Client) SetKeepAlive(connections int) {
 		c.options.KeepAlive = connections
 	}
 
-	t, ok := c.httpClient.Transport.(*http.Transport)
-	if !ok {
-		return
+	t := c.baseTransport
+	if t == nil {
+		var ok bool
+
+		t, ok = c.httpClient.Transport.(*http.Transport)
+		if !ok {
+			return
+		}
 	}
 
 	t.MaxIdleConns = connections

@@ -136,6 +136,18 @@ type Options struct {
 	// http.ProxyFromEnvironment to honour those variables.
 	Proxy func(*http.Request) (*url.URL, error)
 
+	// WrapTransport, when non-nil, is called once while the client is built,
+	// with the *http.Transport the client would otherwise use. That base
+	// transport already carries the TLS configuration, dial function, proxy,
+	// and timeouts these options asked for. The returned RoundTripper becomes
+	// the transport of the underlying http.Client, so it sees every request,
+	// including the ticket login and any forced re-login. It sits below the
+	// client's retry layer, so it observes each attempt separately. The
+	// wrapper may Clone the base transport; a wrapper that returns nil makes
+	// NewClient fail. Opt-in; nil (default) leaves the transport exactly as it
+	// is without the field.
+	WrapTransport func(base *http.Transport) http.RoundTripper
+
 	// Caching
 	CacheConfig *CacheConfig // Cache configuration (nil = disabled)
 
