@@ -2,6 +2,7 @@ package client_test
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -238,6 +239,10 @@ func TestWrapTransport_NilResultFailsNewClient(t *testing.T) {
 			})
 			if err == nil {
 				t.Fatal("NewClient() = nil error, want an error when WrapTransport returns a nil RoundTripper")
+			}
+
+			if !errors.Is(err, pve.ErrWrapTransportNil) {
+				t.Errorf("NewClient() error = %v, want it to match pve.ErrWrapTransportNil", err)
 			}
 		})
 	}

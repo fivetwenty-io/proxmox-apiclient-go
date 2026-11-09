@@ -770,7 +770,9 @@ func (c *Client) SetTimeout(timeout time.Duration) {
 // WrapTransport option it installs a Clone of the current transport carrying
 // the new limits, which later requests and logins use, and starts closing the
 // idle connections of the transport it replaced on a separate goroutine,
-// without waiting for that to finish. Requests already in flight finish on
+// without waiting for that to finish. It does not wait because it can run
+// inside a connection's Close while net/http holds the transport's idle lock,
+// as the swaptransport package explains. Requests already in flight finish on
 // the replaced transport, and a connection one of them returns to that
 // transport's pool afterwards is closed by its idle timeout, or sooner by
 // Close. With a WrapTransport option it records the value
