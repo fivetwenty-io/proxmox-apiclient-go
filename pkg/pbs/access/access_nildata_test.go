@@ -18,6 +18,7 @@ import (
 // than reusing access_smoke_test.go's newTestHarness/smokeOptsFromServerURL)
 // so this file has no dependency on a generated file's internals surviving
 // regeneration; the fake token matches the one already used there.
+//
 //nolint:ireturn // mirrors access.New's own interface return; there is no concrete type to return instead
 func newNilDataService(t *testing.T, body string) access.Service {
 	t.Helper()

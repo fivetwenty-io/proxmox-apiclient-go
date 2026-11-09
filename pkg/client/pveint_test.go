@@ -18,7 +18,7 @@ func TestPVEInt_Unmarshal(t *testing.T) {
 		{`0`, 0},
 		{`-3`, -3},
 		{`9223372036854775807`, 9223372036854775807},
-		{`1.9`, 1},  // fractional numbers truncate toward zero
+		{`1.9`, 1}, // fractional numbers truncate toward zero
 		{`-1.9`, -1},
 		{`"5"`, 5},
 		{`"0"`, 0},
