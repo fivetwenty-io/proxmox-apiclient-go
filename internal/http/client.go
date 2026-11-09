@@ -104,6 +104,12 @@ type Client struct {
 	// calling caller code, such as the logger or the Close method of a
 	// connection from a caller's DialContext, which may call either setter.
 	tuneMu sync.Mutex
+
+	// retiring tracks the goroutines SetKeepAlive starts to close the idle
+	// connections of the transports it replaced. SetKeepAlive does not wait
+	// for them, because it can run inside a connection's Close while net/http
+	// holds the lock that closing needs. Tests wait on it to observe the close.
+	retiring sync.WaitGroup
 }
 
 // httpClientSetter is implemented by authenticators that send requests with
@@ -762,9 +768,12 @@ func (c *Client) SetTimeout(timeout time.Duration) {
 // without reconstructing the client. net/http reads those fields while
 // requests run, so SetKeepAlive never writes a transport in use. Without a
 // WrapTransport option it installs a Clone of the current transport carrying
-// the new limits, which later requests and logins use, and closes the idle
-// connections of the transport it replaced; requests already in flight finish
-// on the replaced transport. With a WrapTransport option it records the value
+// the new limits, which later requests and logins use, and starts closing the
+// idle connections of the transport it replaced on a separate goroutine,
+// without waiting for that to finish. Requests already in flight finish on
+// the replaced transport, and a connection one of them returns to that
+// transport's pool afterwards is closed by its idle timeout, or sooner by
+// Close. With a WrapTransport option it records the value
 // in the options and leaves every transport unchanged, because NewClient
 // calls the wrapper once and the wrapper keeps the base it was handed. Such a
 // wrapper keeps the idle limits it had when NewClient returned, and one that
@@ -773,11 +782,14 @@ func (c *Client) SetTimeout(timeout time.Duration) {
 func (c *Client) SetKeepAlive(connections int) {
 	retuned, idle := c.setKeepAlive(connections)
 
-	// Closed and logged after tuneMu is released: closing a connection runs
-	// its net.Conn's Close, which may come from a caller's DialContext, and
-	// the logger is caller code, and either may call SetTimeout or
-	// SetKeepAlive itself.
-	idle.CloseIdleConnections()
+	// Closed after tuneMu is released and on another goroutine: closing a
+	// connection runs its net.Conn's Close, which may come from a caller's
+	// DialContext and may call SetTimeout or SetKeepAlive itself. net/http
+	// calls that Close while holding the transport's idle lock when it expires
+	// or evicts an idle connection, and closing that transport's idle
+	// connections needs the same lock, so waiting here would never return.
+	// Logged after tuneMu is released too, because the logger is caller code.
+	idle.CloseInBackground(&c.retiring)
 
 	if !retuned {
 		c.logWarn("SetKeepAlive left the transport unchanged", map[string]interface{}{
@@ -869,8 +881,11 @@ func (c *Client) Logout() error {
 // those the http.Client reaches, because a WrapTransport wrapper that
 // implements only RoundTrip hides the base from the http.Client. Without a
 // wrapper that includes the most recent transports SetKeepAlive replaced.
-// It is safe to call Close more than once. After Close the client should not
-// be used for further requests.
+// Close closes those connections itself and does not wait for the closing
+// SetKeepAlive started in the background. Unlike SetKeepAlive, Close waits
+// for net/http to release each transport's idle lock, so a connection's Close
+// must not call it. It is safe to call Close more than once. After Close the
+// client should not be used for further requests.
 func (c *Client) Close() error {
 	if c.cache != nil {
 		c.cache.Close()

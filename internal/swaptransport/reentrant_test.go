@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -207,4 +208,91 @@ func TestRetiredAdd_ReturnsReplacedAndDroppedTransports(t *testing.T) {
 
 	// A nil Idle, as Update returns when nothing changed, closes nothing.
 	swaptransport.Idle(nil).CloseIdleConnections()
+}
+
+// backgroundCloser dials connections whose Close, once armed, closes the idle
+// connections of transport through CloseInBackground, the way SetKeepAlive
+// does when a connection's Close calls it.
+type backgroundCloser struct {
+	transport *http.Transport
+	retiring  sync.WaitGroup
+	armed     atomic.Bool
+	returned  chan struct{}
+}
+
+func (b *backgroundCloser) dial(ctx context.Context, network, addr string) (net.Conn, error) {
+	conn, err := (&net.Dialer{}).DialContext(ctx, network, addr)
+	if err != nil {
+		return nil, err //nolint:wrapcheck // a dial function hands back the dialer's error untouched
+	}
+
+	return &backgroundClosingConn{Conn: conn, closer: b}, nil
+}
+
+type backgroundClosingConn struct {
+	net.Conn
+
+	closer *backgroundCloser
+}
+
+func (c *backgroundClosingConn) Close() error {
+	if c.closer.armed.CompareAndSwap(true, false) {
+		swaptransport.Idle{c.closer.transport}.CloseInBackground(&c.closer.retiring)
+		close(c.closer.returned)
+	}
+
+	return c.Conn.Close() //nolint:wrapcheck // a net.Conn hands back the inner error untouched
+}
+
+// TestIdleCloseInBackground_DoesNotWaitOnNetHTTPIdleLock lets net/http's
+// idle timer close a connection, which it does while holding the
+// transport's idle lock. The connection's Close closes that same transport's
+// idle connections through CloseInBackground, which must return without
+// waiting for the lock, and the goroutine it started must then finish.
+func TestIdleCloseInBackground_DoesNotWaitOnNetHTTPIdleLock(t *testing.T) {
+	t.Parallel()
+
+	srv, states := newStateServer(t)
+	closer := &backgroundCloser{returned: make(chan struct{})}
+	closer.transport = &http.Transport{DialContext: closer.dial, IdleConnTimeout: 50 * time.Millisecond}
+	client := &http.Client{Transport: closer.transport}
+
+	closer.armed.Store(true)
+	mustGet(t, client, srv.URL)
+
+	select {
+	case <-closer.returned:
+	case <-time.After(5 * time.Second):
+		t.Fatal("CloseInBackground waited for the idle lock net/http held while closing the connection")
+	}
+
+	finished := make(chan struct{})
+
+	go func() {
+		defer close(finished)
+
+		closer.retiring.Wait()
+	}()
+
+	select {
+	case <-finished:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the goroutine CloseInBackground started never finished")
+	}
+
+	waitForState(t, states, http.StateClosed)
+}
+
+// TestIdleCloseInBackground_EmptySetStartsNothing verifies a nil Idle, as
+// Update returns when nothing changed, adds nothing to the wait group.
+func TestIdleCloseInBackground_EmptySetStartsNothing(t *testing.T) {
+	t.Parallel()
+
+	var retiring sync.WaitGroup
+
+	swaptransport.Idle(nil).CloseInBackground(&retiring)
+	swaptransport.Idle{}.CloseInBackground(&retiring)
+
+	// Wait returns at once only when nothing was added.
+	retiring.Wait()
 }

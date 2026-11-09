@@ -403,9 +403,11 @@ func (c *client) SetTimeout(timeout time.Duration) {
 // SetKeepAlive sets the number of keep-alive connections for subsequent
 // requests without reconstructing the client. It is safe to call while
 // requests are in flight: it switches later requests to a retuned copy of the
-// transport rather than writing the one in use. When Options.WrapTransport is
-// set it records the value and changes no transport, as that option
-// describes.
+// transport rather than writing the one in use. It closes the replaced
+// transport's idle connections on a separate goroutine and does not wait, so
+// a connection's Close from Options.DialContext may call it. When
+// Options.WrapTransport is set it records the value and changes no
+// transport, as that option describes.
 func (c *client) SetKeepAlive(connections int) {
 	c.tuneMu.Lock()
 	c.options.KeepAlive = connections

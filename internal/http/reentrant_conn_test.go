@@ -166,6 +166,7 @@ func TestIdleClose_ReentrantConnectionDoesNotDeadlock(t *testing.T) {
 
 			awaitReturn(t, reenter.finished, "the reentrant SDK calls from the connection's Close")
 			awaitReturn(t, triggered, "the call that closed the connection")
+			awaitRetiring(t, reenter.client)
 			reenter.checkApplied(t, tc.poolStaysUp)
 		})
 	}
@@ -183,7 +184,7 @@ func newReentryFor(t *testing.T, serverURL string) *reentry {
 		o.APIToken = testAPITokenShort
 		o.DialContext = reenter.dial
 	})
-	t.Cleanup(func() { _ = reenter.client.Close() })
+	t.Cleanup(func() { closeWithin(t, reenter.client) })
 
 	reenter.pool = pool.New(pool.DefaultConfig())
 
@@ -207,7 +208,44 @@ func awaitReturn(t *testing.T, done <-chan struct{}, what string) {
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
-		t.Fatalf("%s did not return: the closing path held an SDK lock while closing the connection", what)
+		t.Fatalf("%s did not return: a lock was held while a connection's Close called back into the SDK", what)
+	}
+}
+
+// awaitRetiring fails the test when the goroutines SetKeepAlive started to
+// close replaced transports do not finish within 5 seconds.
+func awaitRetiring(t *testing.T, client *Client) {
+	t.Helper()
+
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+
+		client.retiring.Wait()
+	}()
+
+	awaitReturn(t, done, "closing the transports SetKeepAlive replaced")
+}
+
+// closeWithin closes client and fails the test, instead of hanging it, when
+// Close does not return within 5 seconds, as happens when a deadlocked
+// connection Close still holds a transport's idle lock.
+func closeWithin(t *testing.T, client *Client) {
+	t.Helper()
+
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+
+		_ = client.Close()
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Error("Close did not return: a transport's idle lock is still held by a deadlocked connection Close")
 	}
 }
 

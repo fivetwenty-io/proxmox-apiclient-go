@@ -6,11 +6,14 @@
 // switches later requests to a tuned Clone, and Retired cleans up the
 // transports that were replaced.
 //
-// A replaced transport can still gain a pooled connection after it is
-// replaced. A request that was waiting for a connection during the swap
-// resets the transport's close-idle state, so the connection it releases is
-// pooled rather than closed. That connection must not live forever, so every
-// transport this package hands requests to has a finite IdleConnTimeout:
+// Closing a replaced transport's idle connections closes the connections
+// pooled on it at that moment, and nothing more is guaranteed. A replaced
+// transport can still gain pooled connections afterwards. A request that was
+// waiting for a connection during the swap resets the transport's close-idle
+// state, so the connection it releases, and those that other requests still
+// in flight on that transport release after it, are pooled rather than
+// closed. Those connections must not live forever, so every transport this
+// package hands requests to has a finite IdleConnTimeout:
 // the configured value, or DefaultIdleConnTimeout when it is zero or negative.
 // A connection pooled on a replaced transport is therefore closed by
 // net/http's idle timer at the latest IdleConnTimeout after its request ends,
@@ -22,6 +25,16 @@
 // connection while it holds a lock. Update and Retired.Add hand the caller an
 // Idle to close instead, and a caller that holds a lock of its own closes it
 // only after releasing that lock.
+//
+// Releasing the SDK's locks is not enough on its own. net/http also calls a
+// connection's Close while holding the transport's internal idle lock: when
+// the idle timer expires a connection, and when a connection returning to the
+// pool pushes the transport past MaxIdleConns and evicts the oldest one. If
+// that Close calls back into code that closes the same transport's idle
+// connections and waits for it, the wait needs the lock net/http is holding
+// and never ends. Code reachable from a connection's Close, such as a setter
+// that retires a transport, therefore closes an Idle with CloseInBackground,
+// which does not wait.
 package swaptransport
 
 import (
@@ -61,6 +74,21 @@ func (idle Idle) CloseIdleConnections() {
 	for _, t := range idle {
 		t.CloseIdleConnections()
 	}
+}
+
+// CloseInBackground closes the idle connections of every transport in the set
+// on a new goroutine and returns without waiting, so it is safe to call from
+// a net.Conn's Close while net/http holds a transport's idle lock, as the
+// package doc explains. The goroutine is added to wg, which must not be nil,
+// so a caller can wait for it to finish. It ends once every transport's CloseIdleConnections
+// returns, which takes as long as the slowest Close of a connection in the
+// set. An empty set starts no goroutine.
+func (idle Idle) CloseInBackground(wg *sync.WaitGroup) {
+	if len(idle) == 0 {
+		return
+	}
+
+	wg.Go(idle.CloseIdleConnections)
 }
 
 // Retired holds the most recent replaced transports, at most maxRetired, so
@@ -171,8 +199,9 @@ func (s *Transport) Load() *http.Transport {
 //
 // Update closes no connection itself, so the caller may hold a lock around
 // it. The caller calls CloseIdleConnections on the result once it holds no
-// lock, because closing a connection runs caller code. apply runs under
-// Update's lock and must not call Update.
+// lock, because closing a connection runs caller code, or CloseInBackground
+// when it can be reached from a connection's Close. apply runs under Update's
+// lock and must not call Update.
 func (s *Transport) Update(apply func(next *http.Transport) bool) Idle {
 	s.mu.Lock()
 	defer s.mu.Unlock()

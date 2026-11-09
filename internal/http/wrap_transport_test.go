@@ -825,6 +825,7 @@ func TestSetKeepAlive_ClosesReplacedTransportIdleConnections(t *testing.T) {
 	waitForConnState(t, states, http.StateIdle)
 
 	client.SetKeepAlive(9)
+	awaitRetiring(t, client)
 
 	waitForConnState(t, states, http.StateClosed)
 
@@ -863,6 +864,7 @@ func TestSetKeepAlive_InFlightRequestFinishesOnReplacedTransport(t *testing.T) {
 	}
 
 	client.SetKeepAlive(9)
+	awaitRetiring(t, client)
 	close(release)
 
 	select {
