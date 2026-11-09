@@ -18,9 +18,12 @@
 // SetMaxConnections and SetMaxConnectionsPerHost change the idle limits of
 // the *http.Transport the pool created, in place. net/http reads those limits
 // while requests run and offers no way to change them on a transport in use
-// without a data race, so call the setters before requests are in flight, or
-// while none are. The setters are safe to call concurrently with each other
-// and with Get, Put, Stats, IsHealthy, and Close.
+// without a data race, so call the setters before the pool's transport sends
+// its first request. A request that has returned, or was canceled, doesn't
+// make the transport idle, because net/http may still be dialing for it and
+// reads the limits when that connection is pooled. The setters are safe to
+// call concurrently with each other and with Get, Put, Stats, IsHealthy, and
+// Close.
 //
 // Close closes the idle connections of the transport the pool created, even
 // when a caller has replaced or wrapped the shared client's Transport through
@@ -327,9 +330,10 @@ func (p *Pool) Close() error {
 // changes the shared transport in place, so the client Get returns stays the
 // same and every caller sees the new limit, including through a wrapper a
 // caller installed around the pool's transport. net/http reads the limit
-// while requests run, so call SetMaxConnections before requests are in
-// flight, or while none are; it is safe against concurrent setter, Get, Put,
-// Stats, IsHealthy, and Close calls.
+// while requests run and may still be dialing after a request returns or is
+// canceled, so call SetMaxConnections before the transport sends its first
+// request; it is safe against concurrent setter, Get, Put, Stats, IsHealthy,
+// and Close calls.
 func (p *Pool) SetMaxConnections(maxConns int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -340,8 +344,8 @@ func (p *Pool) SetMaxConnections(maxConns int) {
 
 // SetMaxConnectionsPerHost updates the maximum idle connections per host
 // (MaxIdleConnsPerHost). Like SetMaxConnections, it changes the shared
-// transport in place and must be called before requests are in flight, or
-// while none are.
+// transport in place and must be called before the transport sends its
+// first request.
 func (p *Pool) SetMaxConnectionsPerHost(maxConnsPerHost int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()

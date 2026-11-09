@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- The `pool.Pool.SetMaxConnections` and `SetMaxConnectionsPerHost` docs now say that the setters change the shared transport in place and must be called before requests are in flight, or while none are. net/http reads those limits while requests run and gives no race-free way to change them on a live transport. The setters behave as in earlier releases, and `Get` still returns the same `*http.Client` for the life of the pool. The setters are safe to call concurrently with each other and with `Get`, `Put`, `Stats`, `IsHealthy`, and `Close`.
+- The `pool.Pool.SetMaxConnections` and `SetMaxConnectionsPerHost` docs now say that the setters change the shared transport in place and must be called before the pool's transport sends its first request. net/http reads those limits while requests run and gives no race-free way to change them on a live transport, and a request that has returned or was canceled doesn't make the transport idle, because net/http may still be dialing for it. The setters behave as in earlier releases, and `Get` still returns the same `*http.Client` for the life of the pool. The setters are safe to call concurrently with each other and with `Get`, `Put`, `Stats`, `IsHealthy`, and `Close`.
 - `pool.New` copies the `Config` it is given. The setters no longer write the caller's `Config`, and pools built from the same `Config` no longer share it.
 
 ### Fixed
