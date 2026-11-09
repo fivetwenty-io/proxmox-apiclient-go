@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"sync"
 	"sync/atomic"
@@ -34,11 +35,19 @@ type recordedRequest struct {
 type recordingWrapper struct {
 	base *http.Transport
 
+	// onEnter, when set, runs as each request enters the wrapper, before the
+	// request is recorded or handed on.
+	onEnter func()
+
 	mu       sync.Mutex
 	requests []recordedRequest
 }
 
 func (w *recordingWrapper) RoundTrip(req *http.Request) (*http.Response, error) {
+	if w.onEnter != nil {
+		w.onEnter()
+	}
+
 	w.mu.Lock()
 	w.requests = append(w.requests, recordedRequest{
 		method:        req.Method,
@@ -391,13 +400,48 @@ func TestWrapTransport_WithHostRequestCarriesOverrideHost(t *testing.T) {
 	}
 }
 
-// TestWrapTransport_UploadStreamReachesWrapperUnbuffered verifies a sized
-// upload arrives at the wrapper as a stream: it has a declared length but no
-// GetBody, which is what a buffered body would carry.
+// gatedReader yields the first openBytes of its source and then blocks until
+// the gate closes, so a test can tell whether a consumer asked for more data
+// before the gate opened.
+type gatedReader struct {
+	src       io.Reader
+	openBytes int64
+	gate      <-chan struct{}
+	timeout   time.Duration
+
+	read     int64
+	timedOut atomic.Bool
+}
+
+func (g *gatedReader) Read(b []byte) (int, error) {
+	if g.read >= g.openBytes {
+		select {
+		case <-g.gate:
+		case <-time.After(g.timeout):
+			g.timedOut.Store(true)
+		}
+	} else if remaining := g.openBytes - g.read; int64(len(b)) > remaining {
+		b = b[:remaining]
+	}
+
+	n, err := g.src.Read(b)
+	g.read += int64(n)
+
+	return n, err //nolint:wrapcheck // io.Reader contract: pass io.EOF and source errors through verbatim
+}
+
+// TestWrapTransport_UploadStreamReachesWrapperUnbuffered verifies an upload
+// stream reaches the wrapper before the client has read it all. The source
+// withholds everything past the first block until the wrapper has been
+// entered, so a client that buffered the body first would starve it and time
+// out.
 func TestWrapTransport_UploadStreamReachesWrapperUnbuffered(t *testing.T) {
 	t.Parallel()
 
-	const fileSize = 1 << 20
+	const (
+		fileSize  = 1 << 20
+		openBytes = 1 << 10
+	)
 
 	var received int64
 
@@ -421,30 +465,49 @@ func TestWrapTransport_UploadStreamReachesWrapperUnbuffered(t *testing.T) {
 		t.Fatalf("Transport is %T, want *recordingWrapper", client.httpClient.Transport)
 	}
 
-	// The wrapper reads nothing itself: the body must still be unread, so
-	// the server receives the whole stream.
+	gate := make(chan struct{})
+
+	var once sync.Once
+
+	rec.onEnter = func() { once.Do(func() { close(gate) }) }
+
+	src := &gatedReader{
+		src:       &patternReader{remaining: fileSize},
+		openBytes: openBytes,
+		gate:      gate,
+		timeout:   10 * time.Second,
+	}
+
 	_, err := client.UploadWithContext(context.Background(), "/nodes/node/storage/local/upload",
 		map[string]string{streamTestFieldContent: streamTestContentISO}, streamTestFileField, streamTestFileName,
-		NewSizedReader(&patternReader{remaining: fileSize}, fileSize))
+		NewSizedReader(src, fileSize))
 	if err != nil {
 		t.Fatalf("Upload: %v", err)
 	}
+
+	if src.timedOut.Load() {
+		t.Fatal("the upload was read past the first block before it reached the wrapper, so it was buffered")
+	}
+
+	assertSingleUpload(t, rec, fileSize, atomic.LoadInt64(&received))
+}
+
+// assertSingleUpload checks the wrapper saw exactly one upload of at least
+// minSize bytes and that the server received as many bytes as it declared.
+func assertSingleUpload(t *testing.T, rec *recordingWrapper, minSize, received int64) {
+	t.Helper()
 
 	seen := rec.seen()
 	if len(seen) != 1 {
 		t.Fatalf("wrapper saw %d requests, want 1", len(seen))
 	}
 
-	if seen[0].hasGetBody {
-		t.Error("the upload arrived with GetBody set, so it was buffered")
+	if seen[0].contentLength < minSize {
+		t.Errorf("ContentLength = %d, want at least the %d byte file", seen[0].contentLength, minSize)
 	}
 
-	if seen[0].contentLength < fileSize {
-		t.Errorf("ContentLength = %d, want at least the %d byte file", seen[0].contentLength, fileSize)
-	}
-
-	if got := atomic.LoadInt64(&received); got != seen[0].contentLength {
-		t.Errorf("server received %d bytes, wrapper saw ContentLength %d", got, seen[0].contentLength)
+	if received != seen[0].contentLength {
+		t.Errorf("server received %d bytes, wrapper saw ContentLength %d", received, seen[0].contentLength)
 	}
 }
 
@@ -499,5 +562,147 @@ func TestSetKeepAlive_FallsBackToTypeAssertion(t *testing.T) {
 
 	if transport.MaxIdleConns != 13 {
 		t.Errorf("MaxIdleConns = %d after a no-op SetKeepAlive, want 13", transport.MaxIdleConns)
+	}
+}
+
+// TestSetKeepAlive_ReachesClonedTransportInstalledByWrapper verifies
+// SetKeepAlive tunes the transport the http.Client really uses when the
+// wrapper returns a clone of the base.
+func TestSetKeepAlive_ReachesClonedTransportInstalledByWrapper(t *testing.T) {
+	t.Parallel()
+
+	opts := minimalHTTPOptions()
+
+	var base *http.Transport
+
+	opts.WrapTransport = func(b *http.Transport) http.RoundTripper {
+		base = b
+
+		return b.Clone()
+	}
+
+	client, err := NewClient(opts)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+
+	installed, ok := client.httpClient.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("Transport is %T, want *http.Transport", client.httpClient.Transport)
+	}
+
+	if installed == base {
+		t.Fatal("the wrapper returned the base itself, want a clone")
+	}
+
+	client.SetKeepAlive(19)
+
+	for name, tr := range map[string]*http.Transport{"installed clone": installed, "base": base} {
+		if tr.MaxIdleConns != 19 || tr.MaxIdleConnsPerHost != 19 {
+			t.Errorf("%s: MaxIdleConns = %d, MaxIdleConnsPerHost = %d, want 19 and 19",
+				name, tr.MaxIdleConns, tr.MaxIdleConnsPerHost)
+		}
+	}
+}
+
+// TestSetKeepAlive_ClonedTransportKeepsExplicitPerHostCap verifies the
+// explicit MaxIdleConnsPerHost option still wins on the installed clone.
+func TestSetKeepAlive_ClonedTransportKeepsExplicitPerHostCap(t *testing.T) {
+	t.Parallel()
+
+	opts := minimalHTTPOptions()
+	opts.MaxIdleConnsPerHost = 3
+	opts.WrapTransport = func(b *http.Transport) http.RoundTripper { return b.Clone() }
+
+	client, err := NewClient(opts)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+
+	client.SetKeepAlive(19)
+
+	installed, ok := client.httpClient.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("Transport is %T, want *http.Transport", client.httpClient.Transport)
+	}
+
+	if installed.MaxIdleConns != 19 || installed.MaxIdleConnsPerHost != 3 {
+		t.Errorf("MaxIdleConns = %d, MaxIdleConnsPerHost = %d, want 19 and 3",
+			installed.MaxIdleConns, installed.MaxIdleConnsPerHost)
+	}
+}
+
+// TestClose_ClosesBaseIdleConnectionsBehindRoundTripOnlyWrapper verifies Close
+// reaches the idle sockets of the base transport when the wrapper implements
+// only RoundTrip, so the http.Client cannot.
+func TestClose_ClosesBaseIdleConnectionsBehindRoundTripOnlyWrapper(t *testing.T) {
+	t.Parallel()
+
+	states := make(chan http.ConnState, 16)
+
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		_, _ = writer.Write([]byte("ok"))
+	}))
+	srv.Config.ConnState = func(_ net.Conn, state http.ConnState) { states <- state }
+	srv.Start()
+	t.Cleanup(srv.Close)
+
+	opts := minimalHTTPOptions()
+	opts.WrapTransport = func(b *http.Transport) http.RoundTripper {
+		return roundTripOnly{inner: &recordingWrapper{base: b}}
+	}
+
+	client, err := NewClient(opts)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+
+	if _, hasClose := client.httpClient.Transport.(interface{ CloseIdleConnections() }); hasClose {
+		t.Fatal("the wrapper must implement only RoundTrip for this test")
+	}
+
+	resp, err := client.httpClient.Get(srv.URL) //nolint:noctx // exercising the transport directly
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+
+	_, _ = io.Copy(io.Discard, resp.Body)
+	_ = resp.Body.Close()
+
+	waitForConnState(t, states, http.StateIdle)
+
+	closeErr := client.Close()
+	if closeErr != nil {
+		t.Fatalf("Close: %v", closeErr)
+	}
+
+	waitForConnState(t, states, http.StateClosed)
+}
+
+// roundTripOnly hides every method of the RoundTripper it wraps except
+// RoundTrip.
+type roundTripOnly struct {
+	inner http.RoundTripper
+}
+
+func (r roundTripOnly) RoundTrip(req *http.Request) (*http.Response, error) {
+	return r.inner.RoundTrip(req) //nolint:wrapcheck // a transport must hand back the inner error untouched
+}
+
+// waitForConnState drains states until want arrives, failing after a deadline.
+func waitForConnState(t *testing.T, states <-chan http.ConnState, want http.ConnState) {
+	t.Helper()
+
+	deadline := time.After(5 * time.Second)
+
+	for {
+		select {
+		case got := <-states:
+			if got == want {
+				return
+			}
+		case <-deadline:
+			t.Fatalf("server connection never reached state %v", want)
+		}
 	}
 }

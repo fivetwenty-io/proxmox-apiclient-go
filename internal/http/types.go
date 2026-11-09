@@ -113,7 +113,10 @@ type Options struct {
 	// *http.Transport it built, after the TLS configuration is applied. The
 	// returned RoundTripper replaces that transport on the http.Client shared
 	// with the authenticator, so ticket login and forced re-login go through
-	// it as well. Opt-in; nil (default) leaves the transport untouched.
+	// it as well. SetKeepAlive tunes the base transport and any *http.Transport
+	// the wrapper returns, and Close closes the base's idle connections too.
+	// HTTP requests only; WebSocket dialers are not covered. Opt-in; nil
+	// (default) leaves the transport untouched.
 	WrapTransport func(base *http.Transport) http.RoundTripper
 
 	// Caching configuration

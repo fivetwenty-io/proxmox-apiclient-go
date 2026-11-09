@@ -144,8 +144,16 @@ type Options struct {
 	// including the ticket login and any forced re-login. It sits below the
 	// client's retry layer, so it observes each attempt separately. The
 	// wrapper may Clone the base transport; a wrapper that returns nil makes
-	// NewClient fail. Opt-in; nil (default) leaves the transport exactly as it
-	// is without the field.
+	// NewClient fail. Client.SetKeepAlive tunes the base transport and, when
+	// the wrapper returns a *http.Transport of its own, that transport too;
+	// a transport held inside another RoundTripper is the wrapper's to tune.
+	// Client.Close closes the idle connections of the base transport, so a
+	// wrapper that owns additional transports should also implement
+	// CloseIdleConnections and the client reaches it through the http.Client.
+	// The hook covers HTTP requests only: the WebSocket APIs in
+	// pkg/websocket dial through their own configuration and bypass it.
+	// Opt-in; nil (default) leaves the transport exactly as it is without the
+	// field.
 	WrapTransport func(base *http.Transport) http.RoundTripper
 
 	// Caching

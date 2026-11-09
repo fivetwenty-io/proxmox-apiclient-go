@@ -670,28 +670,35 @@ func (c *Client) SetTimeout(timeout time.Duration) {
 // SetKeepAlive updates the number of idle keep-alive connections retained by
 // the live transport (MaxIdleConns, and MaxIdleConnsPerHost when no explicit
 // MaxIdleConnsPerHost override was configured), taking effect for subsequent
-// requests without reconstructing the client. It is a no-op if the transport
-// is not the *http.Transport this client constructs (never true in practice:
-// NewClient always builds one via createHTTPTransport).
+// requests without reconstructing the client. It tunes the *http.Transport
+// NewClient built and, when a WrapTransport option installed a different
+// *http.Transport (for example a Clone of the base), that transport as well.
+// A transport that a wrapper keeps inside its own RoundTripper is out of
+// reach, so such a wrapper applies its own tuning. It is a no-op if the client
+// holds no *http.Transport.
 func (c *Client) SetKeepAlive(connections int) {
 	if c.options != nil {
 		c.options.KeepAlive = connections
 	}
 
-	t := c.baseTransport
-	if t == nil {
-		var ok bool
+	perHost := c.options == nil || c.options.MaxIdleConnsPerHost <= 0
 
-		t, ok = c.httpClient.Transport.(*http.Transport)
-		if !ok {
-			return
+	apply := func(t *http.Transport) {
+		t.MaxIdleConns = connections
+
+		if perHost {
+			t.MaxIdleConnsPerHost = connections
 		}
 	}
 
-	t.MaxIdleConns = connections
+	installed, _ := c.httpClient.Transport.(*http.Transport)
 
-	if c.options == nil || c.options.MaxIdleConnsPerHost <= 0 {
-		t.MaxIdleConnsPerHost = connections
+	if c.baseTransport != nil {
+		apply(c.baseTransport)
+	}
+
+	if installed != nil && installed != c.baseTransport {
+		apply(installed)
 	}
 }
 
@@ -761,6 +768,9 @@ func (c *Client) Logout() error {
 
 // Close releases resources held by the client: it stops the response-cache
 // cleanup goroutine (if caching is enabled) and closes idle HTTP connections.
+// It closes the idle connections of the transport NewClient built as well as
+// those the http.Client reaches, because a WrapTransport wrapper that
+// implements only RoundTrip hides the base from the http.Client.
 // It is safe to call Close more than once. After Close the client should not
 // be used for further requests.
 func (c *Client) Close() error {
@@ -770,6 +780,10 @@ func (c *Client) Close() error {
 
 	if c.httpClient != nil {
 		c.httpClient.CloseIdleConnections()
+	}
+
+	if c.baseTransport != nil {
+		c.baseTransport.CloseIdleConnections()
 	}
 
 	return nil
