@@ -14,9 +14,10 @@ import (
 )
 
 const (
-	netHTTPImport = "net/http"
-	clientName    = "Client"
-	helperGet     = "Get"
+	netHTTPImport  = "net/http"
+	redirectImport = "github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/redirect"
+	clientName     = "Client"
+	helperGet      = "Get"
 )
 
 // clientFindings is what the scan of one file reports. Built counts the
@@ -33,7 +34,9 @@ type clientFindings struct {
 // changes, so every client the SDK builds sets CheckRedirect. The scan flags a
 // composite literal with no CheckRedirect key or a nil one, new(http.Client), a
 // zero-value http.Client variable, http.DefaultClient, and the package
-// functions that use it.
+// functions that use it. A CheckRedirect value counts as a policy only when it
+// is a call to redirect.Wrap or the function redirect.Refuse, because any other
+// expression can hand the caller's nil function straight to the client.
 func scanHTTPClients(fset *token.FileSet, file *ast.File) clientFindings {
 	name := httpImportName(file)
 	if name == "" {
@@ -41,6 +44,8 @@ func scanHTTPClients(fset *token.FileSet, file *ast.File) clientFindings {
 	}
 
 	var found clientFindings
+
+	redirectName := importName(file, redirectImport, "redirect")
 
 	report := func(pos token.Pos, what string) {
 		found.Violations = append(found.Violations, fmt.Sprintf("%s: %s", fset.Position(pos), what))
@@ -53,7 +58,7 @@ func scanHTTPClients(fset *token.FileSet, file *ast.File) clientFindings {
 				return true
 			}
 
-			if hasRedirectPolicy(typed) {
+			if hasRedirectPolicy(typed, redirectName) {
 				found.Built++
 			} else {
 				report(typed.Pos(), "http.Client literal without a CheckRedirect policy")
@@ -88,9 +93,16 @@ func scanHTTPClients(fset *token.FileSet, file *ast.File) clientFindings {
 // httpImportName returns the name net/http is imported under, or an empty
 // string when the file does not import it.
 func httpImportName(file *ast.File) string {
+	return importName(file, netHTTPImport, "http")
+}
+
+// importName returns the name the file imports path under, which is fallback
+// when the import has no explicit name, or an empty string when the file does
+// not import it.
+func importName(file *ast.File, path, fallback string) string {
 	for _, spec := range file.Imports {
-		path, err := strconv.Unquote(spec.Path.Value)
-		if err != nil || path != netHTTPImport {
+		imported, err := strconv.Unquote(spec.Path.Value)
+		if err != nil || imported != path {
 			continue
 		}
 
@@ -98,7 +110,7 @@ func httpImportName(file *ast.File) string {
 			return spec.Name.Name
 		}
 
-		return "http"
+		return fallback
 	}
 
 	return ""
@@ -115,7 +127,7 @@ func isHTTPSelector(expr ast.Expr, pkg, member string) bool {
 	return ok && ident.Name == pkg
 }
 
-func hasRedirectPolicy(lit *ast.CompositeLit) bool {
+func hasRedirectPolicy(lit *ast.CompositeLit, redirectName string) bool {
 	for _, element := range lit.Elts {
 		pair, ok := element.(*ast.KeyValueExpr)
 		if !ok {
@@ -127,12 +139,25 @@ func hasRedirectPolicy(lit *ast.CompositeLit) bool {
 			continue
 		}
 
-		value, isIdent := pair.Value.(*ast.Ident)
-
-		return !isIdent || value.Name != "nil"
+		return isSharedPolicy(pair.Value, redirectName)
 	}
 
 	return false
+}
+
+// isSharedPolicy reports whether expr is redirect.Refuse or a call to
+// redirect.Wrap, the two ways the SDK installs a policy that refuses by
+// default.
+func isSharedPolicy(expr ast.Expr, redirectName string) bool {
+	if redirectName == "" {
+		return false
+	}
+
+	if call, ok := expr.(*ast.CallExpr); ok {
+		return isHTTPSelector(call.Fun, redirectName, "Wrap")
+	}
+
+	return isHTTPSelector(expr, redirectName, "Refuse")
 }
 
 func scanSource(t *testing.T, source string) clientFindings {
@@ -154,16 +179,22 @@ func scanSource(t *testing.T, source string) clientFindings {
 func TestScanFlagsClientsWithoutAPolicy(t *testing.T) {
 	t.Parallel()
 
-	const head = "package p\nimport nethttp \"net/http\"\nvar _ = nethttp.StatusOK\n"
+	const head = "package p\nimport nethttp \"net/http\"\nimport shared \"" + redirectImport + "\"\n" +
+		"var _ = nethttp.StatusOK\nvar _ = shared.Refuse\n"
 
 	bad := map[string]string{
 		"literal without the field": "func f() { _ = &nethttp.Client{Timeout: 1} }",
 		"empty literal":             "func f() { _ = nethttp.Client{} }",
 		"nil policy":                "func f() { _ = &nethttp.Client{CheckRedirect: nil} }",
-		"new":                       "func f() { _ = new(nethttp.Client) }",
-		"zero value variable":       "var c nethttp.Client",
-		"default client":            "func f() { _ = nethttp.DefaultClient }",
-		"package function":          "func f() { _, _ = nethttp.Get(\"x\") }",
+		"callers function passed through": "func f(p func(*nethttp.Request, []*nethttp.Request) error) " +
+			"{ _ = &nethttp.Client{CheckRedirect: p} }",
+		"field passed through": "func f(o struct{ CheckRedirect func(*nethttp.Request, []*nethttp.Request) error }) " +
+			"{ _ = &nethttp.Client{CheckRedirect: o.CheckRedirect} }",
+		"other package named Wrap": "func f() { _ = &nethttp.Client{CheckRedirect: nethttp.Wrap(nil)} }",
+		"new":                      "func f() { _ = new(nethttp.Client) }",
+		"zero value variable":      "var c nethttp.Client",
+		"default client":           "func f() { _ = nethttp.DefaultClient }",
+		"package function":         "func f() { _, _ = nethttp.Get(\"x\") }",
 	}
 
 	for name, body := range bad {
@@ -172,12 +203,17 @@ func TestScanFlagsClientsWithoutAPolicy(t *testing.T) {
 		}
 	}
 
-	const withPolicy = "func f(p func(*nethttp.Request, []*nethttp.Request) error) " +
-		"{ _ = &nethttp.Client{CheckRedirect: p} }"
+	good := map[string]string{
+		"wrapped function": "func f(p func(*nethttp.Request, []*nethttp.Request) error) " +
+			"{ _ = &nethttp.Client{CheckRedirect: shared.Wrap(p)} }",
+		"refuse": "func f() { _ = &nethttp.Client{CheckRedirect: shared.Refuse} }",
+	}
 
-	good := scanSource(t, head+withPolicy)
-	if len(good.Violations) != 0 || good.Built != 1 {
-		t.Errorf("literal with a policy: %+v, want no violation and one client built", good)
+	for name, body := range good {
+		got := scanSource(t, head+body)
+		if len(got.Violations) != 0 || got.Built != 1 {
+			t.Errorf("%s: %+v, want no violation and one client built", name, got)
+		}
 	}
 
 	other := scanSource(t, "package p\ntype http struct{ Client int }\nvar _ = http{Client: 1}\n")
