@@ -106,3 +106,31 @@ func TestResponseParserBodyReadErrorLeavesNoServerText(t *testing.T) {
 
 	redirecttest.AssertNoTrailerText(t, err.Error())
 }
+
+// TestStreamHandlerReadErrorLeavesNoServerText reads a reply whose trailer
+// line the transport cannot read through the stream handler. Its error must
+// hold none of the trailer's bytes.
+func TestStreamHandlerReadErrorLeavesNoServerText(t *testing.T) {
+	t.Parallel()
+
+	server := redirecttest.ServeRaw(t, redirecttest.BadTrailer(`{"data":`))
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL()+"/x", nil)
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+
+	defer func() { _ = resp.Body.Close() }()
+
+	err = NewStreamHandler().Handle(resp)
+	if err == nil {
+		t.Fatal("got no error, want the body read to fail")
+	}
+
+	redirecttest.AssertNoTrailerText(t, err.Error())
+}

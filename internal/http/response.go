@@ -385,7 +385,7 @@ func (sh *StreamHandler) Handle(resp *http.Response) error {
 		}
 
 		if err != nil {
-			return fmt.Errorf("stream read error: %w", err)
+			return fmt.Errorf("stream read error: %w", redirect.ScrubRead(err, resp))
 		}
 	}
 

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/constants"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/redirect"
 )
 
 const formatJSONLines = "jsonlines"
@@ -161,9 +162,34 @@ func New(reader io.ReadCloser, config *Config) *Stream {
 	return stream
 }
 
-// NewFromResponse creates a stream from an HTTP response.
+// NewFromResponse creates a stream from an HTTP response. An error from reading
+// the body goes through the same cleaner as an error from the request, because
+// it can quote bytes the server sent, such as a malformed trailer line.
 func NewFromResponse(resp *http.Response, config *Config) *Stream {
-	return New(resp.Body, config)
+	return New(&scrubbedBody{body: resp.Body, resp: resp}, config)
+}
+
+// scrubbedBody reads a response body and cleans every read error other than
+// the end of the body.
+type scrubbedBody struct {
+	body io.ReadCloser
+	resp *http.Response
+}
+
+// Read reads from the body and cleans an error that is not io.EOF, which it
+// returns as it came so a reader still sees the end of the body.
+func (b *scrubbedBody) Read(buffer []byte) (int, error) {
+	n, err := b.body.Read(buffer)
+	if err == nil || errors.Is(err, io.EOF) {
+		return n, err //nolint:wrapcheck // io.EOF must reach the reader as itself
+	}
+
+	return n, redirect.ScrubRead(err, b.resp) //nolint:wrapcheck // the cleaner keeps the chain
+}
+
+// Close closes the body.
+func (b *scrubbedBody) Close() error {
+	return b.body.Close() //nolint:wrapcheck // the body's own close error
 }
 
 // Read reads the next item from the stream.
