@@ -118,13 +118,6 @@ func (s *Server) URL() string { return "http://" + s.Addr }
 func Serve(t *testing.T, status int, location []byte) *Server {
 	t.Helper()
 
-	listener, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
-
-	server := &Server{Addr: listener.Addr().String()}
-
 	var response bytes.Buffer
 
 	fmt.Fprintf(&response, "HTTP/1.1 %d %s\r\n", status, http.StatusText(status))
@@ -136,6 +129,23 @@ func Serve(t *testing.T, status int, location []byte) *Server {
 	}
 
 	response.WriteString("Content-Length: 0\r\nConnection: close\r\n\r\n")
+
+	return ServeRaw(t, response.Bytes())
+}
+
+// ServeRaw starts a server that answers every request with response, byte for
+// byte, then closes the connection. The bytes need not be a valid HTTP
+// response, so a test can send a status line, a Content-Length, or a
+// Transfer-Encoding that net/http rejects. The server stops when the test ends.
+func ServeRaw(t *testing.T, response []byte) *Server {
+	t.Helper()
+
+	listener, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+
+	server := &Server{Addr: listener.Addr().String()}
 
 	server.wg.Add(1)
 
@@ -153,7 +163,7 @@ func Serve(t *testing.T, status int, location []byte) *Server {
 			go func() {
 				defer server.wg.Done()
 
-				server.answer(conn, response.Bytes())
+				server.answer(conn, response)
 			}()
 		}
 	}()

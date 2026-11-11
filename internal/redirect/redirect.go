@@ -216,6 +216,58 @@ const (
 	unsupportedSchemeMarker = "unsupported protocol scheme"
 )
 
+// framingMarker names one kind of net/http or HTTP/2 protocol error whose
+// message quotes bytes the server sent. The message is cut where the quoted
+// part starts, so the kind stays readable and the bytes do not.
+type framingMarker struct {
+	// text is the phrase that starts the quoted part, or that names the kind.
+	text string
+
+	// keep is true when the phrase belongs to the kind and stays in the
+	// message, and false when it only introduces the quoted bytes.
+	keep bool
+
+	// except is a phrase that, when present, shows the error describes the
+	// caller's own request and not a response, so it is left alone.
+	except string
+}
+
+// framingMarkers lists the protocol errors net/http and its HTTP/2 transport
+// build from response bytes. Each quotes a status line, a status code, a
+// version, a Content-Length, a Transfer-Encoding, a trailer key, a pseudo
+// header, a header name, or the debug data of a GOAWAY frame.
+var framingMarkers = []framingMarker{
+	{text: "malformed HTTP response", keep: true},
+	{text: "malformed HTTP status code", keep: true},
+	{text: "malformed HTTP version", keep: true},
+	{text: "invalid empty Content-Length", keep: true},
+	{text: "bad Content-Length", keep: true},
+	{text: "message cannot contain multiple Content-Length headers", keep: true},
+	{text: "unsupported transfer encoding", keep: true},
+	{text: "too many transfer encodings", keep: true},
+	{text: "invalid Trailer key", keep: true},
+	{text: "bad trailer key", keep: true},
+	{text: "invalid pseudo-header", keep: true},
+	{text: "duplicate pseudo-header", keep: true},
+	{text: "invalid header field name", keep: true, except: "net/http: invalid header"},
+	{text: "invalid header field value for", keep: true, except: "net/http: invalid header"},
+	{text: ", debug=", keep: false},
+}
+
+// FramingError describes a response the transport could not parse. The
+// transport quotes the bytes it rejected in its own message, which come from
+// the server, so the error keeps the kind of fault and drops the bytes. It
+// does not say it is permanent, so the retry loop treats it as it treated the
+// original, because the retry goes to the same host with the same credentials.
+type FramingError struct {
+	// Kind is the message of the original error up to the point where it
+	// quotes the server's bytes.
+	Kind string
+}
+
+// Error returns the kind of fault without the bytes the server sent.
+func (e *FramingError) Error() string { return e.Kind }
+
 // HeaderError describes a response whose header the transport could not read.
 // The transport quotes the whole raw header line in its own message, which can
 // hold a redirect target with credentials or a cookie, so the error names only
@@ -252,6 +304,13 @@ func (e *HeaderError) Permanent() bool { return true }
 // whole, and when the transport rejects a header line it quotes that line.
 // The first becomes an *Error that names only the requested URL, like any
 // other refusal, and the second becomes a *HeaderError. Both are permanent.
+//
+// A protocol error that net/http or its HTTP/2 transport builds from response
+// bytes, such as a bad status code, a bad Content-Length, or an unsupported
+// Transfer-Encoding, quotes those bytes. Scrub replaces it with a
+// *FramingError that keeps the kind of fault and drops the bytes, and leaves
+// the retry behavior as it was. A followed redirect to a scheme the transport
+// cannot speak is marked permanent, because every attempt fails the same way.
 //
 // An error that is not a *url.Error is returned unchanged unless its own text
 // quotes a header. An error that needs no change comes back as the same value.
@@ -307,7 +366,31 @@ func cleanCause(cause error, from string) error {
 		return permanent.Mark(cause)
 	}
 
+	kind, found := framingKind(text)
+	if found {
+		return &FramingError{Kind: kind}
+	}
+
 	return cause
+}
+
+// framingKind cuts text at the point where a known protocol error starts to
+// quote the server's bytes. It reports false when text holds no such error.
+func framingKind(text string) (string, bool) {
+	for _, marker := range framingMarkers {
+		at := strings.Index(text, marker.text)
+		if at < 0 || (marker.except != "" && strings.Contains(text, marker.except)) {
+			continue
+		}
+
+		if marker.keep {
+			at += len(marker.text)
+		}
+
+		return strings.TrimRight(text[:at], " :;,"), true
+	}
+
+	return "", false
 }
 
 // refusedStatus reports whether a response status is one Guard turns into a
