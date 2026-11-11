@@ -218,7 +218,10 @@ func newTransport(config *Config) *http.Transport {
 // counters. It always returns the same *http.Client instance for the life
 // of the Pool; it does not check out a distinct connection. The pool does not
 // guard writes to the client or its Transport, so configure them before other
-// goroutines use the client.
+// goroutines use the client. The client refuses redirects, but when a request
+// sent through it directly fails that way, net/http puts the raw Location
+// header, including any user information and query, in the error text. Send
+// requests with Do or DoWithContext to get an error with that header removed.
 func (p *Pool) Get() (*http.Client, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()

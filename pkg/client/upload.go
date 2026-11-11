@@ -29,9 +29,11 @@ type RedirectError = pvehttp.RedirectError
 
 // FollowRedirects returns an Options.CheckRedirect policy that follows at most
 // maxRedirects redirects and then fails with a *RedirectError. It follows a
-// redirect to any scheme, host, and port, and Go keeps the Authorization and
-// Cookie headers when only the port or the scheme changes, so use it only with
-// a server whose redirects you trust. A negative maxRedirects counts as zero.
+// redirect to any scheme, host, and port. Go keeps the Authorization and
+// Cookie headers when only the port or the scheme changes, and it copies every
+// other header, such as the CSRFPreventionToken header, to a different host as
+// well, so use it only with a server whose redirects you trust. A negative
+// maxRedirects counts as zero.
 func FollowRedirects(maxRedirects int) func(req *http.Request, via []*http.Request) error {
 	return redirect.Follow(maxRedirects)
 }
