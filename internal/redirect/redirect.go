@@ -14,6 +14,9 @@
 package redirect
 
 import (
+	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"net/http"
@@ -259,17 +262,33 @@ func framingMarkers() []framingMarker {
 
 // FramingError describes a response the transport could not parse. The
 // transport quotes the bytes it rejected in its own message, which come from
-// the server, so the error keeps the kind of fault and drops the bytes. It
-// does not say it is permanent, so the retry loop treats it as it treated the
-// original, because the retry goes to the same host with the same credentials.
+// the server, so the error keeps the kind of fault and drops the bytes from
+// its text. It does not say it is permanent, so the retry loop treats it as it
+// treated the original, because the retry goes to the same host with the same
+// credentials. It unwraps to the original error, so errors.Is and errors.As
+// find what they found before, and the retry decision for the cause does not
+// change.
 type FramingError struct {
 	// Kind is the message of the original error up to the point where it
 	// quotes the server's bytes.
 	Kind string
+
+	cause error
 }
 
 // Error returns the kind of fault without the bytes the server sent.
 func (e *FramingError) Error() string { return e.Kind }
+
+// Unwrap returns the original error, whose own text does quote the bytes. It
+// exists so that errors.Is and errors.As see the whole chain. Code that prints
+// the chain link by link prints those bytes, as it would have before.
+func (e *FramingError) Unwrap() error { return e.cause }
+
+// GoString keeps the %#v form to the kind of fault, because the default form
+// would print the original error and with it the bytes the server sent.
+func (e *FramingError) GoString() string {
+	return fmt.Sprintf("&redirect.FramingError{Kind:%q}", e.Kind)
+}
 
 // HeaderError describes a response whose header the transport could not read.
 // The transport quotes the whole raw header line in its own message, which can
@@ -358,6 +377,14 @@ func cleanCause(cause error, from string) error {
 		return Scrub(nested)
 	}
 
+	// A certificate, context, or refusal error is never reclassified by its
+	// text. A server can choose text inside such an error, such as a name in
+	// the certificate it presents, and a match on that text would drop the
+	// types that stop the retry loop.
+	if isProtected(cause) {
+		return cause
+	}
+
 	text := cause.Error()
 
 	switch {
@@ -371,10 +398,39 @@ func cleanCause(cause error, from string) error {
 
 	kind, found := framingKind(text)
 	if found {
-		return &FramingError{Kind: kind}
+		return &FramingError{Kind: kind, cause: cause}
 	}
 
 	return cause
+}
+
+// isProtected reports whether err is a TLS or x509 verification failure, a
+// context error, or a redirect refusal anywhere in its chain. Their text can
+// hold a name the server chose, and their types decide whether a request is
+// retried, so cleanCause leaves them alone.
+func isProtected(err error) bool {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, ErrRefused) {
+		return true
+	}
+
+	var verifyErr *tls.CertificateVerificationError
+	if errors.As(err, &verifyErr) {
+		return true
+	}
+
+	var unknownAuthority x509.UnknownAuthorityError
+	if errors.As(err, &unknownAuthority) {
+		return true
+	}
+
+	var hostnameErr x509.HostnameError
+	if errors.As(err, &hostnameErr) {
+		return true
+	}
+
+	var invalidErr x509.CertificateInvalidError
+
+	return errors.As(err, &invalidErr)
 }
 
 // framingKind cuts text at the point where a known protocol error starts to
