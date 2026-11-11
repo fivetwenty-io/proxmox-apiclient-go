@@ -343,7 +343,7 @@ func (e *Executor) executeRequest(ctx context.Context, req *Request) *Response {
 			StatusCode: 0,
 			Headers:    nil,
 			Body:       nil,
-			Error:      err.Error(),
+			Error:      redirect.Scrub(err).Error(),
 			Duration:   time.Since(start),
 		}
 	}

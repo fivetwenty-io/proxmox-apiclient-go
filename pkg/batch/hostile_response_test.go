@@ -3,6 +3,7 @@ package batch_test
 import (
 	"context"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -109,4 +110,39 @@ func TestBodyReadErrorLeavesNoServerTextInABatchResponse(t *testing.T) {
 	}
 
 	redirecttest.AssertNoTrailerText(t, resp.Error)
+}
+
+// TestRequestBuildErrorLeavesNoQuerySecretInABatchResponse adds a request whose
+// path cannot be parsed and holds a ticket in its query. The text the executor
+// reports for the failed build must not hold the ticket.
+func TestRequestBuildErrorLeavesNoQuerySecretInABatchResponse(t *testing.T) {
+	t.Parallel()
+
+	cfg := &batch.Config{MaxBatchSize: 1, MaxConcurrency: 1, Timeout: 10 * time.Second}
+	batchInstance := batch.New(cfg)
+
+	path := "http://h/x?vncticket=" + redirecttest.SecretQuery + "\u007f"
+
+	err := batchInstance.Add(&batch.Request{ID: "build", Method: methodGET, Path: path})
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	result, err := batch.NewExecutor(&http.Client{}, cfg).Execute(context.Background(), batchInstance)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	resp := result.Responses["build"]
+	if resp == nil || resp.Error == "" {
+		t.Fatalf("response = %+v, want the build error", resp)
+	}
+
+	if strings.Contains(resp.Error, redirecttest.SecretQuery) {
+		t.Errorf("response error %q holds the query secret", resp.Error)
+	}
+
+	if strings.Contains(resp.Error, "\u007f") {
+		t.Errorf("response error %q holds the raw control character", resp.Error)
+	}
 }
