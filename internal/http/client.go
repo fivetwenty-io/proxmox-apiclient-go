@@ -22,6 +22,7 @@ import (
 
 	"crypto/x509"
 	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/constants"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/redirect"
 	issl "github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/ssl"
 	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/swaptransport"
 	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/auth"
@@ -1246,7 +1247,12 @@ func (c *Client) buildRequestWithContext(ctx context.Context, method, path strin
 func (c *Client) executeWithMiddleware(req *http.Request) (*http.Response, error) {
 	// Create the final handler that executes the actual request
 	finalHandler := func(r *http.Request) (*http.Response, error) {
-		return c.httpClient.Load().Do(r)
+		resp, err := c.httpClient.Load().Do(r)
+		if err != nil {
+			return nil, redirect.Scrub(err)
+		}
+
+		return resp, nil
 	}
 
 	// Build the middleware chain in reverse order
@@ -1791,14 +1797,18 @@ func applyRetryJitter(delay time.Duration) time.Duration {
 // dial timeout. It is surfaced as a typed ConnectionError so callers can
 // distinguish it from an API error.
 func classifyTransportError(req *http.Request, doErr error, attempt, retries int, retryAllowed bool) error {
-	// An error marked permanent, by a redirect refusal or by a WrapTransport
-	// wrapper, is refused again on every retry, so the loop stops at once.
-	if IsPermanent(doErr) {
-		return fmt.Errorf("request failed after %d attempt(s), not retried: %w", attempt+1, doErr)
-	}
-
+	// A connection that cannot be established stays a typed ConnectionError
+	// even when a wrapper also marked it permanent, because the marker only
+	// stops the loop and the type is what callers match.
 	if isTerminalTransportError(doErr) {
 		return newConnectionError(req, doErr)
+	}
+
+	// An error marked permanent, by a redirect refusal or by a WrapTransport
+	// wrapper, is refused again on every retry, so the loop stops at once
+	// whatever the method and the retry count.
+	if IsPermanent(doErr) {
+		return fmt.Errorf("request failed after %d attempt(s), not retried: %w", attempt+1, doErr)
 	}
 
 	// A certificate the client refuses is refused again on every retry, so

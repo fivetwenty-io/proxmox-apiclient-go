@@ -10,6 +10,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/redirect"
 )
 
 var (
@@ -41,9 +43,24 @@ type redirectRig struct {
 
 	// targetAuth records whether any request at the target carried the token.
 	targetAuth atomic.Bool
+
+	// firstURL is the base URL of the first listener.
+	firstURL string
 }
 
 func newRedirectRig(t *testing.T, status int, mutate func(*Options)) *redirectRig {
+	t.Helper()
+
+	return newRedirectRigTo(t, status, nil, mutate)
+}
+
+// newRedirectRigTo builds the rig with the Location header the first listener
+// sends set by locate, which receives the first listener's base URL and the
+// target's, and returns the whole header value. A nil locate sends the target's
+// URL with the request path.
+func newRedirectRigTo(
+	t *testing.T, status int, locate func(first, target string) string, mutate func(*Options),
+) *redirectRig {
 	t.Helper()
 
 	rig := &redirectRig{}
@@ -62,9 +79,18 @@ func newRedirectRig(t *testing.T, status int, mutate func(*Options)) *redirectRi
 
 	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rig.firstHits.Add(1)
-		http.Redirect(w, r, target.URL+redirectTestPath, status)
+
+		location := target.URL + redirectTestPath
+		if locate != nil {
+			location = locate("http://"+r.Host, target.URL)
+		}
+
+		w.Header().Set("Location", location)
+		w.WriteHeader(status)
 	}))
 	t.Cleanup(first.Close)
+
+	rig.firstURL = first.URL
 
 	opts := minimalHTTPOptions()
 	opts.APIToken = testAPITokenFull
@@ -186,7 +212,7 @@ func TestRedirectRefusalNamesNoCredentials(t *testing.T) {
 		t.Fatalf("NewRequest: %v", err)
 	}
 
-	refusal := refuseRedirect(req, []*http.Request{via})
+	refusal := redirect.Refuse(req, []*http.Request{via})
 	if !errors.Is(refusal, ErrRedirectRefused) || !IsPermanent(refusal) {
 		t.Fatalf("refusal = %v, want a permanent ErrRedirectRefused", refusal)
 	}
