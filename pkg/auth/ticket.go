@@ -149,11 +149,9 @@ func (ta *TicketAuthenticator) Authenticate() error {
 	}
 
 	if result.TFAChallenge != nil {
-		return &apierrors.TFARequiredError{
-			Ticket:    result.TFAChallenge.Ticket,
-			Challenge: result.TFAChallenge.Challenge,
-			Types:     result.TFAChallenge.Types,
-		}
+		return apierrors.NewTFARequiredError(
+			result.TFAChallenge.Ticket, result.TFAChallenge.Challenge, result.TFAChallenge.Types,
+		)
 	}
 
 	if result.Ticket != nil {
@@ -226,11 +224,9 @@ func (ta *TicketAuthenticator) RefreshForce() error {
 	}
 
 	if result.TFAChallenge != nil {
-		return &apierrors.TFARequiredError{
-			Ticket:    result.TFAChallenge.Ticket,
-			Challenge: result.TFAChallenge.Challenge,
-			Types:     result.TFAChallenge.Types,
-		}
+		return apierrors.NewTFARequiredError(
+			result.TFAChallenge.Ticket, result.TFAChallenge.Challenge, result.TFAChallenge.Types,
+		)
 	}
 
 	if result.Ticket != nil {

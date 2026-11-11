@@ -206,3 +206,33 @@ func TestNewEnvelopeErrorEscapesAndKeepsTheStatus(t *testing.T) {
 		t.Error("a 500 envelope lost its server error sentinel")
 	}
 }
+
+// TestNewTFARequiredErrorEscapesTheTypes builds the error a login reply with a
+// success status produces. Its types must be escaped and cut as they are on a
+// 401 reply, and the caller's slice must stay as it was.
+func TestNewTFARequiredErrorEscapesTheTypes(t *testing.T) {
+	t.Parallel()
+
+	types := []string{"totp\u001b[2J", strings.Repeat("A", 5000)}
+	original := append([]string(nil), types...)
+
+	tfaErr := pvererrors.NewTFARequiredError("PVE:t\u0000", "c\u202e", types)
+
+	for _, text := range append([]string{tfaErr.Error(), tfaErr.Ticket, tfaErr.Challenge}, tfaErr.Types...) {
+		for _, raw := range []string{"\u001b", "\u202e", "\u0000"} {
+			if strings.Contains(text, raw) {
+				t.Errorf("%.80q holds the raw character %q", text, raw)
+			}
+		}
+	}
+
+	if len(tfaErr.Types[1]) > pvererrors.MaxServerTextBytes+len("...(truncated)") {
+		t.Errorf("a type is %d bytes, want it cut", len(tfaErr.Types[1]))
+	}
+
+	for i := range types {
+		if types[i] != original[i] {
+			t.Errorf("the caller's type %d changed to %.40q", i, types[i])
+		}
+	}
+}

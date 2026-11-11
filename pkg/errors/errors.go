@@ -209,6 +209,22 @@ type TFARequiredError struct {
 	droppedTypes int
 }
 
+// NewTFARequiredError builds the error for a login reply that asks for a second
+// factor. The ticket, the challenge, and the types are text the server chose,
+// so they get the same escaping and the same caps as the error ParseAPIError
+// builds from a 401 reply. The types slice is copied, so the caller's slice
+// stays as it was.
+func NewTFARequiredError(ticket, challenge string, types []string) *TFARequiredError {
+	tfaErr := &TFARequiredError{
+		Ticket:    ticket,
+		Challenge: challenge,
+		Types:     append([]string(nil), types...),
+	}
+	tfaErr.escapeServerText()
+
+	return tfaErr
+}
+
 // Error implements the error interface. It prints at most MaxErrorItems of the
 // types, in the order the server sent them, then how many more there were, and
 // it is never longer than MaxErrorTextBytes.
