@@ -603,7 +603,7 @@ func (c *Client) DoWithContext(ctx context.Context, method, path string, params 
 		closeErr := resp.Body.Close()
 		if closeErr != nil {
 			c.logWarn("failed to close response body", map[string]interface{}{
-				logFieldError: closeErr.Error(),
+				logFieldError: redirect.Scrub(closeErr).Error(),
 			})
 		}
 	}()
@@ -643,7 +643,7 @@ func (c *Client) DoBytesWithContext(ctx context.Context, method, path string, pa
 		closeErr := resp.Body.Close()
 		if closeErr != nil {
 			c.logWarn("failed to close response body", map[string]interface{}{
-				logFieldError: closeErr.Error(),
+				logFieldError: redirect.Scrub(closeErr).Error(),
 			})
 		}
 	}()
@@ -697,7 +697,7 @@ func (c *Client) UploadWithContext(ctx context.Context, path string, fields map[
 		closeErr := resp.Body.Close()
 		if closeErr != nil {
 			c.logWarn("failed to close response body", map[string]interface{}{
-				logFieldError: closeErr.Error(),
+				logFieldError: redirect.Scrub(closeErr).Error(),
 			})
 		}
 	}()
@@ -1114,22 +1114,19 @@ func (c *Client) logResponse(req *http.Request, resp *http.Response, bodyBytes [
 
 	fields := map[string]interface{}{
 		logFieldMethod: req.Method,
-		logFieldURL:    req.URL.String(),
+		logFieldURL:    redactedURL(req.URL, logs.config),
 		"status":       resp.StatusCode,
 		"duration":     int64(time.Since(start) / time.Millisecond),
 	}
 
 	if logs.config.LogResponseHeader {
-		fields["resp_headers"] = redact(resp.Header, logs.config.RedactHeaders)
+		fields["resp_headers"] = redact(resp.Header, logs.config.RedactHeaders, alwaysRedactedHeaders()...)
 	}
 
 	if logs.config.LogResponseBody && len(bodyBytes) > 0 {
-		limit := logs.config.MaxBodyBytes
-		if limit <= 0 || limit > len(bodyBytes) {
-			limit = len(bodyBytes)
+		for key, value := range bodyFields(bodyBytes, resp.Header.Get("Content-Type"), logs.config) {
+			fields[key] = value
 		}
-
-		fields["resp_body"] = string(bodyBytes[:limit])
 	}
 
 	if perr != nil {
@@ -1633,7 +1630,7 @@ func (c *Client) renewTicketIfNeeded() {
 // logTicketRenewalFailure logs ticket renewal failures if logging is enabled.
 func (c *Client) logTicketRenewalFailure(err error) {
 	c.logWarn("automatic ticket renewal failed", map[string]interface{}{
-		"error": err.Error(),
+		"error": redirect.Scrub(err).Error(),
 	})
 }
 
@@ -2100,7 +2097,7 @@ func (c *Client) loggingMiddleware(req *http.Request, next Handler) (*http.Respo
 	resp, err := next(req)
 	duration := time.Since(start)
 
-	event := &Event{Method: req.Method, URL: req.URL.String(), Duration: duration, Err: err}
+	event := &Event{Method: req.Method, URL: redactedURL(req.URL, c.logging().config), Duration: duration, Err: err}
 	if resp != nil {
 		event.Status = resp.StatusCode
 	}
