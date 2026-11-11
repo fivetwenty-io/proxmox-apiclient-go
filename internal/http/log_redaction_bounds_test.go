@@ -87,8 +87,8 @@ func TestLoggedHeaderNameIsCutAtTheCap(t *testing.T) {
 
 	name := "X-" + strings.Repeat("N", 5_000)
 	header := map[string][]string{
-		"Content-Type": {contentTypeJSON},
-		name:           {"x"},
+		testHeaderContentType: {contentTypeJSON},
+		name:                  {"x"},
 	}
 
 	field := redactResponseHeaders(header, LogConfig{})
