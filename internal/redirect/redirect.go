@@ -20,6 +20,8 @@ import (
 	"net/url"
 	"reflect"
 	"strings"
+
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/permanent"
 )
 
 // ErrRefused is matched by errors.Is on the error a client returns when a
@@ -207,6 +209,11 @@ const (
 	// the whole raw line, which can be a Location, a Set-Cookie, or any other
 	// header.
 	malformedHeaderMarker = "malformed MIME header"
+
+	// unsupportedSchemeMarker is in the message net/http gives the error it
+	// returns when a request, which for a followed redirect is the server's
+	// chosen target, names a scheme the transport cannot speak.
+	unsupportedSchemeMarker = "unsupported protocol scheme"
 )
 
 // HeaderError describes a response whose header the transport could not read.
@@ -296,9 +303,11 @@ func cleanCause(cause error, from string) error {
 		return &Error{From: from, unparsed: true}
 	case strings.Contains(text, malformedHeaderMarker):
 		return &HeaderError{From: from}
-	default:
-		return cause
+	case strings.Contains(text, unsupportedSchemeMarker) && !permanent.Is(cause):
+		return permanent.Mark(cause)
 	}
+
+	return cause
 }
 
 // refusedStatus reports whether a response status is one Guard turns into a
