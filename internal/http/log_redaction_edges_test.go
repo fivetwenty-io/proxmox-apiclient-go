@@ -155,7 +155,7 @@ func TestLoggedBodyRedactsThePendingValueOfAConfigEntry(t *testing.T) {
 	bodies := map[string]string{
 		"value and pending": `{"data":[{"key":"cipassword","value":"CURRENTPWSECRET","pending":"NEXTPWSECRET"}]}`,
 		"pending only":      `{"data":[{"key":"cipassword","pending":"NEXTPWSECRET"}]}`,
-		"upper case":        `{"data":[{"Key":"cipassword","Pending":"NEXTPWSECRET"}]}`,
+		"capitalized":       `{"data":[{"Key":"cipassword","Pending":"NEXTPWSECRET"}]}`,
 		"pending delete":    `{"data":[{"delete":1,"key":"cipassword","value":"CURRENTPWSECRET"}]}`,
 	}
 
