@@ -158,3 +158,76 @@ func TestRedirect_WrapTransportRefusalIsAttemptedOnce(t *testing.T) {
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
+
+// TestRedirect_FollowRedirectsStopsAtTheLimit sends the client to a listener
+// that redirects to itself, which a policy returning nil would follow without
+// end.
+func TestRedirect_FollowRedirectsStopsAtTheLimit(t *testing.T) {
+	t.Parallel()
+
+	var hits atomic.Int32
+
+	loop := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		http.Redirect(w, r, r.URL.Path, http.StatusFound)
+	}))
+	t.Cleanup(loop.Close)
+
+	cli := newRedirectClient(t, loop, func(o *pve.Options) { o.CheckRedirect = pve.FollowRedirects(3) })
+
+	_, err := cli.GetCtx(retryingContext(), "/version", nil)
+	if !errors.Is(err, pve.ErrRedirectRefused) {
+		t.Fatalf("error = %v, want pve.ErrRedirectRefused", err)
+	}
+
+	if got := hits.Load(); got != 4 {
+		t.Errorf("listener read %d requests, want the first plus 3 redirects", got)
+	}
+}
+
+// TestRedirect_FollowSameOrigin follows a redirect within the origin and
+// refuses one to another port.
+func TestRedirect_FollowSameOrigin(t *testing.T) {
+	t.Parallel()
+
+	t.Run("same origin followed", func(t *testing.T) {
+		t.Parallel()
+
+		var hits atomic.Int32
+
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if hits.Add(1) == 1 {
+				http.Redirect(w, r, "/api2/json/moved", http.StatusFound)
+
+				return
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"data":{"version":"test"}}`)
+		}))
+		t.Cleanup(srv.Close)
+
+		cli := newRedirectClient(t, srv, func(o *pve.Options) { o.CheckRedirect = pve.FollowSameOrigin(2) })
+
+		_, err := cli.GetCtx(retryingContext(), "/version", nil)
+		if err != nil {
+			t.Fatalf("same-origin redirect failed: %v", err)
+		}
+	})
+
+	t.Run("other port refused", func(t *testing.T) {
+		t.Parallel()
+
+		front, frontHits, targetHits := redirectServers(t)
+		cli := newRedirectClient(t, front, func(o *pve.Options) { o.CheckRedirect = pve.FollowSameOrigin(2) })
+
+		_, err := cli.GetCtx(retryingContext(), "/version", nil)
+		if !errors.Is(err, pve.ErrRedirectRefused) {
+			t.Fatalf("error = %v, want pve.ErrRedirectRefused", err)
+		}
+
+		if targetHits.Load() != 0 || frontHits.Load() != 1 {
+			t.Errorf("target read %d, front read %d, want 0 and 1", targetHits.Load(), frontHits.Load())
+		}
+	})
+}

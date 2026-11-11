@@ -2,8 +2,10 @@ package client
 
 import (
 	"io"
+	"net/http"
 
 	pvehttp "github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/http"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/redirect"
 )
 
 // ErrHostOverrideFingerprint is returned when a request carries a WithHost
@@ -24,6 +26,23 @@ var ErrRedirectRefused = pvehttp.ErrRedirectRefused
 // and the two URLs without credentials, matches ErrRedirectRefused, and is
 // never retried.
 type RedirectError = pvehttp.RedirectError
+
+// FollowRedirects returns an Options.CheckRedirect policy that follows at most
+// maxRedirects redirects and then fails with a *RedirectError. It follows a
+// redirect to any scheme, host, and port, and Go keeps the Authorization and
+// Cookie headers when only the port or the scheme changes, so use it only with
+// a server whose redirects you trust. A negative maxRedirects counts as zero.
+func FollowRedirects(maxRedirects int) func(req *http.Request, via []*http.Request) error {
+	return redirect.Follow(maxRedirects)
+}
+
+// FollowSameOrigin returns an Options.CheckRedirect policy that follows at most
+// maxRedirects redirects, and only to the same scheme, host name, and port as
+// the original request. Any other redirect fails with a *RedirectError. A
+// negative maxRedirects counts as zero.
+func FollowSameOrigin(maxRedirects int) func(req *http.Request, via []*http.Request) error {
+	return redirect.FollowSameOrigin(maxRedirects)
+}
 
 // Permanent marks err so the client's retry loop does not attempt the request
 // again. A WrapTransport wrapper returns Permanent(err) from RoundTrip when it

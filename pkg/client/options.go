@@ -177,8 +177,11 @@ type Options struct {
 	// follows redirects and keeps the Authorization header when only the port
 	// or the scheme changes, which would send an API token to another listener
 	// on the host, in plain text for an http target. A function that returns
-	// nil for every request restores that policy, so a caller who needs it
-	// should compare the target's scheme and host with the request's first.
+	// nil for every request follows redirects without limit, which is not what
+	// Go's own policy does, because that one stops after ten. Use
+	// FollowSameOrigin to follow only redirects to the scheme, host, and port
+	// of the request, FollowRedirects to follow any redirect up to a limit, or
+	// count len(via) in a function of your own.
 	CheckRedirect func(req *http.Request, via []*http.Request) error
 
 	// Caching
