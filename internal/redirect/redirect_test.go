@@ -23,6 +23,8 @@ const (
 	redactedTarget = "http://127.0.0.1:1/x"
 	keepQueryURL   = "http://h/x?keep=1"
 	opGet          = "Get"
+	opPost         = "Post"
+	cleanURL       = "http://h/x"
 )
 
 func request(t *testing.T, rawURL string) *http.Request {
@@ -285,7 +287,7 @@ func TestWrapNilRefusesAndPassesTheCallersAnswerThrough(t *testing.T) {
 	}
 }
 
-func TestScrubRedactsOnlyRedirectFailures(t *testing.T) {
+func TestScrubRedactsEveryURLError(t *testing.T) {
 	t.Parallel()
 
 	const raw = "http://user:HUNTER2@127.0.0.1:1/x?ticket=QSECRET#frag"
@@ -293,7 +295,7 @@ func TestScrubRedactsOnlyRedirectFailures(t *testing.T) {
 	refused := &url.Error{
 		Op: opGet, URL: raw, Err: &redirect.Error{Status: http.StatusFound, From: "http://a/", To: redactedTarget},
 	}
-	callers := &url.Error{Op: "Post", URL: raw, Err: redirect.Wrap(func(*http.Request, []*http.Request) error {
+	callers := &url.Error{Op: opPost, URL: raw, Err: redirect.Wrap(func(*http.Request, []*http.Request) error {
 		return errCaller
 	})(request(t, "http://h:2/"), nil)}
 
@@ -317,8 +319,15 @@ func TestScrubRedactsOnlyRedirectFailures(t *testing.T) {
 	transport := &url.Error{Op: opGet, URL: keepQueryURL, Err: errCaller}
 
 	got := redirect.Scrub(transport)
-	if !sameError(got, transport) {
-		t.Errorf("a transport failure was rewritten to %v", got)
+	if got.Error() != `Get "`+cleanURL+`": caller policy says no` || !errors.Is(got, errCaller) {
+		t.Errorf("a transport failure came back as %q, want its URL reduced to scheme, host, and path", got)
+	}
+
+	clean := &url.Error{Op: opGet, URL: cleanURL, Err: errCaller}
+
+	same := redirect.Scrub(clean)
+	if !sameError(same, clean) {
+		t.Errorf("an error with nothing to clean was rewritten to %v", same)
 	}
 
 	if redirect.Scrub(nil) != nil {
@@ -371,7 +380,12 @@ func TestScrubReplacesAnUnparseableLocation(t *testing.T) {
 		t.Errorf("%v, want a *url.Error with the redacted request URL", got)
 	}
 
-	lookalike := &url.Error{Op: opGet, URL: keepQueryURL, Err: errCaller}
+	want := "redirect refused: http://127.0.0.1:1/api answered with a Location header that is not a valid URL"
+	if refusal.Error() != want {
+		t.Errorf("refusal text = %q, want %q", refusal.Error(), want)
+	}
+
+	lookalike := &url.Error{Op: opGet, URL: cleanURL, Err: errCaller}
 
 	same := redirect.Scrub(lookalike)
 	if !sameError(same, lookalike) {
@@ -380,8 +394,34 @@ func TestScrubReplacesAnUnparseableLocation(t *testing.T) {
 
 	empty := &url.Error{Op: opGet, URL: keepQueryURL}
 
-	same = redirect.Scrub(empty)
-	if !sameError(same, empty) {
-		t.Errorf("a *url.Error with no cause was rewritten to %v", same)
+	got = redirect.Scrub(empty)
+	if got.Error() != `Get "`+cleanURL+`": %!s(<nil>)` {
+		t.Errorf("a *url.Error with no cause came back as %q, want only its URL reduced", got)
+	}
+}
+
+// TestScrubCleansAURLErrorNestedInsideAnother checks the rewrite reaches a
+// *url.Error that a transport wrapped inside the one net/http returns, because
+// each one names a URL.
+func TestScrubCleansAURLErrorNestedInsideAnother(t *testing.T) {
+	t.Parallel()
+
+	inner := &url.Error{Op: opPost, URL: "http://u:HUNTER2@h/y?ticket=QSECRET#frag", Err: errCaller}
+	outer := &url.Error{Op: opGet, URL: cleanURL, Err: inner}
+
+	got := redirect.Scrub(outer)
+
+	for _, secret := range []string{"HUNTER2", "QSECRET", "frag", "user:"} {
+		if strings.Contains(got.Error(), secret) {
+			t.Errorf("%q still holds %q from the nested URL", got.Error(), secret)
+		}
+	}
+
+	if want := `Get "` + cleanURL + `": Post "http://h/y": caller policy says no`; got.Error() != want {
+		t.Errorf("error text = %q, want %q", got.Error(), want)
+	}
+
+	if !errors.Is(got, errCaller) {
+		t.Error("Scrub lost the wrapped error")
 	}
 }

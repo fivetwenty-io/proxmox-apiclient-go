@@ -29,14 +29,17 @@ type clientFindings struct {
 }
 
 // scanHTTPClients reports every way a file builds an http.Client without a
-// redirect policy. A client left on Go's default policy follows redirects and
+// redirect refusal. A client left on Go's default policy follows redirects and
 // keeps the Authorization and Cookie headers when only the port or the scheme
 // changes, so every client the SDK builds sets CheckRedirect. The scan flags a
 // composite literal with no CheckRedirect key or a nil one, new(http.Client), a
 // zero-value http.Client variable, http.DefaultClient, and the package
 // functions that use it. A CheckRedirect value counts as a policy only when it
 // is a call to redirect.Wrap or the function redirect.Refuse, because any other
-// expression can hand the caller's nil function straight to the client.
+// expression can hand the caller's nil function straight to the client. A
+// composite literal must also set Transport to a call to redirect.Guard, which
+// refuses a redirect response before net/http reads its Location header,
+// because a policy alone never runs when that header does not parse.
 func scanHTTPClients(fset *token.FileSet, file *ast.File) clientFindings {
 	name := httpImportName(file)
 	if name == "" {
@@ -54,14 +57,12 @@ func scanHTTPClients(fset *token.FileSet, file *ast.File) clientFindings {
 	ast.Inspect(file, func(node ast.Node) bool {
 		switch typed := node.(type) {
 		case *ast.CompositeLit:
-			if !isHTTPSelector(typed.Type, name, clientName) {
-				return true
-			}
-
-			if hasRedirectPolicy(typed, redirectName) {
-				found.Built++
-			} else {
-				report(typed.Pos(), "http.Client literal without a CheckRedirect policy")
+			if isHTTPSelector(typed.Type, name, clientName) {
+				if problem := literalProblem(typed, redirectName); problem != "" {
+					report(typed.Pos(), problem)
+				} else {
+					found.Built++
+				}
 			}
 		case *ast.CallExpr:
 			if ident, ok := typed.Fun.(*ast.Ident); ok && ident.Name == "new" && len(typed.Args) == 1 &&
@@ -69,7 +70,7 @@ func scanHTTPClients(fset *token.FileSet, file *ast.File) clientFindings {
 				report(typed.Pos(), "new(http.Client) has the default redirect policy")
 			}
 
-			for _, helper := range []string{helperGet, "Head", "Post", "PostForm"} {
+			for _, helper := range []string{helperGet, "Head", opPost, "PostForm"} {
 				if isHTTPSelector(typed.Fun, name, helper) {
 					report(typed.Pos(), "http."+helper+" uses http.DefaultClient")
 				}
@@ -88,6 +89,19 @@ func scanHTTPClients(fset *token.FileSet, file *ast.File) clientFindings {
 	})
 
 	return found
+}
+
+// literalProblem describes what an http.Client literal lacks, or returns an
+// empty string when it sets a shared redirect policy and a guarded transport.
+func literalProblem(lit *ast.CompositeLit, redirectName string) string {
+	switch {
+	case !hasRedirectPolicy(lit, redirectName):
+		return "http.Client literal without a CheckRedirect policy"
+	case !hasGuardedTransport(lit, redirectName):
+		return "http.Client literal without a redirect.Guard transport"
+	default:
+		return ""
+	}
 }
 
 // httpImportName returns the name net/http is imported under, or an empty
@@ -145,6 +159,32 @@ func hasRedirectPolicy(lit *ast.CompositeLit, redirectName string) bool {
 	return false
 }
 
+// hasGuardedTransport reports whether the literal sets Transport to a call to
+// redirect.Guard.
+func hasGuardedTransport(lit *ast.CompositeLit, redirectName string) bool {
+	if redirectName == "" {
+		return false
+	}
+
+	for _, element := range lit.Elts {
+		pair, ok := element.(*ast.KeyValueExpr)
+		if !ok {
+			continue
+		}
+
+		key, ok := pair.Key.(*ast.Ident)
+		if !ok || key.Name != "Transport" {
+			continue
+		}
+
+		call, ok := pair.Value.(*ast.CallExpr)
+
+		return ok && isHTTPSelector(call.Fun, redirectName, "Guard")
+	}
+
+	return false
+}
+
 // isSharedPolicy reports whether expr is redirect.Refuse or a call to
 // redirect.Wrap, the two ways the SDK installs a policy that refuses by
 // default.
@@ -191,10 +231,15 @@ func TestScanFlagsClientsWithoutAPolicy(t *testing.T) {
 		"field passed through": "func f(o struct{ CheckRedirect func(*nethttp.Request, []*nethttp.Request) error }) " +
 			"{ _ = &nethttp.Client{CheckRedirect: o.CheckRedirect} }",
 		"other package named Wrap": "func f() { _ = &nethttp.Client{CheckRedirect: nethttp.Wrap(nil)} }",
-		"new":                      "func f() { _ = new(nethttp.Client) }",
-		"zero value variable":      "var c nethttp.Client",
-		"default client":           "func f() { _ = nethttp.DefaultClient }",
-		"package function":         "func f() { _, _ = nethttp.Get(\"x\") }",
+		"policy without a guard":   "func f() { _ = &nethttp.Client{CheckRedirect: shared.Refuse} }",
+		"transport passed through": "func f(rt nethttp.RoundTripper) " +
+			"{ _ = &nethttp.Client{Transport: rt, CheckRedirect: shared.Refuse} }",
+		"guard from another package": "func f(rt nethttp.RoundTripper) " +
+			"{ _ = &nethttp.Client{Transport: nethttp.Guard(rt, nil), CheckRedirect: shared.Refuse} }",
+		"new":                 "func f() { _ = new(nethttp.Client) }",
+		"zero value variable": "var c nethttp.Client",
+		"default client":      "func f() { _ = nethttp.DefaultClient }",
+		"package function":    "func f() { _, _ = nethttp.Get(\"x\") }",
 	}
 
 	for name, body := range bad {
@@ -204,9 +249,10 @@ func TestScanFlagsClientsWithoutAPolicy(t *testing.T) {
 	}
 
 	good := map[string]string{
-		"wrapped function": "func f(p func(*nethttp.Request, []*nethttp.Request) error) " +
-			"{ _ = &nethttp.Client{CheckRedirect: shared.Wrap(p)} }",
-		"refuse": "func f() { _ = &nethttp.Client{CheckRedirect: shared.Refuse} }",
+		"wrapped function": "func f(rt nethttp.RoundTripper, p func(*nethttp.Request, []*nethttp.Request) error) " +
+			"{ _ = &nethttp.Client{Transport: shared.Guard(rt, p), CheckRedirect: shared.Wrap(p)} }",
+		"refuse": "func f(rt nethttp.RoundTripper) " +
+			"{ _ = &nethttp.Client{Transport: shared.Guard(rt, nil), CheckRedirect: shared.Refuse} }",
 	}
 
 	for name, body := range good {
@@ -286,5 +332,67 @@ func TestEveryHTTPClientTheSDKBuildsRefusesRedirects(t *testing.T) {
 
 	for _, violation := range violations {
 		t.Errorf("HTTP client without a redirect refusal policy at %s", violation)
+	}
+}
+
+// TestScanFlagsLiteralsInAFileWithoutTheRedirectImport checks a file that does
+// not import the redirect package cannot hold the shared policy or the guard,
+// whatever it names them.
+func TestScanFlagsLiteralsInAFileWithoutTheRedirectImport(t *testing.T) {
+	t.Parallel()
+
+	const unimported = "package p\nimport nethttp \"net/http\"\nvar _ = nethttp.StatusOK\n"
+
+	for name, body := range map[string]string{
+		"policy passed through": "func f(p func(*nethttp.Request, []*nethttp.Request) error) " +
+			"{ _ = &nethttp.Client{CheckRedirect: p} }",
+		"package named without the import": "func f(rt nethttp.RoundTripper) " +
+			"{ _ = &nethttp.Client{Transport: shared.Guard(rt, nil), CheckRedirect: shared.Refuse} }",
+	} {
+		if got := scanSource(t, unimported+body); len(got.Violations) == 0 {
+			t.Errorf("%s without the redirect import: scan reported nothing, want a violation", name)
+		}
+	}
+}
+
+// TestScanChecksTheRedirectImportOnItsOwn checks each part of the scan fails a
+// literal in a file that does not import the redirect package, so neither the
+// policy check nor the transport check depends on the other to catch it.
+func TestScanChecksTheRedirectImportOnItsOwn(t *testing.T) {
+	t.Parallel()
+
+	const source = "package p\nimport nethttp \"net/http\"\n" +
+		"func f(rt nethttp.RoundTripper, p func(*nethttp.Request, []*nethttp.Request) error) " +
+		"{ _ = &nethttp.Client{Transport: rt, CheckRedirect: p} }"
+
+	file, err := parser.ParseFile(token.NewFileSet(), "sample.go", source, parser.SkipObjectResolution)
+	if err != nil {
+		t.Fatalf("parse sample: %v", err)
+	}
+
+	var literal *ast.CompositeLit
+
+	ast.Inspect(file, func(node ast.Node) bool {
+		if lit, ok := node.(*ast.CompositeLit); ok {
+			literal = lit
+		}
+
+		return true
+	})
+
+	if literal == nil {
+		t.Fatal("sample has no composite literal")
+	}
+
+	if hasRedirectPolicy(literal, importName(file, redirectImport, "redirect")) {
+		t.Error("a policy passed through counts as the shared policy in a file without the import")
+	}
+
+	if hasGuardedTransport(literal, importName(file, redirectImport, "redirect")) {
+		t.Error("a transport passed through counts as the guard in a file without the import")
+	}
+
+	if hasGuardedTransport(literal, "") {
+		t.Error("an empty import name counts as the guard")
 	}
 }

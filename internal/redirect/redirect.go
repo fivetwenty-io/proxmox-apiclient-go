@@ -4,6 +4,13 @@
 // when a redirect changes only the port or the scheme, which would send an API
 // token or a ticket cookie to another listener on the host, in plain text for
 // an http target. The SDK refuses every redirect unless the caller opts in.
+//
+// The refusal works at two layers. Guard wraps the transport under an
+// http.Client and turns every redirect response into an error before net/http
+// reads the Location header, because net/http parses that header before it
+// calls the redirect policy and quotes it in the error when it is malformed.
+// Scrub is the one place every error from a client's Do passes through, and it
+// removes whatever net/http or the transport quoted from the response.
 package redirect
 
 import (
@@ -27,14 +34,17 @@ type Policy = func(req *http.Request, via []*http.Request) error
 // and says it is permanent, so a retry loop does not repeat the request.
 type Error struct {
 	// Status is the status code of the redirect response, such as 302 or 307.
+	// It is zero when the refusal comes from a redirect policy that saw no
+	// response, or from an error net/http built without one.
 	Status int
 
 	// From is the URL that was requested, without user information, query,
-	// or fragment.
+	// or fragment. It is empty when it is not known.
 	From string
 
 	// To is the URL the server asked for, without user information, query, or
-	// fragment. It is empty when the Location header could not be parsed.
+	// fragment. It is empty when the response had no Location header or the
+	// header could not be parsed.
 	To string
 
 	// unparsed is set when the server answered with a redirect whose Location
@@ -44,11 +54,24 @@ type Error struct {
 
 // Error names the redirect target without any credential.
 func (e *Error) Error() string {
-	if e.unparsed {
-		return fmt.Sprintf("redirect refused: %s answered with a Location header that is not a valid URL", e.From)
+	from := e.From
+	if from == "" {
+		from = "the server"
 	}
 
-	return fmt.Sprintf("redirect refused: %s answered %d and asked for %s", e.From, e.Status, e.To)
+	answered := "answered"
+	if e.Status > 0 {
+		answered = fmt.Sprintf("answered %d", e.Status)
+	}
+
+	switch {
+	case e.unparsed:
+		return fmt.Sprintf("redirect refused: %s %s with a Location header that is not a valid URL", from, answered)
+	case e.To == "":
+		return fmt.Sprintf("redirect refused: %s %s without a Location header it could use", from, answered)
+	default:
+		return fmt.Sprintf("redirect refused: %s %s and asked for %s", from, answered, e.To)
+	}
 }
 
 // Is matches ErrRefused.
@@ -148,10 +171,10 @@ func effectivePort(u *url.URL) string {
 	return "80"
 }
 
-// sameError reports whether two errors are the same pointer value. net/http
-// compares http.ErrUseLastResponse by identity, and Scrub must rewrite only the
-// *url.Error that Do returns itself, so == on the values is the contract and
-// errors.Is is not.
+// sameError reports whether two errors are the same pointer value. Scrub uses
+// it to hand back the error it was given when nothing needs cleaning, and
+// Wrap's callers rely on net/http comparing http.ErrUseLastResponse by
+// identity, so == on the values is the contract and errors.Is is not.
 func sameError(first, second error) bool {
 	firstValue, secondValue := reflect.ValueOf(first), reflect.ValueOf(second)
 
@@ -159,78 +182,227 @@ func sameError(first, second error) bool {
 		firstValue.Pointer() == secondValue.Pointer()
 }
 
-// policyError wraps an error a caller's Policy returned, so Scrub can tell a
-// policy failure from a transport failure. It reads and unwraps as the
-// original.
-type policyError struct {
-	err error
-}
-
-func (e *policyError) Error() string { return e.err.Error() }
-
-func (e *policyError) Unwrap() error { return e.err }
-
 // Wrap returns the Policy to install in an http.Client. A nil policy becomes
-// Refuse. Any other policy is called as is, and an error it returns is marked
-// so Scrub can clean the message net/http builds around it.
-// http.ErrUseLastResponse passes through untouched because net/http compares
-// it by identity.
+// Refuse. Any other policy is returned as is, so http.ErrUseLastResponse still
+// reaches net/http untouched, because net/http compares it by identity, and an
+// error the policy returns comes back from Do for Scrub to clean.
 func Wrap(policy Policy) Policy {
 	if policy == nil {
 		return Refuse
 	}
 
-	return func(req *http.Request, via []*http.Request) error {
-		err := policy(req, via)
-		if err == nil || sameError(err, http.ErrUseLastResponse) {
-			return err
-		}
-
-		return &policyError{err: err}
-	}
+	return policy
 }
 
-// unparsedLocationPrefix starts the message net/http gives the error it
-// returns when the Location header of a redirect does not parse. The message
-// quotes the whole raw header, with its user information, query, and fragment.
-const unparsedLocationPrefix = "failed to parse Location header"
+// Marker texts that identify an error whose message quotes a response header.
+const (
+	// unparsedLocationMarker is in the message net/http gives the error it
+	// returns when the Location header of a redirect does not parse. The
+	// message quotes the whole raw header, with its user information, query,
+	// and fragment.
+	unparsedLocationMarker = "failed to parse Location header"
 
-// Scrub cleans the error http.Client.Do returns when a redirect policy failed
-// or when the server sent a Location header that does not parse.
-// net/http wraps that failure in a *url.Error and then overwrites the error's
-// URL with the raw Location header the server sent, which can hold user
-// information, a query, and a fragment. Scrub rebuilds the *url.Error with the
-// URL reduced to scheme, host, and path. A Location header that does not parse
-// becomes an *Error that names only the requested URL, because nothing in the
-// header text can be trusted to hold no credential, and the request is not
-// followed, so the error is permanent like any other refusal. Any other error,
-// including a *url.Error from the transport, comes back unchanged.
+	// malformedHeaderMarker is in the message the transport gives the error
+	// it returns when a response header line is malformed. The message quotes
+	// the whole raw line, which can be a Location, a Set-Cookie, or any other
+	// header.
+	malformedHeaderMarker = "malformed MIME header"
+)
+
+// HeaderError describes a response whose header the transport could not read.
+// The transport quotes the whole raw header line in its own message, which can
+// hold a redirect target with credentials or a cookie, so the error names only
+// the requested URL. It is permanent, because the same server sends the same
+// bytes on every attempt.
+type HeaderError struct {
+	// From is the URL that was requested, without user information, query,
+	// or fragment. It is empty when it is not known.
+	From string
+}
+
+// Error names the requested URL and nothing the server sent.
+func (e *HeaderError) Error() string {
+	from := e.From
+	if from == "" {
+		from = "the server"
+	}
+
+	return from + " answered with a header that could not be read"
+}
+
+// Permanent tells a retry loop not to repeat the request.
+func (e *HeaderError) Permanent() bool { return true }
+
+// Scrub is the one place every error from a client's Do passes through, for
+// the client's own requests and for the ticket, pool, WebSocket, and batch
+// paths. net/http wraps a failure in a *url.Error whose URL is the request URL
+// with its user information masked but its query and fragment kept, which for
+// a followed redirect is the server's chosen target. Scrub rebuilds that
+// *url.Error with the URL reduced to scheme, host, and path.
+//
+// It also replaces a cause whose text quotes a response header. When the
+// Location header of a followed redirect does not parse, net/http quotes it
+// whole, and when the transport rejects a header line it quotes that line.
+// The first becomes an *Error that names only the requested URL, like any
+// other refusal, and the second becomes a *HeaderError. Both are permanent.
+//
+// An error that is not a *url.Error is returned unchanged unless its own text
+// quotes a header. An error that needs no change comes back as the same value.
 func Scrub(err error) error {
-	var urlErr *url.Error
-	if !errors.As(err, &urlErr) || !sameError(err, urlErr) {
-		return err
+	if err == nil {
+		return nil
 	}
 
-	var (
-		policy  *policyError
-		refusal *Error
-	)
-
-	if !errors.As(urlErr.Err, &policy) && !errors.As(urlErr.Err, &refusal) {
-		return scrubUnparsedLocation(urlErr, err)
-	}
-
-	return &url.Error{Op: urlErr.Op, URL: RedactRaw(urlErr.URL), Err: urlErr.Err}
-}
-
-// scrubUnparsedLocation replaces the error net/http returns for a Location
-// header that does not parse, and returns original for any other error.
-func scrubUnparsedLocation(urlErr *url.Error, original error) error {
-	if urlErr.Err == nil || !strings.HasPrefix(urlErr.Err.Error(), unparsedLocationPrefix) {
-		return original
+	urlErr, ok := err.(*url.Error) //nolint:errorlint // only the error Do returns itself is rebuilt
+	if !ok {
+		return cleanCause(err, "")
 	}
 
 	from := RedactRaw(urlErr.URL)
+	cause := cleanCause(urlErr.Err, from)
 
-	return &url.Error{Op: urlErr.Op, URL: from, Err: &Error{From: from, unparsed: true}}
+	if from == urlErr.URL && sameCause(cause, urlErr.Err) {
+		return err
+	}
+
+	return &url.Error{Op: urlErr.Op, URL: from, Err: cause}
+}
+
+// sameCause reports whether two causes are the same value, without comparing
+// uncomparable dynamic types.
+func sameCause(first, second error) bool {
+	if first == nil || second == nil {
+		return first == nil && second == nil
+	}
+
+	return sameError(first, second)
+}
+
+// cleanCause returns cause, or a replacement that names only the requested URL
+// from when the text of cause quotes a response header.
+func cleanCause(cause error, from string) error {
+	if cause == nil {
+		return nil
+	}
+
+	if nested, ok := cause.(*url.Error); ok { //nolint:errorlint // a nested rewrite applies to this value only
+		return Scrub(nested)
+	}
+
+	text := cause.Error()
+
+	switch {
+	case strings.Contains(text, unparsedLocationMarker):
+		return &Error{From: from, unparsed: true}
+	case strings.Contains(text, malformedHeaderMarker):
+		return &HeaderError{From: from}
+	default:
+		return cause
+	}
+}
+
+// refusedStatus reports whether a response status is one Guard turns into a
+// refusal. Every 3xx status counts except 304, which answers a conditional
+// request with the copy the caller already holds and tells it to go nowhere.
+// net/http does not follow a 304, and the PVE API does not use conditional
+// requests, so passing it through refuses nothing a redirect could exploit and
+// breaks a caller that sends If-None-Match through its own header.
+func refusedStatus(status int) bool {
+	return status >= http.StatusMultipleChoices && status < http.StatusBadRequest &&
+		status != http.StatusNotModified
+}
+
+// refusingTransport is the RoundTripper Guard returns.
+type refusingTransport struct {
+	next http.RoundTripper
+}
+
+// Guard returns the RoundTripper to install under an http.Client. With a nil
+// policy it wraps next so that every redirect response becomes a permanent
+// *Error, with the response body closed, before net/http reads the Location
+// header. Go's client parses that header before it calls CheckRedirect, and a
+// header it cannot parse fails the request with an error that quotes the raw
+// header, so a CheckRedirect policy alone cannot keep the header out of an
+// error. With a policy the caller has chosen to follow redirects, so Guard
+// returns next unchanged and the policy decides. A nil next means
+// http.DefaultTransport, as it does for an http.Client.
+//
+// The wrapper sits above whatever transport the client uses, so a transport the
+// caller wrapped still sees the redirect response and cannot let it through.
+// It also rewrites a transport error that quotes a malformed header line to a
+// *HeaderError, so a client used directly, such as the one Pool.Get returns,
+// does not repeat the header either.
+func Guard(next http.RoundTripper, policy Policy) http.RoundTripper {
+	if policy != nil {
+		return next
+	}
+
+	if next == nil {
+		next = http.DefaultTransport
+	}
+
+	return &refusingTransport{next: next}
+}
+
+// Unwrap returns the transport Guard wrapped, or rt itself when rt is not the
+// wrapper Guard returns. Code that tunes or inspects the transport an
+// http.Client was built with reads it through Unwrap.
+func Unwrap(rt http.RoundTripper) http.RoundTripper {
+	if guard, ok := rt.(*refusingTransport); ok {
+		return guard.next
+	}
+
+	return rt
+}
+
+// RoundTrip sends req and refuses a redirect answer.
+func (t *refusingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := t.next.RoundTrip(req)
+	if err != nil {
+		return resp, cleanCause(err, Redact(req.URL))
+	}
+
+	if resp == nil || !refusedStatus(resp.StatusCode) {
+		return resp, nil
+	}
+
+	refusal := refusalFor(req, resp)
+
+	if resp.Body != nil {
+		_ = resp.Body.Close()
+	}
+
+	return nil, refusal
+}
+
+// CloseIdleConnections closes the idle connections of the wrapped transport,
+// which http.Client.CloseIdleConnections reaches through this method.
+func (t *refusingTransport) CloseIdleConnections() {
+	closer, ok := t.next.(interface{ CloseIdleConnections() })
+	if ok {
+		closer.CloseIdleConnections()
+	}
+}
+
+// refusalFor describes the redirect resp answers req with, naming the target
+// as scheme, host, and path only. A Location header that does not parse, which
+// can hold user information, a query, and a fragment, is not quoted.
+func refusalFor(req *http.Request, resp *http.Response) *Error {
+	refusal := &Error{Status: resp.StatusCode, From: Redact(req.URL)}
+
+	location := resp.Header.Get("Location")
+	if location == "" {
+		return refusal
+	}
+
+	target, err := req.URL.Parse(location)
+	if err != nil {
+		refusal.unparsed = true
+
+		return refusal
+	}
+
+	refusal.To = Redact(target)
+
+	return refusal
 }
