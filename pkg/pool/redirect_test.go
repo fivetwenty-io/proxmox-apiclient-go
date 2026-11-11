@@ -34,6 +34,7 @@ func redirectPair(t *testing.T) (*httptest.Server, *atomic.Int32, *atomic.Int32,
 
 	front := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		frontHits.Add(1)
+
 		secretTarget := strings.Replace(target.URL, "http://", "http://user:HUNTER2@", 1) + "/x?ticket=QSECRET"
 		w.Header().Set("Location", secretTarget)
 		w.WriteHeader(http.StatusTemporaryRedirect)
