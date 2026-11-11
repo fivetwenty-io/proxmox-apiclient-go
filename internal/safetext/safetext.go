@@ -103,6 +103,23 @@ func (e *escapedError) Unwrap() error { return e.cause }
 // would print the wrapped error and with it the raw bytes.
 func (e *escapedError) GoString() string { return "safetext.Error(" + strconv.Quote(e.text) + ")" }
 
+// Timeout reports what the wrapped error's own Timeout method reports, and
+// false when it has none. A *url.Error asks its direct cause, not the chain,
+// so without this an escaped timeout would stop reading as one.
+func (e *escapedError) Timeout() bool {
+	timeout, ok := e.cause.(interface{ Timeout() bool })
+
+	return ok && timeout.Timeout()
+}
+
+// Temporary reports what the wrapped error's own Temporary method reports, and
+// false when it has none, for the same reason as Timeout.
+func (e *escapedError) Temporary() bool {
+	temporary, ok := e.cause.(interface{ Temporary() bool })
+
+	return ok && temporary.Temporary()
+}
+
 // unsafeRune reports whether r must not reach a log line as itself. It covers
 // the C0 and C1 controls, DEL, the format characters (which hold the text
 // direction overrides, isolates, and marks such as U+202A to U+202E, U+2066 to
