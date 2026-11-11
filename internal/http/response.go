@@ -117,10 +117,8 @@ func (rp *ResponseParser) parseJSON(body []byte, target interface{}) error {
 	//   (b) errors map is non-empty, regardless of Success/Message values —
 	//       field-level errors on a 2xx must not be silently swallowed.
 	if (envelope.Success == 0 && envelope.Message != "") || len(envelope.Errors) > 0 {
-		return &apierrors.APIError{
-			Message: envelope.Message,
-			Errors:  envelope.Errors,
-		}
+		//nolint:wrapcheck // the SDK's own error type, built from this reply
+		return apierrors.NewEnvelopeError(0, envelope.Message, envelope.Errors)
 	}
 
 	// Parse the data field into the target

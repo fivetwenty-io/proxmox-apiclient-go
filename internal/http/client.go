@@ -1299,12 +1299,8 @@ func (c *Client) parseResponse(resp *http.Response) (*Response, []byte, error) {
 
 	// Check for API-level errors
 	if result.Success == 0 && result.Message != "" {
-		return nil, body, &apierrors.APIError{
-			Message:  result.Message,
-			Code:     resp.StatusCode,
-			Errors:   result.Errors,
-			HTTPCode: resp.StatusCode,
-		}
+		//nolint:wrapcheck // the SDK's own error type, built from this reply
+		return nil, body, apierrors.NewEnvelopeError(resp.StatusCode, result.Message, result.Errors)
 	}
 
 	return &Response{

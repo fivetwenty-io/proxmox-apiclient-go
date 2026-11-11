@@ -11,6 +11,11 @@ import (
 	pvererrors "github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/errors"
 )
 
+const (
+	jsonKeyMessage = "message"
+	shortField     = "short"
+)
+
 // rawControl reports whether text holds a control character other than newline
 // and tab, a text direction or other format character, a line separator, or
 // invalid UTF-8.
@@ -40,7 +45,7 @@ func TestParseAPIErrorEscapesServerBytes(t *testing.T) {
 
 	const hostile = "\x1b[2J\x1b]0;title\a\r\u202eFLIP\u2066\u200e\u061c\x00\x7f"
 
-	message, marshalErr := json.Marshal(map[string]interface{}{"message": "first line\n" + hostile, "code": 500})
+	message, marshalErr := json.Marshal(map[string]interface{}{jsonKeyMessage: "first line\n" + hostile, "code": 500})
 	if marshalErr != nil {
 		t.Fatalf("marshal: %v", marshalErr)
 	}
@@ -124,5 +129,80 @@ func TestParseAPIErrorCapsABodyThatIsNotJSON(t *testing.T) {
 	small := pvererrors.ParseAPIError(502, []byte("  upstream down \n"))
 	if !strings.Contains(small.Error(), "upstream down (code: 502)") {
 		t.Errorf("small body error = %q, want it kept whole", small.Error())
+	}
+}
+
+// TestServerTextIsCappedWithAMarker sends a message, a field name, a field
+// message, and a file name far longer than the cap, as a failure reply and as
+// an envelope on a success status, and checks every text field is cut with the
+// marker, on a character boundary, while a short field is left alone.
+func TestServerTextIsCappedWithAMarker(t *testing.T) {
+	t.Parallel()
+
+	const marker = "...(truncated)"
+
+	long := strings.Repeat("\u00e9", 3000)
+	limit := pvererrors.MaxServerTextBytes + len(marker)
+
+	body, err := json.Marshal(map[string]interface{}{
+		jsonKeyMessage: long, "file": long, "errors": map[string]string{long: long, shortField: "ok"},
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var parsed *pvererrors.APIError
+
+	if !errors.As(pvererrors.ParseAPIError(500, body), &parsed) {
+		t.Fatal("ParseAPIError did not return an *APIError")
+	}
+
+	envelope := pvererrors.NewEnvelopeError(200, long, map[string]string{long: long, shortField: "ok"})
+	envelope.File = ""
+
+	for name, apiErr := range map[string]*pvererrors.APIError{"failure": parsed, "envelope": envelope} {
+		fields := []string{apiErr.Message}
+		if name == "failure" {
+			fields = append(fields, apiErr.File)
+		}
+
+		for field, msg := range apiErr.Errors {
+			fields = append(fields, field, msg)
+		}
+
+		for _, text := range fields {
+			if text == shortField || text == "ok" {
+				continue
+			}
+
+			if len(text) > limit || !strings.HasSuffix(text, marker) || !utf8.ValidString(text) {
+				t.Errorf("%s: field of %d bytes, want a valid cut of at most %d bytes ending in %q",
+					name, len(text), limit, marker)
+			}
+		}
+
+		if apiErr.Errors[shortField] != "ok" {
+			t.Errorf("%s: the short field changed: %v", name, apiErr.Errors)
+		}
+	}
+}
+
+// TestNewEnvelopeErrorEscapesAndKeepsTheStatus checks the constructor keeps the
+// status code and the sentinel the status class gives, and escapes the text.
+func TestNewEnvelopeErrorEscapesAndKeepsTheStatus(t *testing.T) {
+	t.Parallel()
+
+	apiErr := pvererrors.NewEnvelopeError(200, "a\u001b[2J\u202eb\nc", map[string]string{"k\r": "v\u0007"})
+
+	if apiErr.Code != 200 || apiErr.HTTPCode != 200 {
+		t.Errorf("code = %d, http code = %d, want 200", apiErr.Code, apiErr.HTTPCode)
+	}
+
+	if rawControl(apiErr.Error()) || !strings.Contains(apiErr.Message, "\n") {
+		t.Errorf("error text %q: want no raw character and the newline kept", apiErr.Error())
+	}
+
+	if pvererrors.NewEnvelopeError(500, "m", nil).Unwrap() == nil {
+		t.Error("a 500 envelope lost its server error sentinel")
 	}
 }

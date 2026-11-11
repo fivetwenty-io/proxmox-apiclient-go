@@ -38,6 +38,23 @@ type APIError struct {
 	sentinel error
 }
 
+// NewEnvelopeError builds the APIError for a reply whose status says success
+// but whose envelope reports a failure. The message and the field errors are
+// text the server chose, so they get the same escaping and the same length cap
+// as the error ParseAPIError builds from a failure status.
+func NewEnvelopeError(statusCode int, message string, fieldErrors map[string]string) *APIError {
+	apiErr := &APIError{
+		Message:  message,
+		Code:     statusCode,
+		Errors:   fieldErrors,
+		HTTPCode: statusCode,
+		sentinel: sentinelFor(statusCode),
+	}
+	apiErr.escapeServerText()
+
+	return apiErr
+}
+
 // Unwrap returns the wrapped sentinel error, enabling errors.Is chains.
 func (e *APIError) Unwrap() error {
 	return e.sentinel
@@ -241,18 +258,26 @@ func ParseAPIError(statusCode int, body []byte) error {
 	return dispatchByStatus(statusCode, body, apiErr)
 }
 
+// MaxServerTextBytes is the most bytes of escaped text that an error keeps from
+// one server-chosen string. It bounds the message of a reply that is not JSON,
+// such as a proxy's error page, and the message, each field name, each field
+// message, and the file of a reply that is.
+const MaxServerTextBytes = 1024
+
 // MaxGenericMessageBytes is the most bytes of a body that is not JSON that an
 // error message keeps. It is enough to show the title of a proxy's error page.
-const MaxGenericMessageBytes = 1024
+const MaxGenericMessageBytes = MaxServerTextBytes
 
 // escapeServerText replaces, in every text field the server chose, each control
 // character other than newline and tab, each text direction override, and each
 // invalid byte with its escape sequence, so printing the error cannot rewrite
-// a terminal or hide text. Newlines stay, because PVE writes multi-line
-// messages. A program that logs the error on one line should quote it.
+// a terminal or hide text. Each field is also cut at MaxServerTextBytes of
+// escaped text, with a marker when it was cut. Newlines stay, because PVE
+// writes multi-line messages. A program that logs the error on one line should
+// quote it.
 func (e *APIError) escapeServerText() {
-	e.Message = safetext.Multiline(e.Message)
-	e.File = safetext.Multiline(e.File)
+	e.Message = safetext.CappedMultiline(e.Message, MaxServerTextBytes)
+	e.File = safetext.CappedMultiline(e.File, MaxServerTextBytes)
 
 	if e.Errors == nil {
 		return
@@ -260,7 +285,7 @@ func (e *APIError) escapeServerText() {
 
 	escaped := make(map[string]string, len(e.Errors))
 	for field, msg := range e.Errors {
-		escaped[safetext.Multiline(field)] = safetext.Multiline(msg)
+		escaped[safetext.CappedMultiline(field, MaxServerTextBytes)] = safetext.CappedMultiline(msg, MaxServerTextBytes)
 	}
 
 	e.Errors = escaped
