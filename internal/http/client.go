@@ -1121,7 +1121,7 @@ func (c *Client) logResponse(req *http.Request, resp *http.Response, bodyBytes [
 	}
 
 	if logs.config.LogResponseHeader {
-		fields["resp_headers"] = redact(resp.Header, logs.config.RedactHeaders, alwaysRedactedHeaders()...)
+		fields["resp_headers"] = redactResponseHeaders(resp.Header, logs.config)
 	}
 
 	if logs.config.LogResponseBody && len(bodyBytes) > 0 {

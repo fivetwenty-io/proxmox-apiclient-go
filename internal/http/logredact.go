@@ -6,6 +6,8 @@ import (
 	"net/url"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/safetext"
 )
 
 // Fields that stand in for a body, or for the part of it a log line leaves out.
@@ -21,7 +23,42 @@ const (
 	// create call, whose "value" member is the token secret.
 	tokenCreateMarker = "full-tokenid"
 	tokenSecretMember = "value"
+
+	// maxRedactBodyBytes is the largest body the redactor parses. A larger
+	// body is logged by its length and content type, because decoding and
+	// encoding a body costs many times its size in memory, and a debug log
+	// line is not worth that.
+	maxRedactBodyBytes = 64 * 1024
+
+	// Names of the headers that carry a URL.
+	headerLocation        = "location"
+	headerContentLocation = "content-location"
 )
+
+// secretNameFragments are the parts of a name that mark its value as a secret.
+// A query parameter, a header, or a JSON member whose lower-cased name holds
+// one is redacted. They are matched as plain substrings, which redacts more
+// than strictly needed (a name such as "monkey" matches "key") and never less,
+// except for otpFragments and benignNames below.
+func secretNameFragments() []string {
+	return []string{
+		redactParamPassword, "passwd", redactParamSecret, redactParamToken, "ticket", "key", "authkey", "recovery",
+		"challenge", "csrf", "cookie", "credential", "private",
+	}
+}
+
+// otpFragments mark a one-time password. A plain substring match would redact
+// "hotplug" and "footprint", so these match only at the start or the end of a
+// word of the name, where a word is a run of letters.
+func otpFragments() []string {
+	return []string{"otp", "totp"}
+}
+
+// benignNames are PVE option names that hold a secret fragment and no secret.
+// They are removed from a name before the fragment test.
+func benignNames() []string {
+	return []string{"keyboard"}
+}
 
 // alwaysRedactedHeaders are the headers whose values never reach a log line,
 // whatever the configured list says. They carry credentials in either
@@ -34,15 +71,19 @@ func alwaysRedactedHeaders() []string {
 // values never reach a log line, whatever the configured list says.
 func alwaysRedactedParams() []string {
 	return []string{
-		redactParamPassword, "token", "secret", "ticket", "vncticket", headerCSRF, "otp",
+		redactParamPassword, redactParamToken, redactParamSecret, "ticket", "vncticket", headerCSRF, "otp",
 		"privatekey", "private-key", headerAuthorization, headerCookie,
 	}
 }
 
-// nameSet returns the lower-cased names in the lists as a set, so a
-// comparison ignores case on both sides.
-func nameSet(lists ...[]string) map[string]struct{} {
-	set := make(map[string]struct{})
+// nameMatcher decides whether the value behind a name is a secret. It holds
+// the exact names a caller or the SDK listed, compared without regard to case,
+// and it also redacts any name that holds one of secretNameFragments.
+type nameMatcher map[string]struct{}
+
+// newNameMatcher returns a matcher for the lower-cased names in the lists.
+func newNameMatcher(lists ...[]string) nameMatcher {
+	set := make(nameMatcher)
 
 	for _, list := range lists {
 		for _, name := range list {
@@ -51,6 +92,43 @@ func nameSet(lists ...[]string) map[string]struct{} {
 	}
 
 	return set
+}
+
+// secret reports whether the value behind name must be redacted.
+func (m nameMatcher) secret(name string) bool {
+	lower := strings.ToLower(name)
+
+	if _, listed := m[lower]; listed {
+		return true
+	}
+
+	return holdsSecretFragment(lower)
+}
+
+// holdsSecretFragment reports whether the lower-cased name holds a fragment of
+// a secret's name.
+func holdsSecretFragment(lower string) bool {
+	checked := lower
+	for _, benign := range benignNames() {
+		checked = strings.ReplaceAll(checked, benign, "")
+	}
+
+	for _, fragment := range secretNameFragments() {
+		if strings.Contains(checked, fragment) {
+			return true
+		}
+	}
+
+	words := strings.FieldsFunc(checked, func(r rune) bool { return r < 'a' || r > 'z' })
+	for _, word := range words {
+		for _, fragment := range otpFragments() {
+			if strings.HasPrefix(word, fragment) || strings.HasSuffix(word, fragment) {
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 // redactedURL renders target for a log line or a hook. It keeps the scheme, host,
@@ -66,7 +144,7 @@ func redactedURL(target *url.URL, cfg LogConfig) string {
 	out := url.URL{Scheme: target.Scheme, Host: target.Host, Path: target.Path, RawPath: target.RawPath}
 
 	if cfg.LogQueryParams {
-		out.RawQuery = redactRawQuery(target.RawQuery, nameSet(cfg.RedactParams, alwaysRedactedParams()))
+		out.RawQuery = redactRawQuery(target.RawQuery, newNameMatcher(cfg.RedactParams, alwaysRedactedParams()))
 	}
 
 	return out.String()
@@ -76,7 +154,7 @@ func redactedURL(target *url.URL, cfg LogConfig) string {
 // names. A parameter whose name does not decode is redacted too, because
 // nothing can show it is harmless. The order and the spelling of the rest are
 // kept.
-func redactRawQuery(raw string, names map[string]struct{}) string {
+func redactRawQuery(raw string, names nameMatcher) string {
 	if raw == "" {
 		return ""
 	}
@@ -96,7 +174,7 @@ func redactRawQuery(raw string, names map[string]struct{}) string {
 			continue
 		}
 
-		if _, found := names[strings.ToLower(decoded)]; found {
+		if names.secret(decoded) {
 			pairs[i] = name + "=" + url.QueryEscape(redactedValue)
 		}
 	}
@@ -105,18 +183,29 @@ func redactRawQuery(raw string, names map[string]struct{}) string {
 }
 
 // bodyFields returns the log fields for a response body. A body that parses as
-// JSON is logged with the value of every secret member replaced, cut at limit
-// bytes when limit is positive. A body that does not parse is not logged: its
-// length and content type stand in for it, because text that is not JSON gives
-// nothing to tell a secret from the rest.
+// JSON is logged with the value of every secret member replaced, with control
+// and text direction characters escaped, cut at limit bytes when limit is
+// positive. A body that does not parse, or is larger than maxRedactBodyBytes,
+// is not logged: its length and content type stand in for it, because text
+// that is not JSON gives nothing to tell a secret from the rest, and a large
+// body is not parsed at all.
 func bodyFields(body []byte, contentType string, cfg LogConfig) map[string]interface{} {
-	redacted, ok := redactJSONBody(body, nameSet(cfg.RedactParams, cfg.RedactHeaders, alwaysRedactedParams()))
+	if len(body) > maxRedactBodyBytes {
+		return map[string]interface{}{
+			logFieldBodyLength:      len(body),
+			logFieldBodyContentType: contentType,
+		}
+	}
+
+	redacted, ok := redactJSONBody(body, newNameMatcher(cfg.RedactParams, cfg.RedactHeaders, alwaysRedactedParams()))
 	if !ok {
 		return map[string]interface{}{
 			logFieldBodyLength:      len(body),
 			logFieldBodyContentType: contentType,
 		}
 	}
+
+	redacted = []byte(safetext.Line(string(redacted)))
 
 	if cfg.MaxBodyBytes > 0 && len(redacted) > cfg.MaxBodyBytes {
 		cut := cfg.MaxBodyBytes
@@ -133,7 +222,7 @@ func bodyFields(body []byte, contentType string, cfg LogConfig) map[string]inter
 // redactJSONBody parses body as one JSON value and returns it re-encoded with
 // the value of each member named in names replaced. It reports false when body
 // is not exactly one JSON value.
-func redactJSONBody(body []byte, names map[string]struct{}) ([]byte, bool) {
+func redactJSONBody(body []byte, names nameMatcher) ([]byte, bool) {
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.UseNumber()
 
@@ -166,7 +255,7 @@ func redactJSONBody(body []byte, names map[string]struct{}) ([]byte, bool) {
 // names replaced, at any depth. In an object that carries the member a token
 // create response uses to name the new token, the "value" member is the token
 // secret and is replaced as well.
-func redactJSONValue(value interface{}, names map[string]struct{}) interface{} {
+func redactJSONValue(value interface{}, names nameMatcher) interface{} {
 	switch typed := value.(type) {
 	case map[string]interface{}:
 		_, isTokenCreate := lookupFold(typed, tokenCreateMarker)
@@ -174,9 +263,8 @@ func redactJSONValue(value interface{}, names map[string]struct{}) interface{} {
 
 		for key, member := range typed {
 			lower := strings.ToLower(key)
-			_, secret := names[lower]
 
-			if secret || (isTokenCreate && lower == tokenSecretMember) {
+			if names.secret(key) || (isTokenCreate && lower == tokenSecretMember) {
 				out[key] = redactedValue
 
 				continue
@@ -207,4 +295,43 @@ func lookupFold(object map[string]interface{}, key string) (interface{}, bool) {
 	}
 
 	return nil, false
+}
+
+// redactResponseHeaders returns the response headers for a log line. The
+// credential headers are replaced, the value of Location and Content-Location
+// goes through the same URL redaction as the url field, and every other value
+// has control and text direction characters escaped, because a server chose it.
+func redactResponseHeaders(header map[string][]string, cfg LogConfig) map[string]interface{} {
+	out := redact(header, cfg.RedactHeaders, alwaysRedactedHeaders()...)
+
+	for key, value := range out {
+		values, ok := value.([]string)
+		if !ok {
+			continue
+		}
+
+		lower := strings.ToLower(key)
+		isURL := lower == headerLocation || lower == headerContentLocation
+
+		for i, text := range values {
+			if isURL {
+				values[i] = redactedLocation(text, cfg)
+			} else {
+				values[i] = safetext.Line(text)
+			}
+		}
+	}
+
+	return out
+}
+
+// redactedLocation renders the value of a Location header like the url field. A
+// value that is not a URL is replaced.
+func redactedLocation(value string, cfg LogConfig) string {
+	target, err := url.Parse(value)
+	if err != nil {
+		return redactedValue
+	}
+
+	return safetext.Line(redactedURL(target, cfg))
 }

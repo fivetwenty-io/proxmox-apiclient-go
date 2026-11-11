@@ -3,7 +3,6 @@ package http
 import (
 	"net/http"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/constants"
@@ -50,7 +49,7 @@ func defaultLogConfig() LogConfig {
 	return LogConfig{
 		Enabled:           true,
 		RedactHeaders:     []string{headerAuthorization, headerCookie, headerCSRF},
-		RedactParams:      []string{redactParamPassword, "token", "secret"},
+		RedactParams:      []string{redactParamPassword, redactParamToken, redactParamSecret},
 		LogRequestHeader:  false,
 		LogResponseHeader: false,
 		LogQueryParams:    true,
@@ -77,13 +76,11 @@ type Event struct {
 // redact returns a new map with sensitive keys redacted. A key matches a name
 // in redactKeys, or one in alwaysRedacted, without regard to case.
 func redact(in map[string][]string, redactKeys []string, alwaysRedacted ...string) map[string]interface{} {
-	names := nameSet(redactKeys, alwaysRedacted)
+	names := newNameMatcher(redactKeys, alwaysRedacted)
 	out := make(map[string]interface{}, len(in))
 
 	for key, vals := range in {
-		_, redacted := names[strings.ToLower(key)]
-
-		if redacted {
+		if names.secret(key) {
 			out[key] = redactedValue
 		} else {
 			// copy values

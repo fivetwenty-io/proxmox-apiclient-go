@@ -45,7 +45,7 @@ func loggedClient(t *testing.T, contentType, body string) (*Client, *captureLine
 	return client, captured
 }
 
-func assertNoSecrets(t *testing.T, captured *captureLines, extra ...string) {
+func assertNoSecrets(t *testing.T, captured *captureLines) {
 	t.Helper()
 
 	lines := captured.all()
@@ -54,7 +54,7 @@ func assertNoSecrets(t *testing.T, captured *captureLines, extra ...string) {
 	}
 
 	for _, line := range lines {
-		for _, secret := range append(logSecrets(), append(extra, "COOKIESECRET", "s3cr3t")...) {
+		for _, secret := range append(logSecrets(), "COOKIESECRET", "s3cr3t") {
 			if strings.Contains(line, secret) {
 				t.Errorf("log line holds %q: %s", secret, line)
 			}

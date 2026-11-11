@@ -42,6 +42,8 @@ const (
 
 	// Redact param keys used in defaultLogConfig.
 	redactParamPassword = "password"
+	redactParamSecret   = "secret"
+	redactParamToken    = "token"
 )
 
 // SSLVerifyMode selects whether server certificates are verified.
