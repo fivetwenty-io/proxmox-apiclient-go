@@ -187,3 +187,46 @@ func TestLoggedBodyKeepsAPendingMemberWithNoSecretSibling(t *testing.T) {
 		t.Error("the pending member of an object with no secret member was redacted")
 	}
 }
+
+// TestLoggedBodyRedactsACephConfigSecret sends the reply to a read of the Ceph
+// config database. Each entry names its option in "name" and gives its setting
+// in "value", so the value of an option whose name is a secret name is a
+// secret, although no member name in the entry marks one.
+func TestLoggedBodyRedactsACephConfigSecret(t *testing.T) {
+	t.Parallel()
+
+	bodies := map[string]string{
+		"password option": `{"data":[{"section":"mgr","name":"mgr/influx/password","value":"CEPHSECRET",` +
+			`"level":"advanced","mask":"","can_update_at_runtime":1}]}`,
+		"key option":  `{"data":[{"section":"client","name":"rgw_crypt_s3_kms_encryption_keys","value":"CEPHSECRET"}]}`,
+		"capitalized": `{"data":[{"Name":"mgr/influx/PASSWORD","Value":"CEPHSECRET"}]}`,
+	}
+
+	for name, body := range bodies {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			for _, line := range logOf(t, body) {
+				if strings.Contains(line, "CEPHSECRET") {
+					t.Errorf("log line holds the option's secret: %s", line)
+				}
+			}
+		})
+	}
+}
+
+// TestLoggedBodyKeepsAnOrdinaryCephConfigValue checks that the rule for a
+// secret option does not redact every option's value.
+func TestLoggedBodyKeepsAnOrdinaryCephConfigValue(t *testing.T) {
+	t.Parallel()
+
+	found := false
+
+	for _, line := range logOf(t, `{"data":[{"section":"global","name":"osd_pool_default_size","value":"KEEPCEPH"}]}`) {
+		found = found || strings.Contains(line, "KEEPCEPH")
+	}
+
+	if !found {
+		t.Error("the value of an ordinary Ceph option was redacted")
+	}
+}

@@ -30,6 +30,13 @@ const (
 	// pending config of a VM, a container, and a cloud-init drive all use it.
 	pairedPendingMember = "pending"
 
+	// namingNameMember and namingKeyMember are the members whose string value
+	// names the setting a paired value member holds. The Ceph config database
+	// gives the option name in "name", and a pending config entry gives it in
+	// "key".
+	namingNameMember = "name"
+	namingKeyMember  = "key"
+
 	// dataMember is the member of a PVE reply that holds the result, and the
 	// member of an ACME plugin that holds the DNS provider's credentials.
 	dataMember = "data"
@@ -282,10 +289,12 @@ func redactJSONBody(body []byte, names nameMatcher) ([]byte, bool) {
 //
 // Two members are replaced by their place and not their name. A string held by
 // a "data" member is the result of a call, or the credentials of an ACME
-// plugin, and carries no name that shows it is harmless. A "value" member
-// whose object also holds a member named as a secret, such as the "tokenid" or
-// "full-tokenid" of a token create reply or the "key" of a pending config
-// entry, holds the value that name stands for.
+// plugin, and carries no name that shows it is harmless. A "value" or
+// "pending" member whose object also holds a member named as a secret, such as
+// the "tokenid" or "full-tokenid" of a token create reply or the "key" of a
+// pending config entry, holds the value that name stands for. So does one whose
+// object has a "name" or "key" member whose value is the name of a secret, such
+// as the "name" of a Ceph config option.
 func redactJSONValue(value interface{}, names nameMatcher) interface{} {
 	switch typed := value.(type) {
 	case map[string]interface{}:
@@ -328,15 +337,35 @@ func redactJSONValue(value interface{}, names nameMatcher) interface{} {
 }
 
 // holdsSecretSibling reports whether object has a member, other than the
-// paired value members themselves, whose name marks a secret.
+// paired value members themselves, whose name marks a secret, or a naming
+// member whose string value is the name of a secret. A Ceph config option
+// such as {"name":"mgr/influx/password","value":...} names its setting in the
+// value of "name", and no member name there marks a secret.
 func holdsSecretSibling(object map[string]interface{}, names nameMatcher) bool {
-	for name := range object {
-		if !isPairedValue(strings.ToLower(name)) && names.secret(name) {
+	for name, member := range object {
+		lower := strings.ToLower(name)
+		if isPairedValue(lower) {
+			continue
+		}
+
+		if names.secret(name) {
+			return true
+		}
+
+		setting, isString := member.(string)
+		if isString && isNamingMember(lower) && names.secret(setting) {
 			return true
 		}
 	}
 
 	return false
+}
+
+// isNamingMember reports whether a lower-cased member name is one whose value
+// names the setting a paired value member holds, as "name" does in a Ceph
+// config option and "key" does in a pending config entry.
+func isNamingMember(lower string) bool {
+	return lower == namingNameMember || lower == namingKeyMember
 }
 
 // isPairedValue reports whether a lower-cased member name is one that holds the
