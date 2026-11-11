@@ -23,6 +23,7 @@ import (
 	"crypto/x509"
 	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/constants"
 	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/redirect"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/safetext"
 	issl "github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/ssl"
 	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/swaptransport"
 	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/auth"
@@ -1293,7 +1294,7 @@ func (c *Client) parseResponse(resp *http.Response) (*Response, []byte, error) {
 		return &Response{
 			Data: string(body),
 			Code: resp.StatusCode,
-		}, body, fmt.Errorf("failed to unmarshal response body: %w", err)
+		}, body, fmt.Errorf("failed to unmarshal response body: %w", safetext.Error(err))
 	}
 
 	// Check for API-level errors

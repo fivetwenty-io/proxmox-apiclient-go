@@ -10,6 +10,7 @@ import (
 	"strconv"
 
 	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/constants"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/safetext"
 	apierrors "github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/errors"
 )
 
@@ -99,12 +100,12 @@ func (rp *ResponseParser) parseJSON(body []byte, target interface{}) error {
 	if err != nil {
 		// Try parsing directly into target
 		if rp.StrictMode {
-			return fmt.Errorf("failed to parse response envelope: %w", err)
+			return fmt.Errorf("failed to parse response envelope: %w", safetext.Error(err))
 		}
 
 		err = json.Unmarshal(body, target)
 		if err != nil {
-			return fmt.Errorf("failed to unmarshal JSON response: %w", err)
+			return fmt.Errorf("failed to unmarshal JSON response: %w", safetext.Error(err))
 		}
 
 		return nil
@@ -126,7 +127,7 @@ func (rp *ResponseParser) parseJSON(body []byte, target interface{}) error {
 	if len(envelope.Data) > 0 {
 		err = json.Unmarshal(envelope.Data, target)
 		if err != nil {
-			return fmt.Errorf("failed to unmarshal envelope data: %w", err)
+			return fmt.Errorf("failed to unmarshal envelope data: %w", safetext.Error(err))
 		}
 
 		return nil
@@ -135,7 +136,7 @@ func (rp *ResponseParser) parseJSON(body []byte, target interface{}) error {
 	// No data field, try to use the whole response
 	err = json.Unmarshal(body, target)
 	if err != nil {
-		return fmt.Errorf("failed to unmarshal JSON response: %w", err)
+		return fmt.Errorf("failed to unmarshal JSON response: %w", safetext.Error(err))
 	}
 
 	return nil
