@@ -143,10 +143,7 @@ func NewClient(options *Options) (*Client, error) {
 		return nil, err
 	}
 
-	httpClient := &http.Client{
-		Transport: roundTripper,
-		Timeout:   options.Timeout,
-	}
+	httpClient := newHTTPClient(options, roundTripper)
 
 	authenticator := createAuthenticator(options, httpClient)
 
@@ -1794,6 +1791,12 @@ func applyRetryJitter(delay time.Duration) time.Duration {
 // dial timeout. It is surfaced as a typed ConnectionError so callers can
 // distinguish it from an API error.
 func classifyTransportError(req *http.Request, doErr error, attempt, retries int, retryAllowed bool) error {
+	// An error marked permanent, by a redirect refusal or by a WrapTransport
+	// wrapper, is refused again on every retry, so the loop stops at once.
+	if IsPermanent(doErr) {
+		return fmt.Errorf("request failed after %d attempt(s), not retried: %w", attempt+1, doErr)
+	}
+
 	if isTerminalTransportError(doErr) {
 		return newConnectionError(req, doErr)
 	}

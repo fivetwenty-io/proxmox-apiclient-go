@@ -5,6 +5,19 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `Options.CheckRedirect` sets what the client does with a redirect a server sends, with the same meaning as `http.Client.CheckRedirect`. A function that returns nil follows the redirect, and one that returns an error fails the request with it. Leaving it nil refuses every redirect, as described under Changed.
+- `ErrRedirectRefused` and `RedirectError` describe a refused redirect. `errors.Is(err, ErrRedirectRefused)` matches, and `RedirectError` carries the status code and the two URLs, the one requested and the one the server asked for, with the user information, query, and fragment removed so no credential reaches the message.
+- `Permanent(err)` marks an error so the retry loop does not attempt the request again, and `IsPermanent(err)` reports the marker. A `WrapTransport` wrapper returns `Permanent(err)` from `RoundTrip` when it refuses a request on purpose. An error type of your own gets the same treatment when it has a `Permanent() bool` method that returns true.
+
+### Changed
+
+- The client no longer follows redirects unless `Options.CheckRedirect` allows it. Go's default policy keeps the `Authorization` header when a redirect changes only the port or the scheme, so a node that answered a token-authenticated request with a 302 or 307 to another port of its own host, such as `http://<same host>:<other port>`, got the token sent there, in plain text for an `http` target. The request now fails with a `RedirectError` and the redirect target receives nothing. The refusal covers the ticket login requests as well. PVE does not redirect its API, so a client that works today is unaffected, but one that relied on following a redirect needs a `CheckRedirect` function that returns nil, ideally after comparing the target's scheme and host with the request's.
+- The retry loop does not retry an error marked with `Permanent`, which includes a refused redirect. Before this release a refused request was attempted again until the retry count ran out, which is four attempts for a GET with the defaults.
+
 ## [v3.12.0] — 2026-11-09
 
 ### Added

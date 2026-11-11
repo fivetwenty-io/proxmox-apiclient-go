@@ -122,6 +122,12 @@ type Options struct {
 	// untouched.
 	WrapTransport func(base *http.Transport) http.RoundTripper
 
+	// CheckRedirect, when non-nil, decides what the HTTP client does with a
+	// redirect, exactly as http.Client.CheckRedirect does. Nil (default)
+	// refuses every redirect with a *RedirectError that matches
+	// ErrRedirectRefused and is never retried.
+	CheckRedirect func(req *http.Request, via []*http.Request) error
+
 	// Caching configuration
 	CacheConfig *cache.Config
 

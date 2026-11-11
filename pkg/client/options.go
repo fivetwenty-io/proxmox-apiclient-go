@@ -162,6 +162,25 @@ type Options struct {
 	// without the field.
 	WrapTransport func(base *http.Transport) http.RoundTripper
 
+	// CheckRedirect, when non-nil, decides what the client does with a redirect
+	// a server sends, exactly as http.Client.CheckRedirect does: req is the
+	// request the redirect would send, with req.Response holding the redirect
+	// response, and via holds the requests already sent, oldest first. Return
+	// nil to follow the redirect, http.ErrUseLastResponse to stop and surface
+	// the redirect response as an API error, or any other error to fail the
+	// request with it. Wrap an error in Permanent so the client does not
+	// attempt the request again.
+	//
+	// Nil (default) refuses every redirect: the request fails with a
+	// *RedirectError that matches ErrRedirectRefused, naming the target
+	// without credentials, and the client does not retry it. Go's own policy
+	// follows redirects and keeps the Authorization header when only the port
+	// or the scheme changes, which would send an API token to another listener
+	// on the host, in plain text for an http target. A function that returns
+	// nil for every request restores that policy, so a caller who needs it
+	// should compare the target's scheme and host with the request's first.
+	CheckRedirect func(req *http.Request, via []*http.Request) error
+
 	// Caching
 	CacheConfig *CacheConfig // Cache configuration (nil = disabled)
 

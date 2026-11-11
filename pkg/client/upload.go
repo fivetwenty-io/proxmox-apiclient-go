@@ -15,6 +15,27 @@ var ErrHostOverrideFingerprint = pvehttp.ErrHostOverrideFingerprint
 // Options.WrapTransport.
 var ErrWrapTransportNil = pvehttp.ErrWrapTransportNil
 
+// ErrRedirectRefused is matched by errors.Is on the error a request returns
+// when the server answers with a redirect and Options.CheckRedirect is nil or
+// does not allow it; see Options.CheckRedirect.
+var ErrRedirectRefused = pvehttp.ErrRedirectRefused
+
+// RedirectError is the error a refused redirect returns. It names the status
+// and the two URLs without credentials, matches ErrRedirectRefused, and is
+// never retried.
+type RedirectError = pvehttp.RedirectError
+
+// Permanent marks err so the client's retry loop does not attempt the request
+// again. A WrapTransport wrapper returns Permanent(err) from RoundTrip when it
+// refuses a request on purpose, and a CheckRedirect function returns it for the
+// same reason. errors.Is and errors.As still reach err. A nil err stays nil.
+// An error type with a Permanent() bool method that returns true is treated the
+// same way.
+func Permanent(err error) error { return pvehttp.Permanent(err) } //nolint:wrapcheck // marks err, so it is the same error
+
+// IsPermanent reports whether err carries the permanent marker.
+func IsPermanent(err error) bool { return pvehttp.IsPermanent(err) }
+
 // NewSizedReader wraps r with its exact byte count so file uploads stream the
 // multipart body with an explicit Content-Length instead of buffering the
 // whole payload in memory to measure it. An *os.File needs no wrapping — its
