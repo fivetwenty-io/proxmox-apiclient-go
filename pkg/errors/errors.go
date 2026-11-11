@@ -1,12 +1,14 @@
 package errors
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/constants"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/safetext"
 )
 
 // Sentinel errors for HTTP status classes. Use errors.Is to test wrapped APIErrors.
@@ -80,7 +82,7 @@ type PermissionError struct {
 // Error implements the error interface.
 func (e *PermissionError) Error() string {
 	if e.What != "" {
-		return fmt.Sprintf("permission denied for %s: %s", e.What, e.APIError.Error())
+		return fmt.Sprintf("permission denied for %s: %s", safetext.Multiline(e.What), e.APIError.Error())
 	}
 
 	return "permission denied: " + e.APIError.Error()
@@ -96,7 +98,7 @@ type ParameterError struct {
 // Error implements the error interface.
 func (e *ParameterError) Error() string {
 	if e.Usage != "" {
-		return fmt.Sprintf("parameter error: %s (usage: %s)", e.APIError.Error(), e.Usage)
+		return fmt.Sprintf("parameter error: %s (usage: %s)", e.APIError.Error(), safetext.Multiline(e.Usage))
 	}
 
 	return "parameter error: " + e.APIError.Error()
@@ -114,7 +116,7 @@ type AuthenticationError struct {
 func (e *AuthenticationError) Error() string {
 	msg := "authentication failed"
 	if e.Realm != "" {
-		msg += " for realm " + e.Realm
+		msg += " for realm " + safetext.Multiline(e.Realm)
 	}
 
 	if e.TFA {
@@ -138,6 +140,17 @@ type TFARequiredError struct {
 // Error implements the error interface.
 func (e *TFARequiredError) Error() string {
 	return fmt.Sprintf("two-factor authentication required (available types: %s)", strings.Join(e.Types, ", "))
+}
+
+// escapeServerText escapes the text fields the server chose, as
+// APIError.escapeServerText does.
+func (e *TFARequiredError) escapeServerText() {
+	e.Ticket = safetext.Multiline(e.Ticket)
+	e.Challenge = safetext.Multiline(e.Challenge)
+
+	for i, kind := range e.Types {
+		e.Types[i] = safetext.Multiline(kind)
+	}
 }
 
 // ConnectionError represents a connection-related error.
@@ -223,13 +236,40 @@ func ParseAPIError(statusCode int, body []byte) error {
 
 	apiErr.HTTPCode = statusCode
 	apiErr.sentinel = sentinelFor(statusCode)
+	apiErr.escapeServerText()
 
 	return dispatchByStatus(statusCode, body, apiErr)
 }
 
-// newGenericError builds an APIError for non-JSON or empty bodies.
+// MaxGenericMessageBytes is the most bytes of a body that is not JSON that an
+// error message keeps. It is enough to show the title of a proxy's error page.
+const MaxGenericMessageBytes = 1024
+
+// escapeServerText replaces, in every text field the server chose, each control
+// character other than newline and tab, each text direction override, and each
+// invalid byte with its escape sequence, so printing the error cannot rewrite
+// a terminal or hide text. Newlines stay, because PVE writes multi-line
+// messages. A program that logs the error on one line should quote it.
+func (e *APIError) escapeServerText() {
+	e.Message = safetext.Multiline(e.Message)
+	e.File = safetext.Multiline(e.File)
+
+	if e.Errors == nil {
+		return
+	}
+
+	escaped := make(map[string]string, len(e.Errors))
+	for field, msg := range e.Errors {
+		escaped[safetext.Multiline(field)] = safetext.Multiline(msg)
+	}
+
+	e.Errors = escaped
+}
+
+// newGenericError builds an APIError for non-JSON or empty bodies. The message
+// is the body cut at MaxGenericMessageBytes, and escaped.
 func newGenericError(statusCode int, body []byte) *APIError {
-	msg := strings.TrimSpace(string(body))
+	msg := strings.TrimSpace(safetext.CappedMultilineBytes(bytes.TrimSpace(body), MaxGenericMessageBytes))
 	if msg == "" {
 		msg = fmt.Sprintf("HTTP %d", statusCode)
 	}
@@ -261,6 +301,8 @@ func dispatchByStatus(statusCode int, body []byte, apiErr APIError) error {
 func dispatchUnauthorized(body []byte, apiErr APIError) error {
 	var tfaErr TFARequiredError
 	if json.Unmarshal(body, &tfaErr) == nil && tfaErr.Ticket != "" {
+		tfaErr.escapeServerText()
+
 		return &tfaErr
 	}
 

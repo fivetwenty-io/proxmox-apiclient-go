@@ -14,6 +14,7 @@ import (
 
 	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/constants"
 	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/redirect"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/safetext"
 	"github.com/gorilla/websocket"
 )
 
@@ -38,6 +39,11 @@ const (
 	// maxConsecutiveDeadlineFailures is how many SetReadDeadline failures in a
 	// row readLoop tolerates before treating the connection as dead.
 	maxConsecutiveDeadlineFailures = 3
+
+	// maxCloseErrorBytes is the most bytes of a read error's text that an
+	// error returned to the caller keeps. The text of a close error holds the
+	// reason the server chose, so it is escaped and cut at this length.
+	maxCloseErrorBytes = 256
 
 	// readDeadlineFailureBackoff is the pause between retries after a
 	// SetReadDeadline failure, so a broken conn does not busy-spin the CPU.
@@ -636,7 +642,7 @@ func (c *Client) readLoop(ctx context.Context) {
 			messageType, data, err := conn.ReadMessage()
 			if err != nil {
 				if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
-					c.sendError(fmt.Errorf("read error: %w", err))
+					c.sendError(fmt.Errorf("read error: %w", safetext.CappedError(err, maxCloseErrorBytes)))
 				}
 
 				return

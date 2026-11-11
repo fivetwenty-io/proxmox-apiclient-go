@@ -17,6 +17,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/redirect"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/safetext"
 )
 
 // Errors returned by proxy operations.
@@ -144,7 +145,7 @@ func (c *Conn) ReadMessage() (int, []byte, error) {
 
 	msgType, data, err := c.ws.ReadMessage()
 	if err != nil {
-		return 0, nil, fmt.Errorf("read message: %w", err)
+		return 0, nil, fmt.Errorf("read message: %w", safetext.CappedError(err, maxCloseErrorBytes))
 	}
 
 	return msgType, data, nil
