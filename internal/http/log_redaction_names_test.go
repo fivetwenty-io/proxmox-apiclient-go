@@ -18,8 +18,8 @@ func TestSecretNameMatchesFragmentsAndSparesOrdinaryNames(t *testing.T) {
 	secrets := []string{
 		"recovery", "challenge", "corosync_authkey", "cipassword", "encryption-key", "client-secret", "Passwd",
 		"TOTP", "otp", "totp_code", "one-time-otp", "hotp", "CSRFPreventionToken", "PVEAuthCookie", "credential-id",
-		"private_key", "api_key", "X-Api-Key", "Sec-WebSocket-Key", "authkey", "ticket", "vncticket", headerAuthorization,
-		"proxy-authorization", "set-cookie", "tokenid", "monkey",
+		"private_key", "api_key", "X-Api-Key", "Sec-WebSocket-Key", "authkey", "ticket", "vncticket",
+		headerAuthorization, "proxy-authorization", "set-cookie", "tokenid", "monkey",
 	}
 
 	ordinary := []string{
