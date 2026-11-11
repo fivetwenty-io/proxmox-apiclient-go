@@ -143,3 +143,47 @@ func TestLoggedHeaderValuesAreEscapedAndCapped(t *testing.T) {
 		t.Fatal("no line carried the content type field")
 	}
 }
+
+// TestLoggedBodyRedactsThePendingValueOfAConfigEntry sends the reply to a read
+// of the pending configuration of a VM, a container, or its cloud-init
+// drive. Each entry names an option in "key", gives its current setting in
+// "value", and gives a change not yet applied in "pending", so both settings
+// of a password option are secrets.
+func TestLoggedBodyRedactsThePendingValueOfAConfigEntry(t *testing.T) {
+	t.Parallel()
+
+	bodies := map[string]string{
+		"value and pending": `{"data":[{"key":"cipassword","value":"CURRENTPWSECRET","pending":"NEXTPWSECRET"}]}`,
+		"pending only":      `{"data":[{"key":"cipassword","pending":"NEXTPWSECRET"}]}`,
+		"upper case":        `{"data":[{"Key":"cipassword","Pending":"NEXTPWSECRET"}]}`,
+		"pending delete":    `{"data":[{"delete":1,"key":"cipassword","value":"CURRENTPWSECRET"}]}`,
+	}
+
+	for name, body := range bodies {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			for _, line := range logOf(t, body) {
+				if strings.Contains(line, "PWSECRET") {
+					t.Errorf("log line holds the password: %s", line)
+				}
+			}
+		})
+	}
+}
+
+// TestLoggedBodyKeepsAPendingMemberWithNoSecretSibling checks that the rule for
+// a pending entry does not redact every member named "pending".
+func TestLoggedBodyKeepsAPendingMemberWithNoSecretSibling(t *testing.T) {
+	t.Parallel()
+
+	found := false
+
+	for _, line := range logOf(t, `{"data":{"name":"job","pending":"KEEPTHISPENDING"}}`) {
+		found = found || strings.Contains(line, "KEEPTHISPENDING")
+	}
+
+	if !found {
+		t.Error("the pending member of an object with no secret member was redacted")
+	}
+}

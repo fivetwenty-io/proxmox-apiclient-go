@@ -25,6 +25,11 @@ const (
 	// here, and a pending config entry names the option in a "key" sibling.
 	pairedValueMember = "value"
 
+	// pairedPendingMember is the member of a pending config entry that holds
+	// the setting not yet applied, beside the current one in "value". The
+	// pending config of a VM, a container, and a cloud-init drive all use it.
+	pairedPendingMember = "pending"
+
 	// dataMember is the member of a PVE reply that holds the result, and the
 	// member of an ACME plugin that holds the DNS provider's credentials.
 	dataMember = "data"
@@ -291,7 +296,7 @@ func redactJSONValue(value interface{}, names nameMatcher) interface{} {
 			lower := strings.ToLower(key)
 			_, isString := member.(string)
 
-			if names.secret(key) || (paired && lower == pairedValueMember) || (isString && lower == dataMember) {
+			if names.secret(key) || (paired && isPairedValue(lower)) || (isString && lower == dataMember) {
 				out[key] = redactedValue
 
 				continue
@@ -323,15 +328,21 @@ func redactJSONValue(value interface{}, names nameMatcher) interface{} {
 }
 
 // holdsSecretSibling reports whether object has a member, other than the
-// paired value member itself, whose name marks a secret.
+// paired value members themselves, whose name marks a secret.
 func holdsSecretSibling(object map[string]interface{}, names nameMatcher) bool {
 	for name := range object {
-		if !strings.EqualFold(name, pairedValueMember) && names.secret(name) {
+		if !isPairedValue(strings.ToLower(name)) && names.secret(name) {
 			return true
 		}
 	}
 
 	return false
+}
+
+// isPairedValue reports whether a lower-cased member name is one that holds the
+// current or the pending value of a name a sibling member gives.
+func isPairedValue(lower string) bool {
+	return lower == pairedValueMember || lower == pairedPendingMember
 }
 
 // redactResponseHeaders returns the response headers for a log line. The
