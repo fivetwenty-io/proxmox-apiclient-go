@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/constants"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/redirect"
 	"github.com/gorilla/websocket"
 )
 
@@ -261,7 +262,7 @@ func (c *Client) Connect(ctx context.Context) error {
 			_ = resp.Body.Close()
 		}
 
-		return fmt.Errorf("failed to connect: %w", err)
+		return fmt.Errorf("failed to connect: %w", redirect.Scrub(err))
 	}
 
 	// Configure deadlines on the freshly dialed conn before publishing it as

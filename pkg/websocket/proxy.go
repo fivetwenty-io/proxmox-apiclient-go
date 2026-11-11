@@ -665,7 +665,9 @@ func (p *ProxyClient) dial(ctx context.Context, apiPath string, query url.Values
 			_ = resp.Body.Close()
 		}
 
-		return nil, fmt.Errorf("dial %s: %w", wsURL.String(), err)
+		// The query holds the one-time ticket and the tunnel socket, so the
+		// error names the scheme, host, and path and nothing more.
+		return nil, fmt.Errorf("dial %s: %w", redirect.Redact(&wsURL), redirect.Scrub(err))
 	}
 
 	return &Conn{ws: conn}, nil
