@@ -70,9 +70,11 @@ func TestLoggedURLsCarryNoSecretQueryValue(t *testing.T) {
 
 	client, captured := loggedClient(t, "application/json", `{"data":[]}`)
 
-	_, err := client.DoWithContext(context.Background(), http.MethodGet, "/nodes/pve1/scan/cifs", map[string]interface{}{
+	params := map[string]interface{}{
 		"server": "10.0.0.1", "username": "u", "password": logSecretPassword, "vncticket": "TICKETSECRET",
-	})
+	}
+
+	_, err := client.DoWithContext(context.Background(), http.MethodGet, "/nodes/pve1/scan/cifs", params)
 	if err != nil {
 		t.Fatalf("request: %v", err)
 	}
@@ -109,7 +111,9 @@ func TestRedactedURLStripsUserinfoFragmentAndSecrets(t *testing.T) {
 		}
 	}
 
-	for _, want := range []string{"https://h:8006/api2/json/x%20y?", "node=pve1", "Password=REDACTED", "ticket=REDACTED"} {
+	wanted := []string{"https://h:8006/api2/json/x%20y?", "node=pve1", "Password=REDACTED", "ticket=REDACTED"}
+
+	for _, want := range wanted {
 		if !strings.Contains(got, want) {
 			t.Errorf("%q lost %q", got, want)
 		}
@@ -151,7 +155,8 @@ func TestLoggedResponseBodyRedactsSecretMembers(t *testing.T) {
 	bodies := map[string]string{
 		"login": `{"data":{"ticket":"` + logSecretTicket + `","CSRFPreventionToken":"` + logSecretCSRF +
 			`","username":"root@pam","cap":{"vms":{"VM.Audit":1}}}}`,
-		"token create": `{"data":{"full-tokenid":"root@pam!t","info":{"privsep":"1"},"value":"` + logSecretValue + `"}}`,
+		"token create": `{"data":{"full-tokenid":"root@pam!t","info":{"privsep":"1"},` +
+			`"value":"` + logSecretValue + `"}}`,
 		"nested array": `{"data":[{"vncticket":"TICKETSECRET","password":"CSRFSECRET","id":7}]}`,
 	}
 
@@ -180,7 +185,8 @@ func TestLoggedResponseBodyRedactsSecretMembers(t *testing.T) {
 func TestLoggedResponseBodyKeepsOrdinaryMembers(t *testing.T) {
 	t.Parallel()
 
-	fields := bodyFields([]byte(`{"data":{"value":"visible","count":12345678901234567890}}`), "application/json", LogConfig{})
+	body := []byte(`{"data":{"value":"visible","count":12345678901234567890}}`)
+	fields := bodyFields(body, "application/json", LogConfig{})
 
 	got, _ := fields[logFieldBody].(string)
 	if got != `{"data":{"count":12345678901234567890,"value":"visible"}}` {
