@@ -396,18 +396,23 @@ func sameCause(first, second error) bool {
 	return sameError(first, second)
 }
 
-// ScrubRead cleans an error from reading the body of a response to a request
-// for requested, as Scrub cleans an error from Do. The body is read after Do
-// returns, and a failure there can quote bytes the server sent, such as a
-// malformed trailer line or the debug text of an HTTP/2 GOAWAY frame. A nil
-// requested URL is named as "the server".
-func ScrubRead(err error, requested *url.URL) error {
+// ScrubRead cleans an error from reading the body of resp, as Scrub cleans an
+// error from Do. The body is read after Do returns, and a failure there can
+// quote bytes the server sent, such as a malformed trailer line or the debug
+// text of an HTTP/2 GOAWAY frame. The error names the URL of the request resp
+// answers, or "the server" when resp carries no request.
+func ScrubRead(err error, resp *http.Response) error {
 	if err == nil {
 		return nil
 	}
 
 	if urlErr, ok := err.(*url.Error); ok { //nolint:errorlint // only a bare *url.Error is rebuilt
 		return Scrub(urlErr)
+	}
+
+	var requested *url.URL
+	if resp != nil && resp.Request != nil {
+		requested = resp.Request.URL
 	}
 
 	return cleanCause(err, redactBounded(requested))

@@ -81,3 +81,32 @@ func TestTransportErrorsLeaveNoRequestSecretsInABatchResponse(t *testing.T) {
 
 	redirecttest.AssertCleanText(t, resp.Error)
 }
+
+// TestBodyReadErrorLeavesNoServerTextInABatchResponse answers with a reply whose
+// trailer line the transport cannot read, after a body the decoder has not
+// finished. The response text must hold none of the trailer's bytes.
+func TestBodyReadErrorLeavesNoServerTextInABatchResponse(t *testing.T) {
+	t.Parallel()
+
+	server := redirecttest.ServeRaw(t, redirecttest.BadTrailer(`{"data":`))
+
+	cfg := &batch.Config{MaxBatchSize: 1, MaxConcurrency: 1, Timeout: 10 * time.Second}
+	batchInstance := batch.New(cfg)
+
+	err := batchInstance.Add(&batch.Request{ID: "trailer", Method: methodGET, Path: server.URL() + pathTest})
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	result, err := batch.NewExecutor(&http.Client{}, cfg).Execute(context.Background(), batchInstance)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	resp := result.Responses["trailer"]
+	if resp == nil {
+		t.Fatal("no response for the request")
+	}
+
+	redirecttest.AssertNoTrailerText(t, resp.Error)
+}

@@ -437,7 +437,7 @@ func (ta *TicketAuthenticator) parseTFAResponse(resp *http.Response) (*tfaRespon
 
 	err := decoder.Decode(&tfaResp)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse TFA response: %w", err)
+		return nil, fmt.Errorf("failed to parse TFA response: %w", redirect.ScrubRead(err, resp))
 	}
 
 	return &tfaResp, nil
@@ -597,7 +597,7 @@ func (ta *TicketAuthenticator) processLoginResponse(resp *http.Response) (*AuthR
 
 	err := decoder.Decode(&response)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse login response: %w", err)
+		return nil, fmt.Errorf("failed to parse login response: %w", redirect.ScrubRead(err, resp))
 	}
 
 	return buildLoginResult(&response), nil

@@ -388,7 +388,7 @@ func (e *Executor) executeRequest(ctx context.Context, req *Request) *Response {
 				StatusCode: httpResp.StatusCode,
 				Headers:    httpResp.Header,
 				Body:       nil,
-				Error:      fmt.Sprintf("failed to decode response body: %v", err),
+				Error:      fmt.Sprintf("failed to decode response body: %v", redirect.ScrubRead(err, httpResp)),
 				Duration:   time.Since(start),
 			}
 		}

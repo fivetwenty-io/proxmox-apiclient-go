@@ -573,7 +573,7 @@ func (p *ProxyClient) directHTTPPost(
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("read POST response body: %w", err)
+		return nil, fmt.Errorf("read POST response body: %w", redirect.ScrubRead(err, resp))
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {

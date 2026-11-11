@@ -255,3 +255,35 @@ func assertCleanLines(t *testing.T, rendered []string) {
 		}
 	}
 }
+
+// TrailerMarker is in the malformed trailer line BadTrailer sends.
+const TrailerMarker = "EVILTRAILER"
+
+// BadTrailer returns a 200 response whose chunked body holds body and ends with
+// a trailer line the transport cannot read. The line holds an escape sequence,
+// TrailerMarker, and the secret markers, so a test sees whether an error from
+// reading the body repeats it. A body that is not a whole JSON value makes a
+// streaming decoder read up to the trailer, as io.ReadAll always does.
+func BadTrailer(body string) []byte {
+	return []byte(fmt.Sprintf(
+		"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n"+
+			"Connection: close\r\n\r\n%x\r\n%s\r\n0\r\n\u001b[2J%s user:%s@x?ticket=%s\r\n\r\n",
+		len(body), body, TrailerMarker, SecretUser, SecretQuery,
+	))
+}
+
+// AssertNoTrailerText fails the test when text holds the escape sequence, the
+// marker, or a secret from the trailer line BadTrailer sends.
+func AssertNoTrailerText(t *testing.T, text string) {
+	t.Helper()
+
+	if text == "" {
+		t.Fatal("got no error text, want the body read to fail")
+	}
+
+	for _, bad := range append(Secrets(), TrailerMarker, "\u001b") {
+		if strings.Contains(text, bad) {
+			t.Errorf("%q holds %q from the trailer", text, bad)
+		}
+	}
+}
