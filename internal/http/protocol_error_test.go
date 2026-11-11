@@ -33,7 +33,7 @@ func framingCases() map[string]struct {
 			quoted + "\r\n\r\n",
 			"malformed HTTP response",
 		},
-		"version": {
+		"http version": {
 			"HTTP/" + redirecttest.SecretUser + " 200 OK\r\n\r\n",
 			"malformed HTTP version",
 		},
@@ -42,7 +42,7 @@ func framingCases() map[string]struct {
 			"bad Content-Length",
 		},
 		"two content lengths": {
-			"HTTP/1.1 200 OK\r\nContent-Length:  \r\nContent-Length: " + quoted + "\r\n\r\n",
+			"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nContent-Length: " + quoted + "\r\n\r\n",
 			"message cannot contain multiple Content-Length headers",
 		},
 		"transfer encoding": {

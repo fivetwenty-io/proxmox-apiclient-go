@@ -235,23 +235,26 @@ type framingMarker struct {
 // framingMarkers lists the protocol errors net/http and its HTTP/2 transport
 // build from response bytes. Each quotes a status line, a status code, a
 // version, a Content-Length, a Transfer-Encoding, a trailer key, a pseudo
-// header, a header name, or the debug data of a GOAWAY frame.
-var framingMarkers = []framingMarker{
-	{text: "malformed HTTP response", keep: true},
-	{text: "malformed HTTP status code", keep: true},
-	{text: "malformed HTTP version", keep: true},
-	{text: "invalid empty Content-Length", keep: true},
-	{text: "bad Content-Length", keep: true},
-	{text: "message cannot contain multiple Content-Length headers", keep: true},
-	{text: "unsupported transfer encoding", keep: true},
-	{text: "too many transfer encodings", keep: true},
-	{text: "invalid Trailer key", keep: true},
-	{text: "bad trailer key", keep: true},
-	{text: "invalid pseudo-header", keep: true},
-	{text: "duplicate pseudo-header", keep: true},
-	{text: "invalid header field name", keep: true, except: "net/http: invalid header"},
-	{text: "invalid header field value for", keep: true, except: "net/http: invalid header"},
-	{text: ", debug=", keep: false},
+// header, a header name, or the debug data of a GOAWAY frame. It is a function
+// so that no package-level state can change the list.
+func framingMarkers() []framingMarker {
+	return []framingMarker{
+		{text: "malformed HTTP response", keep: true},
+		{text: "malformed HTTP status code", keep: true},
+		{text: "malformed HTTP version", keep: true},
+		{text: "invalid empty Content-Length", keep: true},
+		{text: "bad Content-Length", keep: true},
+		{text: "message cannot contain multiple Content-Length headers", keep: true},
+		{text: "unsupported transfer encoding", keep: true},
+		{text: "too many transfer encodings", keep: true},
+		{text: "invalid Trailer key", keep: true},
+		{text: "bad trailer key", keep: true},
+		{text: "invalid pseudo-header", keep: true},
+		{text: "duplicate pseudo-header", keep: true},
+		{text: "invalid header field name", keep: true, except: "net/http: invalid header"},
+		{text: "invalid header field value for", keep: true, except: "net/http: invalid header"},
+		{text: ", debug=", keep: false},
+	}
 }
 
 // FramingError describes a response the transport could not parse. The
@@ -363,7 +366,7 @@ func cleanCause(cause error, from string) error {
 	case strings.Contains(text, malformedHeaderMarker):
 		return &HeaderError{From: from}
 	case strings.Contains(text, unsupportedSchemeMarker) && !permanent.Is(cause):
-		return permanent.Mark(cause)
+		return permanent.Mark(cause) //nolint:wrapcheck // marks cause, so it is the same error
 	}
 
 	kind, found := framingKind(text)
@@ -377,17 +380,17 @@ func cleanCause(cause error, from string) error {
 // framingKind cuts text at the point where a known protocol error starts to
 // quote the server's bytes. It reports false when text holds no such error.
 func framingKind(text string) (string, bool) {
-	for _, marker := range framingMarkers {
-		at := strings.Index(text, marker.text)
-		if at < 0 || (marker.except != "" && strings.Contains(text, marker.except)) {
+	for _, marker := range framingMarkers() {
+		start := strings.Index(text, marker.text)
+		if start < 0 || (marker.except != "" && strings.Contains(text, marker.except)) {
 			continue
 		}
 
 		if marker.keep {
-			at += len(marker.text)
+			start += len(marker.text)
 		}
 
-		return strings.TrimRight(text[:at], " :;,"), true
+		return strings.TrimRight(text[:start], " :;,"), true
 	}
 
 	return "", false

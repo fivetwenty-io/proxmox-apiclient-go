@@ -9,6 +9,7 @@ import (
 
 	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/permanent"
 	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/redirect"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/redirect/redirecttest"
 )
 
 // serverText is the text a hostile server puts in the bytes a protocol error
@@ -19,17 +20,21 @@ const serverText = "http://user:HUNTER2@h/x?ticket=QSECRET#FRAGSECRET"
 // reads a response.
 const brokenConnection = "net/http: HTTP/1.x transport connection broken: "
 
-// TestScrubKeepsTheKindAndDropsTheServersBytes feeds Scrub the messages
-// net/http and its HTTP/2 transport build from response bytes. Each must come
-// back as the kind of fault alone, and must not be marked permanent.
-func TestScrubKeepsTheKindAndDropsTheServersBytes(t *testing.T) {
-	t.Parallel()
+// textError is an error with a fixed message, so a test can build the text
+// net/http would produce.
+type textError struct{ text string }
 
+func (e *textError) Error() string { return e.text }
+
+// framingCase is a message net/http builds and the message Scrub must leave.
+type framingCase struct{ text, want string }
+
+// framingCases returns one message for each kind of protocol error Scrub
+// cleans. Each is the kind of fault, a joiner, and the quoted bytes, with the
+// broken-connection prefix unless the error comes from the HTTP/2 transport.
+func framingCases() map[string]framingCase {
 	quoted := fmt.Sprintf("%q", serverText)
 
-	// Each case is the message net/http builds, which is the kind of fault, a
-	// joiner, and the quoted bytes, with the broken-connection prefix unless the
-	// error comes from the HTTP/2 transport.
 	type fault struct{ prefix, kind, joiner, suffix string }
 
 	faults := map[string]fault{
@@ -55,18 +60,25 @@ func TestScrubKeepsTheKindAndDropsTheServersBytes(t *testing.T) {
 		},
 	}
 
-	cases := make(map[string]struct{ text, want string }, len(faults))
+	cases := make(map[string]framingCase, len(faults))
 	for name, f := range faults {
-		cases[name] = struct{ text, want string }{
-			f.prefix + f.kind + f.joiner + quoted + f.suffix, f.prefix + f.kind,
-		}
+		cases[name] = framingCase{f.prefix + f.kind + f.joiner + quoted + f.suffix, f.prefix + f.kind}
 	}
 
-	for name, tc := range cases {
+	return cases
+}
+
+// TestScrubKeepsTheKindAndDropsTheServersBytes feeds Scrub the messages
+// net/http and its HTTP/2 transport build from response bytes. Each must come
+// back as the kind of fault alone, and must not be marked permanent.
+func TestScrubKeepsTheKindAndDropsTheServersBytes(t *testing.T) {
+	t.Parallel()
+
+	for name, tc := range framingCases() {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			original := &url.Error{Op: "Get", URL: "http://h/api2/json/version", Err: errors.New(tc.text)}
+			original := &url.Error{Op: "Get", URL: "http://h/api2/json/version", Err: &textError{tc.text}}
 			got := redirect.Scrub(original)
 
 			var urlErr *url.Error
@@ -78,7 +90,7 @@ func TestScrubKeepsTheKindAndDropsTheServersBytes(t *testing.T) {
 				t.Errorf("cause = %q, want %q", urlErr.Err.Error(), tc.want)
 			}
 
-			for _, secret := range []string{"HUNTER2", "QSECRET", "FRAGSECRET", "user:"} {
+			for _, secret := range append(redirecttest.Secrets(), "FRAGSECRET") {
 				if strings.Contains(got.Error(), secret) {
 					t.Errorf("%q holds %q", got.Error(), secret)
 				}
@@ -110,7 +122,7 @@ func TestScrubLeavesFaultsThatQuoteNothingFromTheServer(t *testing.T) {
 		brokenConnection + "EOF",
 		"http: server gave HTTP response to HTTPS client",
 	} {
-		cause := errors.New(text)
+		cause := &textError{text}
 
 		got := redirect.Scrub(cause)
 		if !sameError(got, cause) {

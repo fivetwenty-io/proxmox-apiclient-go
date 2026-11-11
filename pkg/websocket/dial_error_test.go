@@ -53,7 +53,12 @@ func garbageServer(t *testing.T) *httptest.Server {
 	t.Helper()
 
 	return httptest.NewServer(http.HandlerFunc(func(respWriter http.ResponseWriter, _ *http.Request) {
-		conn, _, err := respWriter.(http.Hijacker).Hijack()
+		hijacker, ok := respWriter.(http.Hijacker)
+		if !ok {
+			return
+		}
+
+		conn, _, err := hijacker.Hijack()
 		if err != nil {
 			return
 		}

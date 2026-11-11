@@ -16,7 +16,7 @@ import (
 func TestScrubMarksAnUnsupportedSchemePermanent(t *testing.T) {
 	t.Parallel()
 
-	cause := errors.New(`unsupported protocol scheme "ftp"`)
+	cause := &textError{`unsupported protocol scheme "ftp"`}
 	original := &url.Error{Op: "Get", URL: "ftp://h/x?ticket=QSECRET", Err: cause}
 
 	got := redirect.Scrub(original)
