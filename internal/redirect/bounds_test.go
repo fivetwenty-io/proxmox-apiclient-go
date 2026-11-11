@@ -26,7 +26,7 @@ import (
 
 // rawControls are characters that must never reach an error as themselves.
 func rawControls() []string {
-	return []string{"\u001b", "‮", "\u009b", "\n"}
+	return []string{"\u001b", "\u202e", "\u009b", "\n"}
 }
 
 // assertNoRawControls fails when text holds a raw control or direction
@@ -106,7 +106,7 @@ func TestFramingKindIsCapped(t *testing.T) {
 }
 
 // longPath is a redirect target path that percent-encoding triples.
-func longPath() string { return "/" + strings.Repeat("‮", 300_000) }
+func longPath() string { return "/" + strings.Repeat("\u202e", 300_000) }
 
 // maxURLText is the longest URL text a refusal may carry, with its marker.
 const maxURLText = safetext.MaxServerTextBytes + len("...(truncated)")
@@ -230,7 +230,7 @@ func TestScrubEscapesACertificateNameAndKeepsTheChain(t *testing.T) {
 func TestScrubEscapesAndCapsAnyCauseText(t *testing.T) {
 	t.Parallel()
 
-	reason := errors.New("Forbidden ‮EVIL\u009b2J")
+	reason := errors.New("Forbidden \u202eEVIL\u009b2J")
 
 	got := redirect.Scrub(&url.Error{Op: opGet, URL: "https://pve.example/x", Err: reason})
 	assertNoRawControls(t, got.Error())

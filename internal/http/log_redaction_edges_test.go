@@ -109,7 +109,7 @@ func TestLoggedHeaderValuesAreEscapedAndCapped(t *testing.T) {
 	t.Parallel()
 
 	response := "HTTP/1.1 200 OK\r\n" +
-		"Content-Type: text/‮EVILCT\u009b2J\r\n" +
+		"Content-Type: text/\u202eEVILCT\u009b2J\r\n" +
 		"X-Long: " + longHeaderValue() + "\r\n" +
 		"Location: http://h/" + longHeaderValue() + "\r\n" +
 		"Content-Length: 5\r\nConnection: close\r\n\r\nhello"
@@ -128,7 +128,7 @@ func TestLoggedHeaderValuesAreEscapedAndCapped(t *testing.T) {
 	for _, line := range captured.all() {
 		sawContentType = sawContentType || strings.Contains(line, logFieldBodyContentType)
 
-		for _, raw := range []string{"‮", "\u009b"} {
+		for _, raw := range []string{"\u202e", "\u009b"} {
 			if strings.Contains(line, raw) {
 				t.Errorf("log line holds the raw character %q: %.200s", raw, line)
 			}
