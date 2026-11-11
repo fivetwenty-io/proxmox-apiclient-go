@@ -17,7 +17,7 @@ func TestProxyClient_BodyReadErrorLeavesNoServerText(t *testing.T) {
 	server := redirecttest.ServeRaw(t, redirecttest.BadTrailer(`{"data":{}}`))
 
 	client, err := pkgws.NewProxyClient(&pkgws.ProxyConfig{
-		Host: "127.0.0.1", Port: portOf(t, server.Addr), Scheme: testSchemeHTTP, Insecure: true,
+		Host: testLocalhost, Port: portOf(t, server.Addr), Scheme: testSchemeHTTP, Insecure: true,
 		Ticket: testTicket, CSRFToken: testCSRF,
 	})
 	if err != nil {

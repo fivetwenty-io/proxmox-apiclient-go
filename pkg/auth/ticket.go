@@ -149,6 +149,7 @@ func (ta *TicketAuthenticator) Authenticate() error {
 	}
 
 	if result.TFAChallenge != nil {
+		//nolint:wrapcheck // the SDK's own error type, built here and not passed through
 		return apierrors.NewTFARequiredError(
 			result.TFAChallenge.Ticket, result.TFAChallenge.Challenge, result.TFAChallenge.Types,
 		)
@@ -224,6 +225,7 @@ func (ta *TicketAuthenticator) RefreshForce() error {
 	}
 
 	if result.TFAChallenge != nil {
+		//nolint:wrapcheck // the SDK's own error type, built here and not passed through
 		return apierrors.NewTFARequiredError(
 			result.TFAChallenge.Ticket, result.TFAChallenge.Challenge, result.TFAChallenge.Types,
 		)

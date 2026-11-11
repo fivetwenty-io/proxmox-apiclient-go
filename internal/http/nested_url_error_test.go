@@ -12,8 +12,12 @@ import (
 	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/redirect/redirecttest"
 )
 
-// errWrappedReset is the cause the wrapping transport reports.
-var errWrappedReset = errors.New("connection reset by peer")
+var (
+	// errWrappedReset is the cause the wrapping transport reports.
+	errWrappedReset = errors.New("connection reset by peer")
+	// errFirstEndpointDown is the failure the wrapper joins before its own.
+	errFirstEndpointDown = errors.New("first endpoint down")
+)
 
 // urlErrorWrapper is a transport wrapper that sends through an inner client of
 // its own and returns that client's *url.Error behind its own words, with the
@@ -23,7 +27,7 @@ type urlErrorWrapper struct{ join bool }
 func (w urlErrorWrapper) RoundTrip(req *http.Request) (*http.Response, error) {
 	inner := &url.Error{Op: "Get", URL: req.URL.String(), Err: errWrappedReset}
 	if w.join {
-		return nil, errors.Join(errors.New("first endpoint down"), inner)
+		return nil, errors.Join(errFirstEndpointDown, inner)
 	}
 
 	return nil, fmt.Errorf("attempt 2 of 2: %w", inner)
@@ -45,7 +49,7 @@ func TestWrappedURLErrorLeavesNoQuerySecret(t *testing.T) {
 			}, false)
 			client.SetMaxRetries(0)
 
-			params := map[string]interface{}{"password": "QUERYSECRET", "server": "x"}
+			params := map[string]interface{}{redactParamPassword: "QUERYSECRET", "domain": "x"}
 
 			_, err := client.DoWithContext(context.Background(), http.MethodGet, "/nodes/n/scan/cifs", params)
 			if err == nil {

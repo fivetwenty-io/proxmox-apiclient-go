@@ -37,7 +37,7 @@ func TestLoggedBodyRedactsTheSecretOfEveryTokenCreateShape(t *testing.T) {
 	t.Parallel()
 
 	bodies := map[string]string{
-		"pve":           `{"data":{"full-tokenid":"root@pam!x","info":{"privsep":1},"value":"PVETOKENSECRET"}}`,
+		"pve token":     `{"data":{"full-tokenid":"root@pam!x","info":{"privsep":1},"value":"PVETOKENSECRET"}}`,
 		"pbs and pdm":   `{"data":{"tokenid":"root@pam!x","value":"PBSTOKENSECRET"}}`,
 		"upper case":    `{"data":{"TokenID":"root@pam!x","Value":"CASETOKENSECRET"}}`,
 		"pending entry": `{"data":[{"key":"cipassword","value":"PENDINGSECRET"}]}`,

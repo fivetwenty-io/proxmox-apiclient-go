@@ -41,6 +41,19 @@ func assertNoRawControls(t *testing.T, text string) {
 	}
 }
 
+// hostileTarget is the request URL the cause tests name.
+const hostileTarget = "https://pve.example/x"
+
+var (
+	// errConnRefused is an ordinary transport cause.
+	errConnRefused = errors.New("connection refused")
+	// errForbiddenReason is a proxy reason phrase with a direction override and
+	// a C1 control in it.
+	errForbiddenReason = errors.New("forbidden \u202eEVIL\u009b2J")
+	// errLongCause is a cause 100,000 bytes long.
+	errLongCause = errors.New(strings.Repeat("B", 100_000))
+)
+
 // TestFramingKindStopsAtTheEarliestMarker builds protocol errors whose quoted
 // bytes hold a second marker phrase. The kind must end at the marker that
 // comes first in the text, not at the one listed first, so none of the
@@ -171,7 +184,7 @@ func TestRefusePolicyBoundsBothURLs(t *testing.T) {
 func TestScrubBoundsTheURLOfAURLError(t *testing.T) {
 	t.Parallel()
 
-	got := redirect.Scrub(&url.Error{Op: opGet, URL: "http://h" + longPath(), Err: errors.New("connection refused")})
+	got := redirect.Scrub(&url.Error{Op: opGet, URL: "http://h" + longPath(), Err: errConnRefused})
 
 	var urlErr *url.Error
 	if !errors.As(got, &urlErr) || len(urlErr.URL) > maxURLText {
@@ -197,8 +210,8 @@ func TestScrubEscapesACertificateNameAndKeepsTheChain(t *testing.T) {
 	}
 
 	for shape, input := range map[string]error{
-		"bare":      cause,
-		"url error": &url.Error{Op: opGet, URL: "https://pve.example/x", Err: cause},
+		"bare cause": cause,
+		"url error":  &url.Error{Op: opGet, URL: hostileTarget, Err: cause},
 	} {
 		got := redirect.Scrub(input)
 		assertNoRawControls(t, got.Error())
@@ -230,23 +243,19 @@ func TestScrubEscapesACertificateNameAndKeepsTheChain(t *testing.T) {
 func TestScrubEscapesAndCapsAnyCauseText(t *testing.T) {
 	t.Parallel()
 
-	reason := errors.New("Forbidden \u202eEVIL\u009b2J")
-
-	got := redirect.Scrub(&url.Error{Op: opGet, URL: "https://pve.example/x", Err: reason})
+	got := redirect.Scrub(&url.Error{Op: opGet, URL: hostileTarget, Err: errForbiddenReason})
 	assertNoRawControls(t, got.Error())
 
-	if !errors.Is(got, reason) {
+	if !errors.Is(got, errForbiddenReason) {
 		t.Errorf("Scrub lost the cause from %v", got)
 	}
 
-	long := errors.New(strings.Repeat("B", 100_000))
-
-	got = redirect.Scrub(&url.Error{Op: opGet, URL: "https://pve.example/x", Err: long})
+	got = redirect.Scrub(&url.Error{Op: opGet, URL: hostileTarget, Err: errLongCause})
 	if limit := safetext.MaxErrorTextBytes + 4*safetext.MaxServerTextBytes; len(got.Error()) > limit {
 		t.Errorf("error is %d bytes, want at most %d", len(got.Error()), limit)
 	}
 
-	if !errors.Is(got, long) {
+	if !errors.Is(got, errLongCause) {
 		t.Errorf("Scrub lost the long cause from %v", got)
 	}
 }
@@ -308,7 +317,10 @@ func TestHostileCertificateNameOverTheWire(t *testing.T) {
 			}
 
 			go func(conn net.Conn) {
-				_ = conn.(*tls.Conn).HandshakeContext(context.Background())
+				if tlsConn, ok := conn.(*tls.Conn); ok {
+					_ = tlsConn.HandshakeContext(context.Background())
+				}
+
 				_ = conn.Close()
 			}(conn)
 		}
@@ -342,12 +354,12 @@ func TestHostileCertificateNameOverTheWire(t *testing.T) {
 	}
 }
 
-// hostileTimeout is a timeout whose text holds an escape sequence.
-type hostileTimeout struct{}
+// hostileTimeoutError is a timeout whose text holds an escape sequence.
+type hostileTimeoutError struct{}
 
-func (hostileTimeout) Error() string   { return "i/o timeout reading from evil\u001b[2J" }
-func (hostileTimeout) Timeout() bool   { return true }
-func (hostileTimeout) Temporary() bool { return true }
+func (hostileTimeoutError) Error() string   { return "i/o timeout reading from evil\u001b[2J" }
+func (hostileTimeoutError) Timeout() bool   { return true }
+func (hostileTimeoutError) Temporary() bool { return true }
 
 // TestScrubKeepsTheTimeoutOfAnEscapedCause checks that a *url.Error whose cause
 // had its text escaped still reports a timeout. A *url.Error asks its direct
@@ -356,10 +368,10 @@ func TestScrubKeepsTheTimeoutOfAnEscapedCause(t *testing.T) {
 	t.Parallel()
 
 	for shape, cause := range map[string]error{
-		"bare":   hostileTimeout{},
-		"nested": &url.Error{Op: opGet, URL: secretURL, Err: hostileTimeout{}},
+		"bare cause": hostileTimeoutError{},
+		"nested":     &url.Error{Op: opGet, URL: secretURL, Err: hostileTimeoutError{}},
 	} {
-		got := redirect.Scrub(&url.Error{Op: opGet, URL: "https://pve.example/x", Err: cause})
+		got := redirect.Scrub(&url.Error{Op: opGet, URL: hostileTarget, Err: cause})
 		assertNoRawControls(t, got.Error())
 
 		var netErr net.Error
