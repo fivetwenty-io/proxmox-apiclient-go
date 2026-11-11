@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"net/url"
+	"sort"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -42,8 +44,24 @@ const (
 	dataMember = "data"
 
 	// redactedHeaderValueBytes is the most bytes of escaped text a log line
-	// keeps from one response header value or the content type.
+	// keeps from one response header name or value, or from the content type.
 	redactedHeaderValueBytes = safetext.MaxServerTextBytes
+
+	// maxLoggedHeaderValues is the most values of one response header a log
+	// line keeps. A header can repeat as often as the transport's header limit
+	// allows.
+	maxLoggedHeaderValues = 16
+
+	// maxLoggedHeaderBytes is the most bytes of header names and values the
+	// resp_headers field holds, which is the transport's header limit cut
+	// down to what a debug log line is worth. It holds one header with every
+	// value it may keep, at the longest each value may be, with room to spare.
+	maxLoggedHeaderBytes = 32 * 1024
+
+	// droppedHeadersField counts the response headers left out of the
+	// resp_headers field. Parentheses cannot appear in a header name, so no
+	// header the server sends can take this name.
+	droppedHeadersField = "(dropped headers)"
 
 	// maxRedactBodyBytes is the largest body the redactor parses. A larger
 	// body is logged by its length and content type, because decoding and
@@ -378,30 +396,90 @@ func isPairedValue(lower string) bool {
 // credential headers are replaced, the value of Location and Content-Location
 // goes through the same URL redaction as the url field, and every other value
 // has control and text direction characters escaped, because a server chose it.
-// Each value is cut at redactedHeaderValueBytes, so a server cannot fill a log
-// line with one long header.
+//
+// The server also chose how many headers there are, how long their names are,
+// and how often each repeats, so each name and each value is cut at
+// redactedHeaderValueBytes, a header keeps at most maxLoggedHeaderValues
+// values, and the field holds at most maxLoggedHeaderBytes of names and values.
+// Headers are taken in the order of their names, and those that no longer fit
+// are counted under droppedHeadersField.
 func redactResponseHeaders(header map[string][]string, cfg LogConfig) map[string]interface{} {
-	out := redact(header, cfg.RedactHeaders, alwaysRedactedHeaders()...)
+	redacted := redact(header, cfg.RedactHeaders, alwaysRedactedHeaders()...)
 
-	for key, value := range out {
-		values, ok := value.([]string)
-		if !ok {
+	names := make([]string, 0, len(redacted))
+	for name := range redacted {
+		names = append(names, name)
+	}
+
+	sort.Strings(names)
+
+	out := make(map[string]interface{}, len(names))
+	budget := maxLoggedHeaderBytes
+	dropped := 0
+
+	for _, name := range names {
+		logged := safetext.Capped(name, redactedHeaderValueBytes)
+		value, size := loggedHeaderValue(name, redacted[name], cfg)
+		size += len(logged)
+
+		// Two long names can share the part that survives the cut. The first
+		// one keeps the field, and the other is counted as dropped.
+		if _, taken := out[logged]; taken || size > budget {
+			dropped++
+
 			continue
 		}
 
-		lower := strings.ToLower(key)
-		isURL := lower == headerLocation || lower == headerContentLocation
+		budget -= size
+		out[logged] = value
+	}
 
-		for i, text := range values {
-			if isURL {
-				values[i] = redactedLocation(text, cfg)
-			} else {
-				values[i] = safetext.Capped(text, redactedHeaderValueBytes)
-			}
-		}
+	if dropped > 0 {
+		out[droppedHeadersField] = dropped
 	}
 
 	return out
+}
+
+// loggedHeaderValue returns what a log line shows for the values of the header
+// name, and how many bytes of text that holds. A redacted header stays
+// redacted. Otherwise each value is redacted or escaped and cut, and values
+// past maxLoggedHeaderValues are replaced by one entry that counts them.
+func loggedHeaderValue(name string, value interface{}, cfg LogConfig) (interface{}, int) {
+	values, ok := value.([]string)
+	if !ok {
+		return value, len(redactedValue)
+	}
+
+	lower := strings.ToLower(name)
+	isURL := lower == headerLocation || lower == headerContentLocation
+
+	kept := values
+	if len(kept) > maxLoggedHeaderValues {
+		kept = kept[:maxLoggedHeaderValues]
+	}
+
+	out := make([]string, 0, len(kept)+1)
+	size := 0
+
+	for _, text := range kept {
+		if isURL {
+			text = redactedLocation(text, cfg)
+		} else {
+			text = safetext.Capped(text, redactedHeaderValueBytes)
+		}
+
+		out = append(out, text)
+		size += len(text)
+	}
+
+	if more := len(values) - len(kept); more > 0 {
+		marker := "...(" + strconv.Itoa(more) + " more values)"
+		out = append(out, marker)
+		size += len(marker)
+	}
+
+	return out, size
 }
 
 // redactedLocation renders the value of a Location header like the url field. A
