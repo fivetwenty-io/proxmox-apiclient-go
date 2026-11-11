@@ -185,6 +185,24 @@ func TestRedirect_FollowRedirectsStopsAtTheLimit(t *testing.T) {
 	}
 }
 
+// TestRedirect_FollowRedirectsFollowsToAnotherPort checks the policy follows to
+// any port, which the same-origin policy refuses, and still stops at its limit.
+func TestRedirect_FollowRedirectsFollowsToAnotherPort(t *testing.T) {
+	t.Parallel()
+
+	front, frontHits, targetHits := redirectServers(t)
+	cli := newRedirectClient(t, front, func(o *pve.Options) { o.CheckRedirect = pve.FollowRedirects(1) })
+
+	_, err := cli.GetCtx(retryingContext(), "/version", nil)
+	if err != nil {
+		t.Fatalf("redirect to another port failed: %v", err)
+	}
+
+	if targetHits.Load() != 1 || frontHits.Load() != 1 {
+		t.Errorf("target read %d, front read %d, want 1 and 1", targetHits.Load(), frontHits.Load())
+	}
+}
+
 // TestRedirect_FollowSameOrigin follows a redirect within the origin and
 // refuses one to another port.
 func TestRedirect_FollowSameOrigin(t *testing.T) {
