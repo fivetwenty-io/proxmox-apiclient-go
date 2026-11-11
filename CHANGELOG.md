@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-- The log redaction now hides the secret of an API token that Proxmox Backup Server or Proxmox Datacenter Manager creates or regenerates. Those replies name the token with `tokenid` where PVE uses `full-tokenid`, so their `value` member reached the log in plain text. A member named `value` is now redacted whenever an object it sits in has a member whose name is a secret name, which also covers a pending configuration entry such as `{"key":"cipassword","value":...}`. A `value` member with no such sibling is still logged.
+- The log redaction now hides the secret of an API token that Proxmox Backup Server or Proxmox Datacenter Manager creates or regenerates. Those replies name the token with `tokenid` where PVE uses `full-tokenid`, so their `value` member reached the log in plain text. A member named `value` is now redacted whenever an object it sits in has a member whose name is a secret name, which also covers a pending configuration entry such as `{"key":"cipassword","value":...}`. The `pending` member of such an entry, which holds a change not yet applied, is redacted by the same rule, so the pending configuration of a VM, a container, or a cloud-init drive no longer logs a new password either. A `value` or `pending` member with no such sibling is still logged.
 - A string member named `data` is now redacted at any depth of a logged body, and not only at the top. The reply to a read of an ACME DNS plugin holds the provider's credentials in such a string one level down, alone or inside a list, and it used to reach the log as sent.
 - The content type that a log line gives for a body it does not parse, and every value in the `resp_headers` field, are now escaped and cut at 1 KiB. A server used to be able to put a direction override or a control character into the content type, and to put close to the transport's whole header limit into every debug log line through one long header.
 - An error from reading a response body now goes through the same cleaner as an error from sending the request. A chunked reply with a malformed trailer line used to put that line, with any control characters and secrets in it, into the error the client returned, and into the errors from the login and second-factor decoders, the response parser, the WebSocket proxy, and the batch executor. That error is now a permanent `HeaderError` that does not quote the line, and the words each caller wraps around it stay the same.
@@ -531,7 +531,7 @@ previously mis-generated symbols, which carried no usable data:
 
 - `Storage().DeleteVolumeIfExists(ctx, node, storage, volume) (existed, err)` — deletes a volume and reports whether it was present; returns `(false, nil)` on 404, `(true, nil)` on success, and a wrapped error on any other failure. Distinct from `DeleteVolume`, which silently swallows 404.
 
-## [Unreleased] — 2026-05-18
+## [v3.1.0] — 2026-05-18
 
 ### Fixed
 
