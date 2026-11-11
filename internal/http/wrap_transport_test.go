@@ -1071,7 +1071,9 @@ func TestClose_ClosesBaseIdleConnectionsBehindRoundTripOnlyWrapper(t *testing.T)
 		t.Fatalf("NewClient: %v", err)
 	}
 
-	if _, hasClose := redirect.Unwrap(client.httpClient.Load().Transport).(interface{ CloseIdleConnections() }); hasClose {
+	base := redirect.Unwrap(client.httpClient.Load().Transport)
+
+	if _, hasClose := base.(interface{ CloseIdleConnections() }); hasClose {
 		t.Fatal("the wrapper must implement only RoundTrip for this test")
 	}
 

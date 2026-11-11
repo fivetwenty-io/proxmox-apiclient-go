@@ -52,7 +52,9 @@ func FollowSameOrigin(maxRedirects int) func(req *http.Request, via []*http.Requ
 // same reason. errors.Is and errors.As still reach err. A nil err stays nil.
 // An error type with a Permanent() bool method that returns true is treated the
 // same way.
-func Permanent(err error) error { return pvehttp.Permanent(err) } //nolint:wrapcheck // marks err, so it is the same error
+//
+//nolint:wrapcheck // marks err, so it is the same error
+func Permanent(err error) error { return pvehttp.Permanent(err) }
 
 // IsPermanent reports whether err carries the permanent marker.
 func IsPermanent(err error) bool { return pvehttp.IsPermanent(err) }

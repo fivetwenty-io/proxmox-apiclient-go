@@ -187,7 +187,8 @@ func TestTransportErrorsLeaveNoRequestSecrets(t *testing.T) {
 
 	paths := map[string]func(*Client) error{
 		"get": func(c *Client) error {
-			_, err := c.DoWithContext(context.Background(), http.MethodGet, "/version?ticket="+redirecttest.SecretQuery, nil)
+			path := "/version?ticket=" + redirecttest.SecretQuery
+			_, err := c.DoWithContext(context.Background(), http.MethodGet, path, nil)
 
 			return err
 		},

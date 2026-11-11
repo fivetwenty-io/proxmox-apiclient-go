@@ -24,7 +24,8 @@ func TestHostileResponsesLeaveNoSecretInABatchResponse(t *testing.T) {
 			server := redirecttest.Serve(t, http.StatusFound, hostile.Location)
 
 			cfg := &batch.Config{
-				MaxBatchSize: 1, MaxConcurrency: 1, Timeout: 10 * time.Second, RetryFailedRequests: false, MaxRetries: 0,
+				MaxBatchSize: 1, MaxConcurrency: 1, Timeout: 10 * time.Second,
+				RetryFailedRequests: false, MaxRetries: 0,
 			}
 			batchInstance := batch.New(cfg)
 

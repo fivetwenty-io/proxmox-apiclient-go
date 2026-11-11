@@ -108,7 +108,8 @@ func TestProxyClient_RefusesARedirectWithoutALocation(t *testing.T) {
 	server := redirecttest.Serve(t, http.StatusFound, nil)
 
 	client, err := pkgws.NewProxyClient(&pkgws.ProxyConfig{
-		Host: "127.0.0.1", Port: portOf(t, server.Addr), Scheme: testSchemeHTTP, Ticket: testTicket, CSRFToken: testCSRF,
+		Host: "127.0.0.1", Port: portOf(t, server.Addr), Scheme: testSchemeHTTP,
+		Ticket: testTicket, CSRFToken: testCSRF,
 	})
 	if err != nil {
 		t.Fatalf("NewProxyClient: %v", err)
