@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -982,5 +983,53 @@ func TestVMVNCProxy_ConnectionRefused(t *testing.T) {
 	_, err := client.VMVNCProxy(context.Background(), testHost, 100)
 	if err == nil {
 		t.Fatal("expected connection refused error")
+	}
+}
+
+// --- redirect refusal ---
+
+// TestProxyClient_RefusesRedirect checks that the ticket POST sent when no
+// HTTPClient is configured does not follow a redirect to another port of the
+// host. Go would send the ticket cookie, the CSRF token, and the form body
+// there, so the target must read nothing.
+func TestProxyClient_RefusesRedirect(t *testing.T) {
+	t.Parallel()
+
+	var targetHits, frontHits atomic.Int32
+
+	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		targetHits.Add(1)
+	}))
+	defer target.Close()
+
+	front := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		frontHits.Add(1)
+		secretTarget := strings.Replace(target.URL, "http://", "http://user:HUNTER2@", 1) + "/x?ticket=QSECRET"
+		w.Header().Set("Location", secretTarget)
+		w.WriteHeader(http.StatusTemporaryRedirect)
+	}))
+	defer front.Close()
+
+	client := proxyClientFor(t, front)
+
+	_, err := client.NodeTermProxy(context.Background(), "pve1")
+	if err == nil {
+		t.Fatal("NodeTermProxy followed a redirect, want it refused")
+	}
+
+	if !strings.Contains(err.Error(), "redirect refused") {
+		t.Errorf("error = %v, want a redirect refusal", err)
+	}
+
+	if strings.Contains(err.Error(), "HUNTER2") || strings.Contains(err.Error(), "QSECRET") {
+		t.Errorf("error %q holds credentials from the Location header", err.Error())
+	}
+
+	if got := targetHits.Load(); got != 0 {
+		t.Errorf("redirect target read %d requests, want 0", got)
+	}
+
+	if got := frontHits.Load(); got != 1 {
+		t.Errorf("front listener read %d requests, want 1", got)
 	}
 }

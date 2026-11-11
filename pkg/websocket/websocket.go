@@ -315,7 +315,11 @@ func (c *Client) Connect(ctx context.Context) error {
 	return nil
 }
 
-// ConnectWithRetry connects with automatic retry on failure.
+// ConnectWithRetry connects with automatic retry on failure. It retries every
+// error Connect returns, and does not look for the permanent marker the HTTP
+// client honors. Config has no hook through which a caller could supply such an
+// error, because the dialer is built from Config alone, and the dialer never
+// follows a redirect, so no ticket or token can reach a redirect target here.
 func (c *Client) ConnectWithRetry(ctx context.Context) error {
 	attempts := 0
 

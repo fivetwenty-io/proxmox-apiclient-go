@@ -15,6 +15,8 @@ import (
 	"strings"
 
 	"github.com/gorilla/websocket"
+
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/redirect"
 )
 
 // Errors returned by proxy operations.
@@ -563,7 +565,7 @@ func (p *ProxyClient) directHTTPPost(
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("POST %s: %w", apiPath, err)
+		return nil, fmt.Errorf("POST %s: %w", apiPath, redirect.Scrub(err))
 	}
 
 	defer func() { _ = resp.Body.Close() }()
@@ -596,7 +598,10 @@ func (p *ProxyClient) buildHTTPClient() *http.Client {
 
 	transport := &http.Transport{TLSClientConfig: tlsCfg}
 
-	return &http.Client{Transport: transport}
+	// Refuse every redirect: the request carries the ticket cookie, the CSRF
+	// token, and the form body, and Go keeps all three when a redirect changes
+	// only the port or the scheme of the host.
+	return &http.Client{Transport: transport, CheckRedirect: redirect.Refuse}
 }
 
 // dialVNCWebSocket opens a WebSocket at apiPath with vncticket and port query params.

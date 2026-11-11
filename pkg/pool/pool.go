@@ -41,6 +41,7 @@ import (
 	"time"
 
 	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/constants"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/redirect"
 )
 
 var (
@@ -69,6 +70,17 @@ type Config struct {
 
 	// EnableHTTP2 enables HTTP/2 support.
 	EnableHTTP2 bool
+
+	// CheckRedirect decides what the shared client does with a redirect, with
+	// the meaning of http.Client.CheckRedirect. Nil (default) refuses every
+	// redirect with an error that matches errors.Is against the redirect
+	// refusal the main client returns, because Go's own policy keeps the
+	// Authorization and Cookie headers a caller put on a request when a
+	// redirect changes only the port or the scheme of the host. A function
+	// that returns nil for every request follows without limit, so a caller
+	// who opts in should count len(via) and compare the target's scheme and
+	// host with the request's.
+	CheckRedirect func(req *http.Request, via []*http.Request) error
 }
 
 // DefaultConfig returns the default pool configuration.
@@ -80,6 +92,7 @@ func DefaultConfig() *Config {
 		ConnectionTimeout:     constants.DefaultClientTimeout(),
 		MaxIdleTime:           constants.MaxIdleTimeout(),
 		EnableHTTP2:           true,
+		CheckRedirect:         nil,
 	}
 }
 
@@ -162,7 +175,7 @@ func New(config *Config) *Pool {
 		transport: transport,
 		client: &http.Client{
 			Transport:     transport,
-			CheckRedirect: nil,
+			CheckRedirect: redirect.Wrap(own.CheckRedirect),
 			Jar:           nil,
 			Timeout:       own.ConnectionTimeout,
 		},
@@ -278,7 +291,7 @@ func (p *Pool) DoWithContext(ctx context.Context, req *http.Request) (*http.Resp
 		p.stats.FailedConnections++
 		p.stats.mu.Unlock()
 
-		return nil, fmt.Errorf("failed to execute HTTP request: %w", err)
+		return nil, fmt.Errorf("failed to execute HTTP request: %w", redirect.Scrub(err))
 	}
 
 	// Track response
