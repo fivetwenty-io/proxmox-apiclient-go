@@ -1034,3 +1034,32 @@ func TestProxyClient_RefusesRedirect(t *testing.T) {
 		t.Errorf("front listener read %d requests, want 1", got)
 	}
 }
+
+// TestProxyClient_HidesAnUnparseableLocation checks that a Location header that
+// does not parse is reported as a redirect refusal without the raw header.
+func TestProxyClient_HidesAnUnparseableLocation(t *testing.T) {
+	t.Parallel()
+
+	front := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Location", "http://user:HUNTER2@127.0.0.1:abc/x?ticket=QSECRET#frag")
+		w.WriteHeader(http.StatusTemporaryRedirect)
+	}))
+	defer front.Close()
+
+	client := proxyClientFor(t, front)
+
+	_, err := client.NodeTermProxy(context.Background(), "pve1")
+	if err == nil {
+		t.Fatal("NodeTermProxy followed a redirect, want it refused")
+	}
+
+	if !strings.Contains(err.Error(), "redirect refused") {
+		t.Errorf("error = %v, want a redirect refusal", err)
+	}
+
+	for _, secret := range []string{"HUNTER2", "QSECRET", "frag", "user:"} {
+		if strings.Contains(err.Error(), secret) {
+			t.Errorf("error %q holds %q from the Location header", err.Error(), secret)
+		}
+	}
+}

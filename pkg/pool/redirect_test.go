@@ -111,3 +111,34 @@ func TestPoolCheckRedirectOptsIn(t *testing.T) {
 		t.Errorf("redirect target read %d requests, want 1", got)
 	}
 }
+
+// TestPoolHidesAnUnparseableLocation checks a redirect whose Location header
+// does not parse. net/http quotes the raw header in that error, so the pool
+// must return a refusal that names no credential.
+func TestPoolHidesAnUnparseableLocation(t *testing.T) {
+	t.Parallel()
+
+	var hits atomic.Int32
+
+	front := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Location", "http://user:HUNTER2@127.0.0.1:abc/x?ticket=QSECRET#frag")
+		w.WriteHeader(http.StatusTemporaryRedirect)
+	}))
+	t.Cleanup(front.Close)
+
+	poolInstance := pool.New(nil)
+
+	t.Cleanup(func() { _ = poolInstance.Close() })
+
+	err := getWithToken(t, context.Background(), poolInstance, front.URL)
+	if !errors.Is(err, pve.ErrRedirectRefused) || !pve.IsPermanent(err) {
+		t.Fatalf("error = %v, want a permanent pve.ErrRedirectRefused", err)
+	}
+
+	for _, secret := range []string{"HUNTER2", "QSECRET", "frag", "user:"} {
+		if strings.Contains(err.Error(), secret) {
+			t.Errorf("error %q holds %q from the Location header", err.Error(), secret)
+		}
+	}
+}

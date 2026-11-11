@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/redirect"
 	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/auth"
 	apierrors "github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/errors"
 )
@@ -151,6 +152,144 @@ func TestRedirectErrorHidesTheLocationCredentials(t *testing.T) {
 	})
 }
 
+// unparseableLocations returns Location values that net/http cannot parse, each
+// with a password, a query secret, and a fragment secret, in the three places
+// a parse can fail, which are the port, a percent escape, and an IPv6 bracket.
+func unparseableLocations() map[string]func(first, target string) string {
+	return map[string]func(first, target string) string{
+		"invalid port": func(_, _ string) string {
+			return "http://user:" + locationSecretUser + "@127.0.0.1:abc/x?ticket=" + locationSecretQuery +
+				"#" + locationSecretFrag
+		},
+		"bad escape": func(_, target string) string {
+			return strings.Replace(target, "http://", "http://user:"+locationSecretUser+"@", 1) +
+				"/%zz?ticket=" + locationSecretQuery + "#" + locationSecretFrag
+		},
+		"open bracket": func(_, _ string) string {
+			return "http://user:" + locationSecretUser + "@[::1/x?ticket=" + locationSecretQuery +
+				"#" + locationSecretFrag
+		},
+	}
+}
+
+// TestUnparseableLocationIsARefusalThatHidesTheHeader checks a Location value
+// that does not parse. net/http quotes the whole raw header in that error, so
+// the client must replace it with a permanent refusal, for every redirect
+// status, and attempt the request once.
+func TestUnparseableLocationIsARefusalThatHidesTheHeader(t *testing.T) {
+	t.Parallel()
+
+	statuses := []int{
+		http.StatusMovedPermanently, http.StatusFound, http.StatusSeeOther,
+		http.StatusTemporaryRedirect, http.StatusPermanentRedirect,
+	}
+
+	for name, locate := range unparseableLocations() {
+		for _, status := range statuses {
+			t.Run(name+"/"+strconv.Itoa(status), func(t *testing.T) {
+				t.Parallel()
+
+				rig := newRedirectRigTo(t, status, locate, nil)
+				err := rig.do(http.MethodGet)
+
+				if !errors.Is(err, ErrRedirectRefused) {
+					t.Fatalf("error = %v, want ErrRedirectRefused", err)
+				}
+
+				if !IsPermanent(err) {
+					t.Errorf("error = %v, want the permanent marker", err)
+				}
+
+				assertNoLocationSecrets(t, err)
+
+				if strings.Contains(err.Error(), "failed to parse") {
+					t.Errorf("error %q still carries the net/http parse failure", err.Error())
+				}
+
+				if got := rig.attempts.Load(); got != 1 {
+					t.Errorf("attempts = %d, want 1", got)
+				}
+
+				if got := rig.firstHits.Load(); got != 1 {
+					t.Errorf("first listener read %d requests, want 1", got)
+				}
+			})
+		}
+	}
+}
+
+// TestUnparseableLocationOnAPostAndAPolicyThatFollows covers the two paths the
+// default GET case does not. A POST never retries, and a policy that follows
+// every redirect never sees a Location header that does not parse.
+func TestUnparseableLocationOnAPostAndAPolicyThatFollows(t *testing.T) {
+	t.Parallel()
+
+	locate := unparseableLocations()["invalid port"]
+
+	t.Run("post", func(t *testing.T) {
+		t.Parallel()
+
+		rig := newRedirectRigTo(t, http.StatusTemporaryRedirect, locate, nil)
+		err := rig.do(http.MethodPost)
+
+		if !errors.Is(err, ErrRedirectRefused) {
+			t.Fatalf("error = %v, want ErrRedirectRefused", err)
+		}
+
+		assertNoLocationSecrets(t, err)
+	})
+
+	t.Run("following policy", func(t *testing.T) {
+		t.Parallel()
+
+		rig := newRedirectRigTo(t, http.StatusFound, locate, func(o *Options) {
+			o.CheckRedirect = redirect.Follow(2)
+		})
+		err := rig.do(http.MethodGet)
+
+		if !errors.Is(err, ErrRedirectRefused) || !IsPermanent(err) {
+			t.Fatalf("error = %v, want a permanent ErrRedirectRefused", err)
+		}
+
+		assertNoLocationSecrets(t, err)
+
+		if got := rig.attempts.Load(); got != 1 {
+			t.Errorf("attempts = %d, want 1", got)
+		}
+	})
+}
+
+// TestTicketRequestsHideAnUnparseableLocation checks login, renewal, TFA, and
+// logout, which send through the authenticator's own client.
+func TestTicketRequestsHideAnUnparseableLocation(t *testing.T) {
+	t.Parallel()
+
+	validTicket := &auth.Ticket{
+		Value: "PVE:root@pam:ticket", CSRFToken: "csrf", Username: testUsername,
+		ValidUntil: time.Now().Add(time.Hour),
+	}
+
+	steps := map[string]func(rig *ticketRedirectRig) error{
+		"login":   func(rig *ticketRedirectRig) error { return rig.ticketAuth.Authenticate() },
+		"renewal": func(rig *ticketRedirectRig) error { return rig.ticketAuth.RefreshForce() },
+		"logout": func(rig *ticketRedirectRig) error {
+			rig.ticketAuth.SetTicket(validTicket)
+
+			return rig.ticketAuth.Logout()
+		},
+	}
+
+	for name, step := range steps {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			rig := newTicketRedirectRigTo(t, http.StatusTemporaryRedirect, unparseableLocations()["invalid port"])
+
+			rig.assertRefused(t, step(rig))
+		})
+	}
+}
+
 // TestRedirectUseLastResponseStillWorks checks the caller's policy may return
 // http.ErrUseLastResponse, which net/http compares by identity, so the policy
 // wrapper must pass it through unwrapped.
@@ -204,6 +343,14 @@ type ticketRedirectRig struct {
 func newTicketRedirectRig(t *testing.T, status int) *ticketRedirectRig {
 	t.Helper()
 
+	return newTicketRedirectRigTo(t, status, secretLocation)
+}
+
+// newTicketRedirectRigTo builds the rig with the Location header set by
+// locate, which receives the target's base URL.
+func newTicketRedirectRigTo(t *testing.T, status int, locate func(first, target string) string) *ticketRedirectRig {
+	t.Helper()
+
 	rig := &ticketRedirectRig{}
 
 	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
@@ -213,7 +360,7 @@ func newTicketRedirectRig(t *testing.T, status int) *ticketRedirectRig {
 
 	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		rig.firstHits.Add(1)
-		w.Header().Set("Location", secretLocation("", target.URL))
+		w.Header().Set("Location", locate("", target.URL))
 		w.WriteHeader(status)
 	}))
 	t.Cleanup(first.Close)

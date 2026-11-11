@@ -34,12 +34,20 @@ type Error struct {
 	From string
 
 	// To is the URL the server asked for, without user information, query, or
-	// fragment.
+	// fragment. It is empty when the Location header could not be parsed.
 	To string
+
+	// unparsed is set when the server answered with a redirect whose Location
+	// header is not a valid URL, so there is no target to name.
+	unparsed bool
 }
 
 // Error names the redirect target without any credential.
 func (e *Error) Error() string {
+	if e.unparsed {
+		return fmt.Sprintf("redirect refused: %s answered with a Location header that is not a valid URL", e.From)
+	}
+
 	return fmt.Sprintf("redirect refused: %s answered %d and asked for %s", e.From, e.Status, e.To)
 }
 
@@ -182,12 +190,21 @@ func Wrap(policy Policy) Policy {
 	}
 }
 
-// Scrub cleans the error http.Client.Do returns when a redirect policy failed.
+// unparsedLocationPrefix starts the message net/http gives the error it
+// returns when the Location header of a redirect does not parse. The message
+// quotes the whole raw header, with its user information, query, and fragment.
+const unparsedLocationPrefix = "failed to parse Location header"
+
+// Scrub cleans the error http.Client.Do returns when a redirect policy failed
+// or when the server sent a Location header that does not parse.
 // net/http wraps that failure in a *url.Error and then overwrites the error's
 // URL with the raw Location header the server sent, which can hold user
 // information, a query, and a fragment. Scrub rebuilds the *url.Error with the
-// URL reduced to scheme, host, and path. Any other error, including a
-// *url.Error from the transport, comes back unchanged.
+// URL reduced to scheme, host, and path. A Location header that does not parse
+// becomes an *Error that names only the requested URL, because nothing in the
+// header text can be trusted to hold no credential, and the request is not
+// followed, so the error is permanent like any other refusal. Any other error,
+// including a *url.Error from the transport, comes back unchanged.
 func Scrub(err error) error {
 	var urlErr *url.Error
 	if !errors.As(err, &urlErr) || !sameError(err, urlErr) {
@@ -200,8 +217,20 @@ func Scrub(err error) error {
 	)
 
 	if !errors.As(urlErr.Err, &policy) && !errors.As(urlErr.Err, &refusal) {
-		return err
+		return scrubUnparsedLocation(urlErr, err)
 	}
 
 	return &url.Error{Op: urlErr.Op, URL: RedactRaw(urlErr.URL), Err: urlErr.Err}
+}
+
+// scrubUnparsedLocation replaces the error net/http returns for a Location
+// header that does not parse, and returns original for any other error.
+func scrubUnparsedLocation(urlErr *url.Error, original error) error {
+	if urlErr.Err == nil || !strings.HasPrefix(urlErr.Err.Error(), unparsedLocationPrefix) {
+		return original
+	}
+
+	from := RedactRaw(urlErr.URL)
+
+	return &url.Error{Op: urlErr.Op, URL: from, Err: &Error{From: from, unparsed: true}}
 }

@@ -21,6 +21,7 @@ var (
 
 const (
 	redactedTarget = "http://127.0.0.1:1/x"
+	keepQueryURL   = "http://h/x?keep=1"
 	opGet          = "Get"
 )
 
@@ -313,7 +314,7 @@ func TestScrubRedactsOnlyRedirectFailures(t *testing.T) {
 		}
 	}
 
-	transport := &url.Error{Op: opGet, URL: "http://h/x?keep=1", Err: errCaller}
+	transport := &url.Error{Op: opGet, URL: keepQueryURL, Err: errCaller}
 
 	got := redirect.Scrub(transport)
 	if !sameError(got, transport) {
@@ -327,5 +328,60 @@ func TestScrubRedactsOnlyRedirectFailures(t *testing.T) {
 	got = redirect.Scrub(errCaller)
 	if !errors.Is(got, errCaller) || got.Error() != errCaller.Error() {
 		t.Errorf("a non-url error came back as %v, want it unchanged", got)
+	}
+}
+
+// TestScrubReplacesAnUnparseableLocation checks the error net/http builds for a
+// Location header that does not parse. Its text quotes the raw header, so Scrub
+// must drop it, keep the refusal contract, and name only the requested URL.
+func TestScrubReplacesAnUnparseableLocation(t *testing.T) {
+	t.Parallel()
+
+	raw := fmt.Sprintf("http://user:HUNTER2@127.0.0.1:%s/x?ticket=QSECRET#frag", "abc")
+
+	_, parseErr := url.Parse(raw)
+	if parseErr == nil {
+		t.Fatal("fixture must not parse")
+	}
+
+	original := &url.Error{
+		Op: opGet, URL: "http://127.0.0.1:1/api?keep=1",
+		Err: fmt.Errorf("failed to parse Location header %q: %w", raw, parseErr),
+	}
+
+	got := redirect.Scrub(original)
+
+	for _, secret := range []string{"HUNTER2", "QSECRET", "frag", "user:", "abc", "parse"} {
+		if strings.Contains(got.Error(), secret) {
+			t.Errorf("%q still holds %q from the Location header", got.Error(), secret)
+		}
+	}
+
+	if !errors.Is(got, redirect.ErrRefused) || !permanent.Is(got) {
+		t.Errorf("%v must match ErrRefused and be permanent", got)
+	}
+
+	var refusal *redirect.Error
+	if !errors.As(got, &refusal) || refusal.From != "http://127.0.0.1:1/api" || refusal.To != "" {
+		t.Errorf("%v, want a *redirect.Error naming only the requested URL", got)
+	}
+
+	var urlErr *url.Error
+	if !errors.As(got, &urlErr) || urlErr.URL != "http://127.0.0.1:1/api" || urlErr.Op != opGet {
+		t.Errorf("%v, want a *url.Error with the redacted request URL", got)
+	}
+
+	lookalike := &url.Error{Op: opGet, URL: keepQueryURL, Err: errCaller}
+
+	same := redirect.Scrub(lookalike)
+	if !sameError(same, lookalike) {
+		t.Errorf("a transport failure was rewritten to %v", same)
+	}
+
+	empty := &url.Error{Op: opGet, URL: keepQueryURL}
+
+	same = redirect.Scrub(empty)
+	if !sameError(same, empty) {
+		t.Errorf("a *url.Error with no cause was rewritten to %v", same)
 	}
 }
