@@ -14,6 +14,17 @@ import (
 // MaxQuoted is the most bytes of a server's value that Quote keeps.
 const MaxQuoted = 64
 
+// MaxServerTextBytes is the most bytes of escaped text that an error or a log
+// line keeps from one value a server chose, such as a message, a header value,
+// or a URL.
+const MaxServerTextBytes = 1024
+
+// MaxErrorTextBytes is the most bytes of escaped text that an error keeps from
+// the whole text of an error it wraps, such as a transport failure that lists
+// several causes. It is above what a list of ordinary causes needs and below
+// the size at which a log line or a terminal is flooded.
+const MaxErrorTextBytes = 8192
+
 // ellipsis follows a quoted value that Quote cut short.
 const ellipsis = "..."
 

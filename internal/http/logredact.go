@@ -19,13 +19,19 @@ const (
 	// truncatedSuffix marks a logged body cut at MaxBodyBytes.
 	truncatedSuffix = "...(truncated)"
 
-	// tokenCreateMarker is the key that identifies the response to a token
-	// create call, whose "value" member is the token secret.
-	tokenCreateMarker = "full-tokenid"
-	tokenSecretMember = "value"
+	// pairedValueMember is the member that holds the value of a name given by
+	// a sibling member. A token create reply names the token in a sibling
+	// ("full-tokenid" on PVE, "tokenid" on PBS and PDM) and puts the secret
+	// here, and a pending config entry names the option in a "key" sibling.
+	pairedValueMember = "value"
 
-	// dataMember is the member of a PVE reply that holds the result.
+	// dataMember is the member of a PVE reply that holds the result, and the
+	// member of an ACME plugin that holds the DNS provider's credentials.
 	dataMember = "data"
+
+	// redactedHeaderValueBytes is the most bytes of escaped text a log line
+	// keeps from one response header value or the content type.
+	redactedHeaderValueBytes = safetext.MaxServerTextBytes
 
 	// maxRedactBodyBytes is the largest body the redactor parses. A larger
 	// body is logged by its length and content type, because decoding and
@@ -194,18 +200,12 @@ func redactRawQuery(raw string, names nameMatcher) string {
 // body is not parsed at all.
 func bodyFields(body []byte, contentType string, cfg LogConfig) map[string]interface{} {
 	if len(body) > maxRedactBodyBytes {
-		return map[string]interface{}{
-			logFieldBodyLength:      len(body),
-			logFieldBodyContentType: contentType,
-		}
+		return bodyStandIn(body, contentType)
 	}
 
 	redacted, ok := redactJSONBody(body, newNameMatcher(cfg.RedactParams, cfg.RedactHeaders, alwaysRedactedParams()))
 	if !ok {
-		return map[string]interface{}{
-			logFieldBodyLength:      len(body),
-			logFieldBodyContentType: contentType,
-		}
+		return bodyStandIn(body, contentType)
 	}
 
 	redacted = []byte(safetext.Line(string(redacted)))
@@ -222,12 +222,20 @@ func bodyFields(body []byte, contentType string, cfg LogConfig) map[string]inter
 	return map[string]interface{}{logFieldBody: string(redacted)}
 }
 
+// bodyStandIn returns the fields logged in place of a body, which are its
+// length and its content type. The server chose the content type, so it is
+// escaped and cut like any other header value.
+func bodyStandIn(body []byte, contentType string) map[string]interface{} {
+	return map[string]interface{}{
+		logFieldBodyLength:      len(body),
+		logFieldBodyContentType: safetext.Capped(contentType, redactedHeaderValueBytes),
+	}
+}
+
 // redactJSONBody parses body as one JSON value and returns it re-encoded with
 // the value of each member named in names replaced. It reports false when body
 // is not exactly one JSON object or array, because a string, number, or other
-// scalar on its own has no name to tell a secret from the rest. A string that
-// is the "data" member of the top-level object is replaced too, for the same
-// reason, since PVE puts a bare result there and nothing names it.
+// scalar on its own has no name to tell a secret from the rest.
 func redactJSONBody(body []byte, names nameMatcher) ([]byte, bool) {
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.UseNumber()
@@ -244,11 +252,9 @@ func redactJSONBody(body []byte, names nameMatcher) ([]byte, bool) {
 		return nil, false
 	}
 
-	switch typed := value.(type) {
-	case map[string]interface{}:
-		redactBareData(typed)
-	case []interface{}:
-		// An array has no member to name, and redactJSONValue walks its items.
+	switch value.(type) {
+	case map[string]interface{}, []interface{}:
+		// redactJSONValue walks the members and the items.
 	default:
 		return nil, false
 	}
@@ -266,35 +272,26 @@ func redactJSONBody(body []byte, names nameMatcher) ([]byte, bool) {
 	return bytes.TrimRight(out.Bytes(), "\n"), true
 }
 
-// redactBareData replaces a string held by the "data" member of the top-level
-// object, ignoring case. The member is the result of the call, and a string
-// there carries no name, so nothing can show it is not a secret.
-func redactBareData(object map[string]interface{}) {
-	for name, member := range object {
-		if !strings.EqualFold(name, dataMember) {
-			continue
-		}
-
-		if _, isString := member.(string); isString {
-			object[name] = redactedValue
-		}
-	}
-}
-
 // redactJSONValue returns value with the value of each object member named in
-// names replaced, and every string item of an array replaced, at any depth. In
-// an object that carries the member a token create response uses to name the
-// new token, the "value" member is the token secret and is replaced as well.
+// names replaced, and every string item of an array replaced, at any depth.
+//
+// Two members are replaced by their place and not their name. A string held by
+// a "data" member is the result of a call, or the credentials of an ACME
+// plugin, and carries no name that shows it is harmless. A "value" member
+// whose object also holds a member named as a secret, such as the "tokenid" or
+// "full-tokenid" of a token create reply or the "key" of a pending config
+// entry, holds the value that name stands for.
 func redactJSONValue(value interface{}, names nameMatcher) interface{} {
 	switch typed := value.(type) {
 	case map[string]interface{}:
-		_, isTokenCreate := lookupFold(typed, tokenCreateMarker)
+		paired := holdsSecretSibling(typed, names)
 		out := make(map[string]interface{}, len(typed))
 
 		for key, member := range typed {
 			lower := strings.ToLower(key)
+			_, isString := member.(string)
 
-			if names.secret(key) || (isTokenCreate && lower == tokenSecretMember) {
+			if names.secret(key) || (paired && lower == pairedValueMember) || (isString && lower == dataMember) {
 				out[key] = redactedValue
 
 				continue
@@ -325,21 +322,24 @@ func redactJSONValue(value interface{}, names nameMatcher) interface{} {
 	}
 }
 
-// lookupFold finds key in object ignoring case.
-func lookupFold(object map[string]interface{}, key string) (interface{}, bool) {
-	for name, member := range object {
-		if strings.EqualFold(name, key) {
-			return member, true
+// holdsSecretSibling reports whether object has a member, other than the
+// paired value member itself, whose name marks a secret.
+func holdsSecretSibling(object map[string]interface{}, names nameMatcher) bool {
+	for name := range object {
+		if !strings.EqualFold(name, pairedValueMember) && names.secret(name) {
+			return true
 		}
 	}
 
-	return nil, false
+	return false
 }
 
 // redactResponseHeaders returns the response headers for a log line. The
 // credential headers are replaced, the value of Location and Content-Location
 // goes through the same URL redaction as the url field, and every other value
 // has control and text direction characters escaped, because a server chose it.
+// Each value is cut at redactedHeaderValueBytes, so a server cannot fill a log
+// line with one long header.
 func redactResponseHeaders(header map[string][]string, cfg LogConfig) map[string]interface{} {
 	out := redact(header, cfg.RedactHeaders, alwaysRedactedHeaders()...)
 
@@ -356,7 +356,7 @@ func redactResponseHeaders(header map[string][]string, cfg LogConfig) map[string
 			if isURL {
 				values[i] = redactedLocation(text, cfg)
 			} else {
-				values[i] = safetext.Line(text)
+				values[i] = safetext.Capped(text, redactedHeaderValueBytes)
 			}
 		}
 	}
@@ -372,5 +372,5 @@ func redactedLocation(value string, cfg LogConfig) string {
 		return redactedValue
 	}
 
-	return safetext.Line(redactedURL(target, cfg))
+	return safetext.Capped(redactedURL(target, cfg), redactedHeaderValueBytes)
 }

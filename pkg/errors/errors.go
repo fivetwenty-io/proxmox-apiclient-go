@@ -344,7 +344,7 @@ func ParseAPIError(statusCode int, body []byte) error {
 // one server-chosen string. It bounds the message of a reply that is not JSON,
 // such as a proxy's error page, and the message, each field name, each field
 // message, and the file of a reply that is.
-const MaxServerTextBytes = 1024
+const MaxServerTextBytes = safetext.MaxServerTextBytes
 
 // MaxErrorItems is the most items an error keeps and prints from a list the
 // server sent, meaning the entries of the errors map and the TFA types. An error
@@ -354,7 +354,7 @@ const MaxErrorItems = 32
 // MaxErrorTextBytes is the most bytes that the Error method of an API error or
 // a TFA error returns. It is above what MaxErrorItems items of ordinary size
 // need, and below the size at which a log line or a terminal is flooded.
-const MaxErrorTextBytes = 8192
+const MaxErrorTextBytes = safetext.MaxErrorTextBytes
 
 // truncationMarker ends an error text that was cut.
 const truncationMarker = "...(truncated)"
