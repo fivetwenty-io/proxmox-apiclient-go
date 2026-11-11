@@ -444,12 +444,21 @@ func cleanCause(cause error, from string) error {
 
 	text := cause.Error()
 
+	// The markers below are phrases net/http and the transport write before
+	// any bytes they quote. A protocol error that quotes the server, such as
+	// the debug data of an HTTP/2 GOAWAY frame, can hold one of the phrases in
+	// the part the server chose, so only the text before that part is read.
+	own := text
+	if start, _ := framingCut(text); start >= 0 {
+		own = text[:start]
+	}
+
 	switch {
-	case strings.Contains(text, unparsedLocationMarker):
+	case strings.Contains(own, unparsedLocationMarker):
 		return &Error{From: from, unparsed: true}
-	case strings.Contains(text, malformedHeaderMarker):
+	case strings.Contains(own, malformedHeaderMarker):
 		return &HeaderError{From: from}
-	case strings.Contains(text, unsupportedSchemeMarker) && !permanent.Is(cause):
+	case strings.Contains(own, unsupportedSchemeMarker) && !permanent.Is(cause):
 		return permanent.Mark(boundText(cause)) //nolint:wrapcheck // marks cause, so it is the same error
 	}
 
@@ -475,7 +484,10 @@ const maxChainLinks = 256
 
 // nestedError is an error whose text is the text of the error it wraps with
 // each *url.Error below the top cleaned. It unwraps to the error it was built
-// from, so errors.Is, errors.As, and a link-by-link walk see what they saw.
+// from, so errors.Is and a link-by-link walk see what they saw. errors.As sees
+// the same links too, except that a *url.Error it finds comes back cleaned.
+// Code that unwraps past this error and reads a nested *url.Error itself still
+// reaches the original, with its query, as it would have before.
 type nestedError struct {
 	text      string
 	cause     error
@@ -497,21 +509,92 @@ func (e *nestedError) Permanent() bool { return e.permanent }
 // would print the wrapped error and with it the URL.
 func (e *nestedError) GoString() string { return "redirect.nestedError(" + strconv.Quote(e.text) + ")" }
 
-// Timeout reports what the wrapped error's own Timeout method reports, and
-// false when it has none, because a *url.Error asks its direct cause.
-func (e *nestedError) Timeout() bool {
-	timeout, ok := e.cause.(interface{ Timeout() bool })
+// As finds what errors.As finds in the wrapped error. When that is a
+// *url.Error, which a target of *url.Error or of an interface such as net.Error
+// can match, it hands back the copy Scrub makes, so errors.As never returns the
+// original with its query, user information, and fragment.
+func (e *nestedError) As(target any) bool {
+	if !errors.As(e.cause, target) {
+		return false
+	}
 
-	return ok && timeout.Timeout()
+	slot := reflect.ValueOf(target).Elem()
+
+	found, ok := slot.Interface().(*url.Error)
+	if !ok {
+		return true
+	}
+
+	scrubbed := reflect.ValueOf(Scrub(found))
+	if scrubbed.Type().AssignableTo(slot.Type()) {
+		slot.Set(scrubbed)
+	}
+
+	return true
 }
 
-// Temporary reports what the wrapped error's own Temporary method reports, and
-// false when it has none, for the same reason as Timeout.
-func (e *nestedError) Temporary() bool {
-	temporary, ok := e.cause.(interface{ Temporary() bool })
+// timeoutReporter is the Timeout half of net.Error.
+type timeoutReporter interface{ Timeout() bool }
 
-	return ok && temporary.Temporary()
+// temporaryReporter is the Temporary half of net.Error.
+type temporaryReporter interface{ Temporary() bool }
+
+// withNetMethods returns base, or base with a Timeout method, a Temporary
+// method, or both, as its cause has them. A *url.Error asks its direct cause,
+// so a timeout below the wrapper still reads as one, and errors.As for a
+// net.Error stops at the wrapper only when it would have stopped at the cause.
+func withNetMethods(base *nestedError) error {
+	timeout, hasTimeout := base.cause.(timeoutReporter)
+	temporary, hasTemporary := base.cause.(temporaryReporter)
+
+	switch {
+	case hasTimeout && hasTemporary:
+		return &nestedNetError{nestedError: base, timeout: timeout, temporary: temporary}
+	case hasTimeout:
+		return &nestedTimeoutError{nestedError: base, timeout: timeout}
+	case hasTemporary:
+		return &nestedTemporaryError{nestedError: base, temporary: temporary}
+	default:
+		return base
+	}
 }
+
+// nestedTimeoutError is a nestedError whose cause has a Timeout method and no
+// Temporary method.
+type nestedTimeoutError struct {
+	*nestedError
+
+	timeout timeoutReporter
+}
+
+// Timeout reports what the cause's Timeout method reports.
+func (e *nestedTimeoutError) Timeout() bool { return e.timeout.Timeout() }
+
+// nestedTemporaryError is a nestedError whose cause has a Temporary method and
+// no Timeout method.
+type nestedTemporaryError struct {
+	*nestedError
+
+	temporary temporaryReporter
+}
+
+// Temporary reports what the cause's Temporary method reports.
+func (e *nestedTemporaryError) Temporary() bool { return e.temporary.Temporary() }
+
+// nestedNetError is a nestedError whose cause has both methods, as a net.Error
+// does, so the wrapper is a net.Error too.
+type nestedNetError struct {
+	*nestedError
+
+	timeout   timeoutReporter
+	temporary temporaryReporter
+}
+
+// Timeout reports what the cause's Timeout method reports.
+func (e *nestedNetError) Timeout() bool { return e.timeout.Timeout() }
+
+// Temporary reports what the cause's Temporary method reports.
+func (e *nestedNetError) Temporary() bool { return e.temporary.Temporary() }
 
 // scrubNested returns err, or when a *url.Error below the top of its chain
 // needs cleaning, an error whose text has that *url.Error's text replaced by
@@ -543,7 +626,7 @@ func scrubNested(err error) error {
 		return err
 	}
 
-	return &nestedError{text: cleaned, cause: err, permanent: stopsRetry}
+	return withNetMethods(&nestedError{text: cleaned, cause: err, permanent: stopsRetry})
 }
 
 // walkNested calls visit for each *url.Error in the chain of err below err
@@ -612,32 +695,43 @@ func isProtected(err error) bool {
 
 // framingKind cuts text at the point where a known protocol error starts to
 // quote the server's bytes. It reports false when text holds no such error.
-// The marker that appears first in text wins, whatever its place in the list,
-// because the quoted bytes that follow it can hold another marker phrase.
 func framingKind(text string) (string, bool) {
+	_, cut := framingCut(text)
+	if cut < 0 {
+		return "", false
+	}
+
+	return strings.TrimRight(text[:cut], " :;,"), true
+}
+
+// framingCut returns where the first known protocol error in text starts, and
+// where its kind ends and the server's bytes begin, or -1 for both when text
+// holds none. The marker that appears first in text wins, whatever its place
+// in the list, because the quoted bytes that follow it can hold another marker
+// phrase. A marker's except phrase is looked for only up to the end of the
+// marker itself, because the bytes after it are the server's and could
+// otherwise switch the marker off.
+func framingCut(text string) (int, int) {
 	first, cut := -1, -1
 
 	for _, marker := range framingMarkers() {
 		start := strings.Index(text, marker.text)
-		if start < 0 || (marker.except != "" && strings.Contains(text, marker.except)) {
+		if start < 0 || (first >= 0 && start >= first) {
 			continue
 		}
 
-		if first >= 0 && start >= first {
+		end := start + len(marker.text)
+		if marker.except != "" && strings.Contains(text[:end], marker.except) {
 			continue
 		}
 
 		first, cut = start, start
 		if marker.keep {
-			cut += len(marker.text)
+			cut = end
 		}
 	}
 
-	if first < 0 {
-		return "", false
-	}
-
-	return strings.TrimRight(text[:cut], " :;,"), true
+	return first, cut
 }
 
 // refusedStatus reports whether a response status is one Guard turns into a
