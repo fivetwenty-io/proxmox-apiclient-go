@@ -83,7 +83,36 @@ func wrapEscaped(err error, limit int) error {
 		return err
 	}
 
-	return &escapedError{text: escaped, cause: err}
+	return withNetMethods(&escapedError{text: escaped, cause: err})
+}
+
+// timeoutReporter is the Timeout half of net.Error.
+type timeoutReporter interface{ Timeout() bool }
+
+// temporaryReporter is the Temporary half of net.Error.
+type temporaryReporter interface{ Temporary() bool }
+
+// withNetMethods returns base, or base with a Timeout method, a Temporary
+// method, or both, as its cause has them. The wrapper then answers for those
+// two methods exactly as its cause does. A *url.Error asks its direct cause,
+// so a timeout below the wrapper still reads as one. errors.As for a net.Error
+// stops at the wrapper only when it would have stopped at the cause, so a
+// timeout further down the chain is not hidden behind a wrapper that has no
+// answer of its own.
+func withNetMethods(base *escapedError) error {
+	timeout, hasTimeout := base.cause.(timeoutReporter)
+	temporary, hasTemporary := base.cause.(temporaryReporter)
+
+	switch {
+	case hasTimeout && hasTemporary:
+		return &escapedNetError{escapedError: base, timeout: timeout, temporary: temporary}
+	case hasTimeout:
+		return &escapedTimeoutError{escapedError: base, timeout: timeout}
+	case hasTemporary:
+		return &escapedTemporaryError{escapedError: base, temporary: temporary}
+	default:
+		return base
+	}
 }
 
 // escapedError is an error whose text is the escaped text of the error it
@@ -103,22 +132,42 @@ func (e *escapedError) Unwrap() error { return e.cause }
 // would print the wrapped error and with it the raw bytes.
 func (e *escapedError) GoString() string { return "safetext.Error(" + strconv.Quote(e.text) + ")" }
 
-// Timeout reports what the wrapped error's own Timeout method reports, and
-// false when it has none. A *url.Error asks its direct cause, not the chain,
-// so without this an escaped timeout would stop reading as one.
-func (e *escapedError) Timeout() bool {
-	timeout, ok := e.cause.(interface{ Timeout() bool })
+// escapedTimeoutError is an escapedError whose cause has a Timeout method and
+// no Temporary method.
+type escapedTimeoutError struct {
+	*escapedError
 
-	return ok && timeout.Timeout()
+	timeout timeoutReporter
 }
 
-// Temporary reports what the wrapped error's own Temporary method reports, and
-// false when it has none, for the same reason as Timeout.
-func (e *escapedError) Temporary() bool {
-	temporary, ok := e.cause.(interface{ Temporary() bool })
+// Timeout reports what the cause's Timeout method reports.
+func (e *escapedTimeoutError) Timeout() bool { return e.timeout.Timeout() }
 
-	return ok && temporary.Temporary()
+// escapedTemporaryError is an escapedError whose cause has a Temporary method
+// and no Timeout method.
+type escapedTemporaryError struct {
+	*escapedError
+
+	temporary temporaryReporter
 }
+
+// Temporary reports what the cause's Temporary method reports.
+func (e *escapedTemporaryError) Temporary() bool { return e.temporary.Temporary() }
+
+// escapedNetError is an escapedError whose cause has both methods, as a
+// net.Error does, so the wrapper is a net.Error too.
+type escapedNetError struct {
+	*escapedError
+
+	timeout   timeoutReporter
+	temporary temporaryReporter
+}
+
+// Timeout reports what the cause's Timeout method reports.
+func (e *escapedNetError) Timeout() bool { return e.timeout.Timeout() }
+
+// Temporary reports what the cause's Temporary method reports.
+func (e *escapedNetError) Temporary() bool { return e.temporary.Temporary() }
 
 // unsafeRune reports whether r must not reach a log line as itself. It covers
 // the C0 and C1 controls, DEL, the format characters (which hold the text
