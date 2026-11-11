@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/redirect"
 	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/swaptransport"
 )
 
@@ -113,9 +114,9 @@ func versionEnvelope(t *testing.T) []byte {
 func liveTransport(t *testing.T, client *Client) *http.Transport {
 	t.Helper()
 
-	swap, ok := client.httpClient.Load().Transport.(*swaptransport.Transport)
+	swap, ok := redirect.Unwrap(client.httpClient.Load().Transport).(*swaptransport.Transport)
 	if !ok {
-		t.Fatalf("Transport is %T, want *swaptransport.Transport", client.httpClient.Load().Transport)
+		t.Fatalf("Transport is %T, want *swaptransport.Transport", redirect.Unwrap(client.httpClient.Load().Transport))
 	}
 
 	if swap != client.swap {
@@ -162,8 +163,8 @@ func TestNewClient_WrapTransportInstalledOnceAndSharedWithAuthenticator(t *testi
 		t.Errorf("WrapTransport calls = %d, want 1", got)
 	}
 
-	if client.httpClient.Load().Transport != http.RoundTripper(*wrapper) {
-		t.Errorf("Transport is %T, want the wrapper's result", client.httpClient.Load().Transport)
+	if redirect.Unwrap(client.httpClient.Load().Transport) != http.RoundTripper(*wrapper) {
+		t.Errorf("Transport is %T, want the wrapper's result", redirect.Unwrap(client.httpClient.Load().Transport))
 	}
 
 	if client.swap != nil {
@@ -464,9 +465,9 @@ func TestWrapTransport_WithHostRequestCarriesOverrideHost(t *testing.T) {
 		t.Fatalf("DoWithContext: %v", err)
 	}
 
-	rec, ok := client.httpClient.Load().Transport.(*recordingWrapper)
+	rec, ok := redirect.Unwrap(client.httpClient.Load().Transport).(*recordingWrapper)
 	if !ok {
-		t.Fatalf("Transport is %T, want *recordingWrapper", client.httpClient.Load().Transport)
+		t.Fatalf("Transport is %T, want *recordingWrapper", redirect.Unwrap(client.httpClient.Load().Transport))
 	}
 
 	seen := rec.seen()
@@ -539,9 +540,9 @@ func TestWrapTransport_UploadStreamReachesWrapperUnbuffered(t *testing.T) {
 		installRecorder(o, &calls)
 	})
 
-	rec, ok := client.httpClient.Load().Transport.(*recordingWrapper)
+	rec, ok := redirect.Unwrap(client.httpClient.Load().Transport).(*recordingWrapper)
 	if !ok {
-		t.Fatalf("Transport is %T, want *recordingWrapper", client.httpClient.Load().Transport)
+		t.Fatalf("Transport is %T, want *recordingWrapper", redirect.Unwrap(client.httpClient.Load().Transport))
 	}
 
 	gate := make(chan struct{})
@@ -624,11 +625,11 @@ func TestSetKeepAlive_LeavesWrapperTransportsUnchanged(t *testing.T) {
 			client.SetLogger(logger)
 			client.SetLogConfig(LogConfig{Enabled: true})
 
-			installed := client.httpClient.Load().Transport
+			installed := redirect.Unwrap(client.httpClient.Load().Transport)
 
 			client.SetKeepAlive(11)
 
-			if client.httpClient.Load().Transport != installed {
+			if redirect.Unwrap(client.httpClient.Load().Transport) != installed {
 				t.Error("SetKeepAlive replaced the wrapper's RoundTripper")
 			}
 
@@ -1070,7 +1071,7 @@ func TestClose_ClosesBaseIdleConnectionsBehindRoundTripOnlyWrapper(t *testing.T)
 		t.Fatalf("NewClient: %v", err)
 	}
 
-	if _, hasClose := client.httpClient.Load().Transport.(interface{ CloseIdleConnections() }); hasClose {
+	if _, hasClose := redirect.Unwrap(client.httpClient.Load().Transport).(interface{ CloseIdleConnections() }); hasClose {
 		t.Fatal("the wrapper must implement only RoundTrip for this test")
 	}
 

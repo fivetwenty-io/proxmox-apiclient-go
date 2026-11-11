@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/redirect"
 	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/pool"
 )
 
@@ -21,7 +22,7 @@ func sharedClient(t *testing.T, poolInstance *pool.Pool) (*http.Client, *http.Tr
 
 	poolInstance.Put(client)
 
-	transport, ok := client.Transport.(*http.Transport)
+	transport, ok := redirect.Unwrap(client.Transport).(*http.Transport)
 	if !ok {
 		t.Fatalf("Transport is %T, want *http.Transport", client.Transport)
 	}

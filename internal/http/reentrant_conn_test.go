@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/redirect"
 	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/pool"
 )
 
@@ -76,7 +77,7 @@ func (c *reentrantConn) Close() error {
 func poolTransport(t *testing.T, client *http.Client) *http.Transport {
 	t.Helper()
 
-	transport, ok := client.Transport.(*http.Transport)
+	transport, ok := redirect.Unwrap(client.Transport).(*http.Transport)
 	if !ok {
 		t.Fatalf("pool client Transport is %T, want *http.Transport", client.Transport)
 	}

@@ -19,11 +19,14 @@ var ErrRedirectRefused = redirect.ErrRefused
 // ErrRedirectRefused, and the retry middleware never retries it.
 type RedirectError = redirect.Error
 
-// newHTTPClient builds the http.Client requests are sent with. Its redirect
-// policy is the one in options, or the refusal when options leave it nil.
+// newHTTPClient builds the http.Client requests are sent with. When options
+// leave CheckRedirect nil, the transport turns every redirect response into a
+// refusal before net/http reads its Location header, and the client's own
+// policy is the refusal as well. When options set a policy, that policy alone
+// decides and the transport is left as it is.
 func newHTTPClient(options *Options, roundTripper http.RoundTripper) *http.Client {
 	return &http.Client{
-		Transport:     roundTripper,
+		Transport:     redirect.Guard(roundTripper, options.CheckRedirect),
 		Timeout:       options.Timeout,
 		CheckRedirect: redirect.Wrap(options.CheckRedirect),
 	}

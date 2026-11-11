@@ -600,8 +600,9 @@ func (p *ProxyClient) buildHTTPClient() *http.Client {
 
 	// Refuse every redirect: the request carries the ticket cookie, the CSRF
 	// token, and the form body, and Go keeps all three when a redirect changes
-	// only the port or the scheme of the host.
-	return &http.Client{Transport: transport, CheckRedirect: redirect.Refuse}
+	// only the port or the scheme of the host. The guard refuses it before
+	// net/http reads the Location header, and the policy backs it up.
+	return &http.Client{Transport: redirect.Guard(transport, nil), CheckRedirect: redirect.Refuse}
 }
 
 // dialVNCWebSocket opens a WebSocket at apiPath with vncticket and port query params.

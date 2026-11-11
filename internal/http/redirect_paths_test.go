@@ -139,15 +139,19 @@ func TestRedirectErrorHidesTheLocationCredentials(t *testing.T) {
 		assertNoLocationSecrets(t, err)
 	})
 
-	t.Run("transport errors keep their url", func(t *testing.T) {
+	t.Run("transport errors keep the request path and drop its query", func(t *testing.T) {
 		t.Parallel()
 
 		client, _ := clientWithFailingTransport(t, errBase)
 		client.SetMaxRetries(0)
 
 		_, err := client.Do(http.MethodGet, "/version?keep=1", nil)
-		if err == nil || !strings.Contains(err.Error(), "keep=1") {
-			t.Errorf("error = %v, want the request URL kept for a transport failure", err)
+		if err == nil || !strings.Contains(err.Error(), "/api2/json/version") {
+			t.Fatalf("error = %v, want the request path kept", err)
+		}
+
+		if strings.Contains(err.Error(), "keep=1") {
+			t.Errorf("error = %v, want the request query removed", err)
 		}
 	})
 }
@@ -270,7 +274,7 @@ func TestTicketRequestsHideAnUnparseableLocation(t *testing.T) {
 	}
 
 	steps := map[string]func(rig *ticketRedirectRig) error{
-		"login":   func(rig *ticketRedirectRig) error { return rig.ticketAuth.Authenticate() },
+		stepLogin: func(rig *ticketRedirectRig) error { return rig.ticketAuth.Authenticate() },
 		"renewal": func(rig *ticketRedirectRig) error { return rig.ticketAuth.RefreshForce() },
 		"logout": func(rig *ticketRedirectRig) error {
 			rig.ticketAuth.SetTicket(validTicket)
@@ -424,7 +428,7 @@ func TestTicketRequestsRefuseRedirects(t *testing.T) {
 	}
 
 	steps := map[string]func(rig *ticketRedirectRig) error{
-		"login": func(rig *ticketRedirectRig) error { return rig.ticketAuth.Authenticate() },
+		stepLogin: func(rig *ticketRedirectRig) error { return rig.ticketAuth.Authenticate() },
 		"renewal": func(rig *ticketRedirectRig) error {
 			return rig.ticketAuth.RefreshForce()
 		},

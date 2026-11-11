@@ -79,7 +79,9 @@ type Config struct {
 	// redirect changes only the port or the scheme of the host. A function
 	// that returns nil for every request follows without limit, so a caller
 	// who opts in should count len(via) and compare the target's scheme and
-	// host with the request's.
+	// host with the request's. With nil, a transport above the pool's own
+	// turns every 3xx response except 304 into the refusal before net/http
+	// reads the Location header, and a non-nil value removes it.
 	CheckRedirect func(req *http.Request, via []*http.Request) error
 }
 
@@ -174,7 +176,7 @@ func New(config *Config) *Pool {
 		config:    own,
 		transport: transport,
 		client: &http.Client{
-			Transport:     transport,
+			Transport:     redirect.Guard(transport, own.CheckRedirect),
 			CheckRedirect: redirect.Wrap(own.CheckRedirect),
 			Jar:           nil,
 			Timeout:       own.ConnectionTimeout,
@@ -218,10 +220,16 @@ func newTransport(config *Config) *http.Transport {
 // counters. It always returns the same *http.Client instance for the life
 // of the Pool; it does not check out a distinct connection. The pool does not
 // guard writes to the client or its Transport, so configure them before other
-// goroutines use the client. The client refuses redirects, but when a request
-// sent through it directly fails that way, net/http puts the raw Location
-// header, including any user information and query, in the error text. Send
-// requests with Do or DoWithContext to get an error with that header removed.
+// goroutines use the client. The client's Transport is a wrapper that refuses
+// every redirect before net/http reads the Location header, so it is not the
+// *http.Transport the pool created. The pool's setters tune that transport,
+// and replacing the client's Transport removes the refusal. An error from a
+// request sent through the client directly shows the request URL as net/http
+// renders it, query included. When Config.CheckRedirect follows redirects,
+// net/http also puts the raw Location header in the error of a redirect it
+// cannot follow, including any user information and query. Send requests with
+// Do or DoWithContext to get an error with the query, the fragment, and that
+// header removed.
 func (p *Pool) Get() (*http.Client, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()

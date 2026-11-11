@@ -125,7 +125,10 @@ type Options struct {
 	// CheckRedirect, when non-nil, decides what the HTTP client does with a
 	// redirect, exactly as http.Client.CheckRedirect does. Nil (default)
 	// refuses every redirect with a *RedirectError that matches
-	// ErrRedirectRefused and is never retried.
+	// ErrRedirectRefused and is never retried. The refusal is made by a
+	// transport above the one WrapTransport returns, before net/http reads
+	// the Location header, and it lets a 304 through. A non-nil value removes
+	// that transport.
 	CheckRedirect func(req *http.Request, via []*http.Request) error
 
 	// Caching configuration

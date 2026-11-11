@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/constants"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/redirect"
 )
 
 var (
@@ -355,12 +356,14 @@ func (e *Executor) executeRequest(ctx context.Context, req *Request) *Response {
 	// Execute request
 	httpResp, err := e.client.Do(httpReq)
 	if err != nil {
+		// The caller's client may follow redirects or may quote a response
+		// header in its error, and the message goes into the Response.
 		return &Response{
 			ID:         req.ID,
 			StatusCode: 0,
 			Headers:    nil,
 			Body:       nil,
-			Error:      err.Error(),
+			Error:      redirect.Scrub(err).Error(),
 			Duration:   time.Since(start),
 		}
 	}
