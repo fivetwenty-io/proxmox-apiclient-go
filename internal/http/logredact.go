@@ -24,6 +24,9 @@ const (
 	tokenCreateMarker = "full-tokenid"
 	tokenSecretMember = "value"
 
+	// dataMember is the member of a PVE reply that holds the result.
+	dataMember = "data"
+
 	// maxRedactBodyBytes is the largest body the redactor parses. A larger
 	// body is logged by its length and content type, because decoding and
 	// encoding a body costs many times its size in memory, and a debug log
@@ -185,8 +188,8 @@ func redactRawQuery(raw string, names nameMatcher) string {
 // bodyFields returns the log fields for a response body. A body that parses as
 // JSON is logged with the value of every secret member replaced, with control
 // and text direction characters escaped, cut at limit bytes when limit is
-// positive. A body that does not parse, or is larger than maxRedactBodyBytes,
-// is not logged: its length and content type stand in for it, because text
+// positive. A body that does not parse, is a bare scalar, or is larger than
+// maxRedactBodyBytes, is not logged: its length and content type stand in for it, because text
 // that is not JSON gives nothing to tell a secret from the rest, and a large
 // body is not parsed at all.
 func bodyFields(body []byte, contentType string, cfg LogConfig) map[string]interface{} {
@@ -221,7 +224,10 @@ func bodyFields(body []byte, contentType string, cfg LogConfig) map[string]inter
 
 // redactJSONBody parses body as one JSON value and returns it re-encoded with
 // the value of each member named in names replaced. It reports false when body
-// is not exactly one JSON value.
+// is not exactly one JSON object or array, because a string, number, or other
+// scalar on its own has no name to tell a secret from the rest. A string that
+// is the "data" member of the top-level object is replaced too, for the same
+// reason, since PVE puts a bare result there and nothing names it.
 func redactJSONBody(body []byte, names nameMatcher) ([]byte, bool) {
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.UseNumber()
@@ -238,6 +244,15 @@ func redactJSONBody(body []byte, names nameMatcher) ([]byte, bool) {
 		return nil, false
 	}
 
+	switch typed := value.(type) {
+	case map[string]interface{}:
+		redactBareData(typed)
+	case []interface{}:
+		// An array has no member to name, and redactJSONValue walks its items.
+	default:
+		return nil, false
+	}
+
 	var out bytes.Buffer
 
 	encoder := json.NewEncoder(&out)
@@ -249,6 +264,21 @@ func redactJSONBody(body []byte, names nameMatcher) ([]byte, bool) {
 	}
 
 	return bytes.TrimRight(out.Bytes(), "\n"), true
+}
+
+// redactBareData replaces a string held by the "data" member of the top-level
+// object, ignoring case. The member is the result of the call, and a string
+// there carries no name, so nothing can show it is not a secret.
+func redactBareData(object map[string]interface{}) {
+	for name, member := range object {
+		if !strings.EqualFold(name, dataMember) {
+			continue
+		}
+
+		if _, isString := member.(string); isString {
+			object[name] = redactedValue
+		}
+	}
 }
 
 // redactJSONValue returns value with the value of each object member named in

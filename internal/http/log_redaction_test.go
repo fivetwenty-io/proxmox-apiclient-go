@@ -229,7 +229,7 @@ func TestLoggedResponseBodyThatIsNotJSONIsNotLogged(t *testing.T) {
 func TestLoggedResponseBodyIsCutAtTheLimit(t *testing.T) {
 	t.Parallel()
 
-	body := []byte(`{"data":"` + strings.Repeat("é", 50) + `","ticket":"TICKETSECRET"}`)
+	body := []byte(`{"note":"` + strings.Repeat("\u00e9", 50) + `","ticket":"TICKETSECRET"}`)
 
 	fields := bodyFields(body, "application/json", LogConfig{MaxBodyBytes: 21})
 
