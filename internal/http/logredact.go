@@ -282,9 +282,9 @@ func redactBareData(object map[string]interface{}) {
 }
 
 // redactJSONValue returns value with the value of each object member named in
-// names replaced, at any depth. In an object that carries the member a token
-// create response uses to name the new token, the "value" member is the token
-// secret and is replaced as well.
+// names replaced, and every string item of an array replaced, at any depth. In
+// an object that carries the member a token create response uses to name the
+// new token, the "value" member is the token secret and is replaced as well.
 func redactJSONValue(value interface{}, names nameMatcher) interface{} {
 	switch typed := value.(type) {
 	case map[string]interface{}:
@@ -306,7 +306,16 @@ func redactJSONValue(value interface{}, names nameMatcher) interface{} {
 		return out
 	case []interface{}:
 		out := make([]interface{}, len(typed))
+
 		for i, member := range typed {
+			// An array item has no member name to tell a secret from the rest, so
+			// a string in one is replaced as the "data" string is.
+			if _, isString := member.(string); isString {
+				out[i] = redactedValue
+
+				continue
+			}
+
 			out[i] = redactJSONValue(member, names)
 		}
 

@@ -84,3 +84,45 @@ func TestLoggedBodyEscapesEveryStringItEmits(t *testing.T) {
 		})
 	}
 }
+
+// TestLoggedBodyRedactsEveryStringInAnArray checks that a string item of an
+// array is replaced wherever the array sits, because an item has no member name
+// to show it is harmless, while the other items and the object members around
+// it are logged as before.
+func TestLoggedBodyRedactsEveryStringInAnArray(t *testing.T) {
+	t.Parallel()
+
+	bodies := map[string]string{
+		"data array":       `{"data":["ARRSTRSECRET"],"success":1}`,
+		"top array":        `["ARRSTRSECRET"]`,
+		"nested array":     `{"data":{"list":["ARRSTRSECRET"]}}`,
+		"array in array":   `{"data":[[1,"ARRSTRSECRET"]]}`,
+		"array in object":  `{"data":[{"ids":["ARRSTRSECRET","other"]}]}`,
+		"mixed item types": `[7,"ARRSTRSECRET",true,null]`,
+	}
+
+	for name, body := range bodies {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got, _ := bodyFields([]byte(body), "application/json", LogConfig{})[logFieldBody].(string)
+			if got == "" {
+				t.Fatal("the body was not logged")
+			}
+
+			if strings.Contains(got, "ARRSTRSECRET") || strings.Contains(got, "other") {
+				t.Errorf("logged body %q holds an array string", got)
+			}
+
+			if !strings.Contains(got, redactedValue) {
+				t.Errorf("logged body %q has no %s marker", got, redactedValue)
+			}
+		})
+	}
+
+	got, _ := bodyFields([]byte(`{"data":{"count":7,"name":"pve1","flags":[1,true]}}`), "application/json",
+		LogConfig{})[logFieldBody].(string)
+	if got != `{"data":{"count":7,"flags":[1,true],"name":"pve1"}}` {
+		t.Errorf("a body with no array string logged as %q, want it unchanged", got)
+	}
+}
