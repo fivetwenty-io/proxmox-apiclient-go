@@ -5,7 +5,7 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [v3.13.0] — 2026-11-11
 
 ### Security
 
@@ -478,7 +478,7 @@ previously mis-generated symbols, which carried no usable data:
 
 - An HTTP 401 response now forces re-authentication and a single retry of the original request.
 
-- A 2xx response carrying a non-empty `errors` map is now surfaced as an `APIError` instead of being treated as success.
+- A 2xx response carrying a non-empty `errors` map is now surfaced as an `APIError` instead of being treated as success. This applies to `ResponseParser`. The client itself returns a 2xx reply that has an `errors` map and no message as a normal response.
 
 - `IsRetryableCode` no longer treats HTTP 423 (Locked) as retryable. 429, 502, 503, and 504 still retry.
 
