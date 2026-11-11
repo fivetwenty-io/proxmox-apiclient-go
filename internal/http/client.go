@@ -449,7 +449,7 @@ func createAuthenticator(options *Options, httpClient *http.Client) auth.Authent
 			// sentinel authenticator that always returns an error on Authenticate(). This keeps
 			// the public API unchanged (NewClient returns (*Client, error) — callers that pass
 			// a malformed token will discover the problem on first use or via Authenticate()).
-			return auth.NewInvalidAuthenticator(fmt.Errorf("invalid APIToken %q: %w", options.APIToken, err))
+			return auth.NewInvalidAuthenticator(fmt.Errorf("invalid APIToken: %w", err))
 		}
 
 		return auth.NewAPITokenAuthenticator(token, options.APITokenName)
