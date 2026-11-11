@@ -79,6 +79,36 @@ func TestLoggedHeaderNamesAndRepeatsAreBounded(t *testing.T) {
 	}
 }
 
+// TestLoggedHeaderNameIsCutAtTheCap logs a header whose name is 5,000 bytes,
+// which is longer than the cap on a name but well inside the budget of the
+// field, so only the cap on names can shorten it.
+func TestLoggedHeaderNameIsCutAtTheCap(t *testing.T) {
+	t.Parallel()
+
+	name := "X-" + strings.Repeat("N", 5_000)
+	header := map[string][]string{
+		"Content-Type": {contentTypeJSON},
+		name:           {"x"},
+	}
+
+	field := redactResponseHeaders(header, LogConfig{})
+
+	if _, whole := field[name]; whole {
+		t.Fatalf("a header name of %d bytes was logged whole", len(name))
+	}
+
+	if _, dropped := field[droppedHeadersField]; dropped {
+		t.Fatalf("the header was dropped and not cut: %v", field[droppedHeadersField])
+	}
+
+	want := name[:redactedHeaderValueBytes] + "...(truncated)"
+
+	if _, cut := field[want]; !cut {
+		t.Errorf("the name was not cut to %d bytes and marked, the field holds %d headers",
+			redactedHeaderValueBytes, len(field))
+	}
+}
+
 // TestLoggedHeaderFieldCountsDroppedHeaders fills the field past its total
 // and checks that the headers left out are counted.
 func TestLoggedHeaderFieldCountsDroppedHeaders(t *testing.T) {
