@@ -211,9 +211,11 @@ type TFARequiredError struct {
 
 // NewTFARequiredError builds the error for a login reply that asks for a second
 // factor. The ticket, the challenge, and the types are text the server chose,
-// so they get the same escaping and the same caps as the error ParseAPIError
-// builds from a 401 reply. The types slice is copied, so the caller's slice
-// stays as it was.
+// so all three are escaped as the error ParseAPIError builds from a 401 reply
+// escapes them. The types are also limited to MaxErrorItems entries and cut at
+// MaxServerTextBytes each. The ticket and the challenge are kept whole, because
+// the caller sends them back to finish the login. The types slice is copied, so
+// the caller's slice stays as it was.
 func NewTFARequiredError(ticket, challenge string, types []string) *TFARequiredError {
 	tfaErr := &TFARequiredError{
 		Ticket:    ticket,
