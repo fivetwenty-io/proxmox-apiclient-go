@@ -12,6 +12,7 @@ import (
 
 	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/permanent"
 	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/redirect"
+	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/redirect/redirecttest"
 )
 
 // markerCertificateName is a certificate name that holds a phrase the framing
@@ -37,7 +38,7 @@ func TestScrubKeepsTheChainOfACertificateErrorWithMarkerText(t *testing.T) {
 	t.Parallel()
 
 	cause := hostnameFailure()
-	original := &url.Error{Op: "Get", URL: "https://h/api2/json/version", Err: cause}
+	original := &url.Error{Op: opGet, URL: "https://h/api2/json/version", Err: cause}
 	want := original.Error()
 
 	got := redirect.Scrub(original)
@@ -90,7 +91,7 @@ func TestScrubNeverReclassifiesContextCertificateOrRefusalErrors(t *testing.T) {
 
 			for shape, input := range map[string]error{
 				"bare":      cause,
-				"url error": &url.Error{Op: "Get", URL: "https://h/x?ticket=QSECRET", Err: cause},
+				"url error": &url.Error{Op: opGet, URL: "https://h/x?ticket=QSECRET", Err: cause},
 			} {
 				got := redirect.Scrub(input)
 				if !errors.Is(got, cause) {
@@ -122,7 +123,7 @@ func TestFramingErrorUnwrapsToTheOriginalCause(t *testing.T) {
 	t.Parallel()
 
 	cause := &textError{brokenConnection + "bad Content-Length " + fmt.Sprintf("%q", serverText)}
-	got := redirect.Scrub(&url.Error{Op: "Get", URL: "http://h/x", Err: cause})
+	got := redirect.Scrub(&url.Error{Op: opGet, URL: "http://h/x", Err: cause})
 
 	if !errors.Is(got, error(cause)) {
 		t.Errorf("errors.Is lost the original cause from %v", got)
@@ -144,7 +145,7 @@ func TestFramingErrorUnwrapsToTheOriginalCause(t *testing.T) {
 	}
 
 	for _, text := range shown {
-		for _, secret := range []string{"HUNTER2", "QSECRET", "FRAGSECRET"} {
+		for _, secret := range append(redirecttest.Secrets(), "FRAGSECRET") {
 			if strings.Contains(text, secret) {
 				t.Errorf("%q holds %q", text, secret)
 			}

@@ -78,7 +78,7 @@ func TestScrubKeepsTheKindAndDropsTheServersBytes(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			original := &url.Error{Op: "Get", URL: "http://h/api2/json/version", Err: &textError{tc.text}}
+			original := &url.Error{Op: opGet, URL: "http://h/api2/json/version", Err: &textError{tc.text}}
 			got := redirect.Scrub(original)
 
 			var urlErr *url.Error

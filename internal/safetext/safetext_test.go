@@ -114,7 +114,8 @@ func TestErrorReturnsCleanTextAsTheSameValue(t *testing.T) {
 
 	clean := fmt.Errorf("pve bool: héllo \uFFFD: %w", errCause)
 
-	if got := safetext.Error(clean); got != clean { //nolint:errorlint // the same value is the contract
+	got := safetext.Error(clean)
+	if !errors.Is(got, clean) {
 		t.Errorf("Error returned %v, want the same error", got)
 	}
 

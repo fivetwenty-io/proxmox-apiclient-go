@@ -38,7 +38,8 @@ func hasRawControl(text string) bool {
 	return false
 }
 
-func jsonResponse(t *testing.T, body string) *http.Response {
+// parseJSONBody runs parser over a 200 response that carries body.
+func parseJSONBody(t *testing.T, parser *ResponseParser, body string, target interface{}) error {
 	t.Helper()
 
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://example.com/path", nil)
@@ -46,12 +47,15 @@ func jsonResponse(t *testing.T, body string) *http.Response {
 		t.Fatalf("NewRequest: %v", err)
 	}
 
-	return &http.Response{
+	resp := &http.Response{
 		StatusCode: http.StatusOK,
 		Header:     http.Header{testHeaderContentType: []string{testContentTypeJSON}},
 		Body:       io.NopCloser(bytes.NewReader([]byte(body))),
 		Request:    req,
 	}
+	defer func() { _ = resp.Body.Close() }()
+
+	return parser.Parse(resp, target)
 }
 
 // TestParseJSONErrorsEscapeControlCharacters decodes into a target whose
@@ -78,7 +82,7 @@ func TestParseJSONErrorsEscapeControlCharacters(t *testing.T) {
 			parser := NewResponseParser()
 			parser.StrictMode = tc.strict
 
-			err := parser.Parse(jsonResponse(t, tc.body), &hostileTarget{})
+			err := parseJSONBody(t, parser, tc.body, &hostileTarget{})
 			if err == nil {
 				t.Fatal("Parse succeeded, want a decode error")
 			}
@@ -115,7 +119,7 @@ func TestDecodeErrorsFromHostileBodiesHoldNoControlCharacters(t *testing.T) {
 		for _, parser := range []*ResponseParser{NewResponseParser(), strictParser} {
 			var target map[string]interface{}
 
-			err := parser.Parse(jsonResponse(t, body), &target)
+			err := parseJSONBody(t, parser, body, &target)
 			if err != nil && hasRawControl(err.Error()) {
 				t.Errorf("parser error %q for body %q holds a raw control character", err.Error(), body)
 			}

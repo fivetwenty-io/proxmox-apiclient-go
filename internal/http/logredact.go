@@ -27,15 +27,15 @@ const (
 // whatever the configured list says. They carry credentials in either
 // direction.
 func alwaysRedactedHeaders() []string {
-	return []string{"authorization", "proxy-authorization", "cookie", "set-cookie", "csrfpreventiontoken"}
+	return []string{headerAuthorization, "proxy-authorization", headerCookie, "set-cookie", headerCSRF}
 }
 
 // alwaysRedactedParams are the query parameter and JSON member names whose
 // values never reach a log line, whatever the configured list says.
 func alwaysRedactedParams() []string {
 	return []string{
-		redactParamPassword, "token", "secret", "ticket", "vncticket", "csrfpreventiontoken", "otp",
-		"privatekey", "private-key", "authorization", "cookie",
+		redactParamPassword, "token", "secret", "ticket", "vncticket", headerCSRF, "otp",
+		"privatekey", "private-key", headerAuthorization, headerCookie,
 	}
 }
 
@@ -53,20 +53,20 @@ func nameSet(lists ...[]string) map[string]struct{} {
 	return set
 }
 
-// redactedURL renders u for a log line or a hook. It keeps the scheme, host,
+// redactedURL renders target for a log line or a hook. It keeps the scheme, host,
 // and path, drops the user information and the fragment, and, when the
 // configuration logs query parameters, keeps the query with the value of every
 // redacted parameter replaced. It is what the query field shows, in the form of
 // the URL, so the two never disagree.
-func redactedURL(u *url.URL, cfg LogConfig) string {
-	if u == nil {
+func redactedURL(target *url.URL, cfg LogConfig) string {
+	if target == nil {
 		return ""
 	}
 
-	out := url.URL{Scheme: u.Scheme, Host: u.Host, Path: u.Path, RawPath: u.RawPath}
+	out := url.URL{Scheme: target.Scheme, Host: target.Host, Path: target.Path, RawPath: target.RawPath}
 
 	if cfg.LogQueryParams {
-		out.RawQuery = redactRawQuery(u.RawQuery, nameSet(cfg.RedactParams, alwaysRedactedParams()))
+		out.RawQuery = redactRawQuery(target.RawQuery, nameSet(cfg.RedactParams, alwaysRedactedParams()))
 	}
 
 	return out.String()

@@ -31,6 +31,15 @@ const (
 	// Redaction sentinel.
 	redactedValue = "REDACTED"
 
+	// headerAuthorization is the lower-cased Authorization header name.
+	headerAuthorization = "authorization"
+
+	// headerCookie is the lower-cased Cookie header name.
+	headerCookie = "cookie"
+
+	// headerCSRF is the lower-cased CSRFPreventionToken header and parameter name.
+	headerCSRF = "csrfpreventiontoken"
+
 	// Redact param keys used in defaultLogConfig.
 	redactParamPassword = "password"
 )

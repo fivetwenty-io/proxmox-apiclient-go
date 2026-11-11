@@ -14,9 +14,21 @@ import (
 // the way the type's UnmarshalJSON does.
 func scalarUnmarshalers() map[string]func(data []byte) error {
 	return map[string]func(data []byte) error{
-		"bool":  func(data []byte) error { var v client.PVEBool; return v.UnmarshalJSON(data) },
-		"int":   func(data []byte) error { var v client.PVEInt; return v.UnmarshalJSON(data) },
-		"float": func(data []byte) error { var v client.PVEFloat; return v.UnmarshalJSON(data) },
+		"bool": func(data []byte) error {
+			var v client.PVEBool
+
+			return v.UnmarshalJSON(data)
+		},
+		"int": func(data []byte) error {
+			var v client.PVEInt
+
+			return v.UnmarshalJSON(data)
+		},
+		"float": func(data []byte) error {
+			var v client.PVEFloat
+
+			return v.UnmarshalJSON(data)
+		},
 	}
 }
 

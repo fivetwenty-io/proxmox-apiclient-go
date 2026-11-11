@@ -49,7 +49,7 @@ type LogConfig struct {
 func defaultLogConfig() LogConfig {
 	return LogConfig{
 		Enabled:           true,
-		RedactHeaders:     []string{"authorization", "cookie", "csrfpreventiontoken"},
+		RedactHeaders:     []string{headerAuthorization, headerCookie, headerCSRF},
 		RedactParams:      []string{redactParamPassword, "token", "secret"},
 		LogRequestHeader:  false,
 		LogResponseHeader: false,
