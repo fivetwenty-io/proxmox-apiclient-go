@@ -5,6 +5,14 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v3.13.2] — 2026-11-11
+
+### Changed
+
+- The Go requirement moved to 1.27.4 to pick up two standard library security fixes. GO-2026-6859 is a header race in `MaxBytesReader` that can crash an HTTP/1 server, and GO-2026-6809 makes `crypto/x509` distrust a set of compromised intermediate certificates.
+- Dependency bumps: `golang.org/x/term` to 0.48.0 and `golang.org/x/sys` to 0.50.0.
+- golangci-lint in CI moved to v2.15.0, and gosec moved to v2.30.0.
+
 ## [v3.13.1] — 2026-11-11
 
 ### Security
