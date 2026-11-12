@@ -67,7 +67,7 @@ jobs:
     # G704 (HTTP to a caller-configured host). Keep in sync with Makefile.
     - name: Run gosec
       run: |
-        go install github.com/securego/gosec/v2/cmd/gosec@v2.28.0
+        go install github.com/securego/gosec/v2/cmd/gosec@v2.30.0
         gosec -quiet -fmt text \
           -exclude-dir=examples -exclude-dir=cmd \
           -exclude-dir=pkg/api/access -exclude-dir=pkg/api/cluster \
