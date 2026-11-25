@@ -1158,7 +1158,7 @@ type CreateNetworkParams struct {
 	Cidr6 *string `json:"cidr6,omitempty"`
 	// Comments Comments (inet, may span multiple lines)
 	Comments *string `json:"comments,omitempty"`
-	// Comments6 Comments (inet5, may span multiple lines)
+	// Comments6 Comments (inet6, may span multiple lines)
 	Comments6 *string `json:"comments6,omitempty"`
 	// Gateway IPv4 address.
 	Gateway *string `json:"gateway,omitempty"`
@@ -1384,7 +1384,7 @@ type UpdateNetwork2Params struct {
 	Cidr6 *string `json:"cidr6,omitempty"`
 	// Comments Comments (inet, may span multiple lines)
 	Comments *string `json:"comments,omitempty"`
-	// Comments6 Comments (inet5, may span multiple lines)
+	// Comments6 Comments (inet6, may span multiple lines)
 	Comments6 *string `json:"comments6,omitempty"`
 	// Delete List of properties to delete.
 	Delete []string `json:"delete,omitempty"`

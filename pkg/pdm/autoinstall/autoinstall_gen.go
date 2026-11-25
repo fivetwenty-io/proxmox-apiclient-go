@@ -430,6 +430,16 @@ func (s *service) ListPrepared(ctx context.Context) (*ListPreparedResponse, erro
 type CreatePreparedParams struct {
 	// AuthorizedTokens List of token IDs that are authorized to retrieve this answer.
 	AuthorizedTokens []string `json:"authorized-tokens,omitempty"`
+	// BondEnabled Whether to enable interface bonding for the management network.
+	BondEnabled *bool `json:"bond-enabled,omitempty"`
+	// BondHashPolicy Bond Transmit Hash Policy for LACP (802.3ad)
+	BondHashPolicy *string `json:"bond-hash-policy,omitempty"`
+	// BondMembersFilter Filter for network devices, to select the members of the management interface bond.
+	BondMembersFilter json.RawMessage `json:"bond-members-filter,omitempty"`
+	// BondMembersFilterMatch Whether the associated filters must all match for a device or if any one is enough.
+	BondMembersFilterMatch *string `json:"bond-members-filter-match,omitempty"`
+	// BondMode Linux Bond Mode
+	BondMode *string `json:"bond-mode,omitempty"`
 	// Cidr IP address and netmask if not using DHCP.  Supports templating via MiniJinja, so this holds either a literal CIDR or a template that resolves to one; it is parsed and validated at render time.
 	Cidr *string `json:"cidr,omitempty"`
 	// Country Country to use for apt mirrors.
@@ -488,6 +498,8 @@ type CreatePreparedParams struct {
 	UseDhcpFqdn bool `json:"use-dhcp-fqdn"`
 	// UseDhcpNetwork Whether to use the network configuration from the DHCP lease or not.
 	UseDhcpNetwork bool `json:"use-dhcp-network"`
+	// VlanId Optional VLAN tag to configure on the management interface, only with a static network configuration. With DHCP, the installer uses the VLAN of its installation environment.
+	VlanId *int64 `json:"vlan-id,omitempty"`
 }
 
 // CreatePreparedResponse mirrors the shape returned by POST /auto-install/prepared.
@@ -516,6 +528,13 @@ func (s *service) CreatePrepared(ctx context.Context, params *CreatePreparedPara
 		err = dec.Decode(&body)
 		if err != nil {
 			return nil, fmt.Errorf("autoinstall.CreatePrepared: decode params: %w", err)
+		}
+		if params.BondMembersFilter != nil {
+			encoded, err := json.Marshal(params.BondMembersFilter)
+			if err != nil {
+				return nil, fmt.Errorf("autoinstall.CreatePrepared: encode bond-members-filter: %w", err)
+			}
+			body["bond-members-filter"] = string(encoded)
 		}
 		if params.DiskFilter != nil {
 			encoded, err := json.Marshal(params.DiskFilter)
@@ -630,6 +649,16 @@ func (s *service) GetPrepared(ctx context.Context, id string) (*GetPreparedRespo
 type UpdatePreparedParams struct {
 	// AuthorizedTokens List of token IDs that are authorized to retrieve this answer.
 	AuthorizedTokens []string `json:"authorized-tokens,omitempty"`
+	// BondEnabled Whether to enable interface bonding for the management network.
+	BondEnabled *bool `json:"bond-enabled,omitempty"`
+	// BondHashPolicy Bond Transmit Hash Policy for LACP (802.3ad)
+	BondHashPolicy *string `json:"bond-hash-policy,omitempty"`
+	// BondMembersFilter Filter for network devices, to select the members of the management interface bond.
+	BondMembersFilter json.RawMessage `json:"bond-members-filter,omitempty"`
+	// BondMembersFilterMatch Whether the associated filters must all match for a device or if any one is enough.
+	BondMembersFilterMatch *string `json:"bond-members-filter-match,omitempty"`
+	// BondMode Linux Bond Mode
+	BondMode *string `json:"bond-mode,omitempty"`
 	// Cidr IP address and netmask if not using DHCP.  Supports templating via MiniJinja, so this holds either a literal CIDR or a template that resolves to one; it is parsed and validated at render time.
 	Cidr *string `json:"cidr,omitempty"`
 	// Country Country to use for apt mirrors.
@@ -690,6 +719,8 @@ type UpdatePreparedParams struct {
 	UseDhcpFqdn *bool `json:"use-dhcp-fqdn,omitempty"`
 	// UseDhcpNetwork Whether to use the network configuration from the DHCP lease or not.
 	UseDhcpNetwork *bool `json:"use-dhcp-network,omitempty"`
+	// VlanId Optional VLAN tag to configure on the management interface, only with a static network configuration. With DHCP, the installer uses the VLAN of its installation environment.
+	VlanId *int64 `json:"vlan-id,omitempty"`
 }
 
 // UpdatePreparedResponse mirrors the shape returned by PUT /auto-install/prepared/{id}.
@@ -718,6 +749,13 @@ func (s *service) UpdatePrepared(ctx context.Context, id string, params *UpdateP
 		err = dec.Decode(&body)
 		if err != nil {
 			return nil, fmt.Errorf("autoinstall.UpdatePrepared: decode params: %w", err)
+		}
+		if params.BondMembersFilter != nil {
+			encoded, err := json.Marshal(params.BondMembersFilter)
+			if err != nil {
+				return nil, fmt.Errorf("autoinstall.UpdatePrepared: encode bond-members-filter: %w", err)
+			}
+			body["bond-members-filter"] = string(encoded)
 		}
 		if params.DiskFilter != nil {
 			encoded, err := json.Marshal(params.DiskFilter)

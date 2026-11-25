@@ -36,7 +36,7 @@ type Service interface {
 	// List all the remotes this instance is managing.
 	ListRemote(ctx context.Context) (*ListRemoteResponse, error)
 	// CreateRemote POST /remotes/remote
-	// Add a new remote to manage.  If `create-token` is specified, a new API token is generated on the target remote with the given name and used instead of the existing authentication details in the entry.
+	// Add a new remote to manage.  If `create-token` is specified, a new API token is generated on the target remote with the given name and used instead of the existing authentication details in the entry.  Creating the token times out after 180 seconds. Waiting for the configuration lock and saving the new entry do not count toward this limit.
 	CreateRemote(ctx context.Context, params *CreateRemoteParams) error
 	// DeleteRemote DELETE /remotes/remote/{id}
 	// Remove a remote that this instance is managing.

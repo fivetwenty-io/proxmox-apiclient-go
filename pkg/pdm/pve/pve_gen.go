@@ -315,7 +315,7 @@ type Service interface {
 	// Return the cached update information about a remote.
 	ListRemotesUpdates(ctx context.Context, remote string) (*ListRemotesUpdatesResponse, error)
 	// CreateScan POST /pve/scan
-	// Scans the given connection info for pve cluster information  For each node that is returned, the TLS connection is probed, to check if using a fingerprint is necessary.
+	// Scans the given connection info for pve cluster information.
 	CreateScan(ctx context.Context, params *CreateScanParams) (*CreateScanResponse, error)
 }
 
@@ -4407,6 +4407,8 @@ type ListRemotesNodesStatusResponse struct {
 	Cpuinfo json.RawMessage `json:"cpuinfo"`
 	// CurrentKernel Meta-information about the currently booted kernel of this node.
 	CurrentKernel json.RawMessage `json:"current-kernel"`
+	// Idle Sum of how much time each core has spent idle, in seconds.
+	Idle client.PVEInt `json:"idle"`
 	// Loadavg An array of load avg for 1, 5 and 15 minutes respectively.
 	Loadavg []string `json:"loadavg"`
 	// Memory Object.
@@ -4415,6 +4417,8 @@ type ListRemotesNodesStatusResponse struct {
 	Pveversion string `json:"pveversion"`
 	// Rootfs Object.
 	Rootfs json.RawMessage `json:"rootfs"`
+	// Uptime The uptime of the system (including time spent in suspend), in seconds.
+	Uptime client.PVEInt `json:"uptime"`
 }
 
 // ListRemotesNodesStatus implements Service.ListRemotesNodesStatus. GET /pve/remotes/{remote}/nodes/{node}/status.

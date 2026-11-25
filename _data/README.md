@@ -133,13 +133,17 @@ bindings for all thirteen namespaces (`access`, `auto-install` → package
 directory index. The `/pve` and `/pbs` trees are PDM's proxied per-remote
 operations against managed PVE/PBS instances.
 
-**Current pin: fetched 2026-09-03 from
-`https://pdm.proxmox.com/docs/api-viewer/apidoc.js` — PDM 1.1.7, 327
+**Current pin: fetched 2026-11-25 from
+`https://pdm.proxmox.com/docs/api-viewer/apidoc.js` — PDM 1.1.10, 327
 method-operations in the API tree (326 generated; only `GET /` is skipped).**
 
 Dialect notes: the PDM spec shares the PBS encoding conventions (boolean
 `additionalProperties`, nested `format` schemas) and adds an `unstable`
-boolean field on endpoint info entries, which the generator ignores. The
+boolean field on endpoint info entries, which the generator ignores. Many
+parameter schemas and a few returns schemas are wrapped in `allOf` (plain
+object members merged by `flattenComposite`, as for the PVE HA rules), and
+composite `oneOf` variants use the `type-property`, `type-property-schema`,
+and `instance-type` keys, which nested properties keep as raw JSON. The
 extracted array has a single top-level node (the `/` API tree) — PDM has
 no extra protocol trees.
 
