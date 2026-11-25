@@ -13,8 +13,9 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync/atomic"
 
-	"github.com/gorilla/websocket"
+	"github.com/coder/websocket"
 
 	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/redirect"
 	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/safetext"
@@ -130,34 +131,47 @@ type MTunnelSession struct {
 	Upid string `json:"upid"`
 }
 
-// Conn wraps a gorilla WebSocket connection and exposes typed I/O.
+// Conn wraps a WebSocket connection and exposes typed I/O. Its methods are
+// safe to call from more than one goroutine, except that only one goroutine
+// may call ReadMessage at a time.
 type Conn struct {
 	ws     *websocket.Conn
-	closed bool
+	closed atomic.Bool
 }
 
 // ReadMessage reads the next message from the connection.
-// Returns messageType (websocket.TextMessage / BinaryMessage), data, error.
+// Returns messageType (TextMessage or BinaryMessage), data, error.
+//
+// An error from a close frame the server sent carries a
+// github.com/coder/websocket CloseError, and websocket.CloseStatus reads its
+// code. A connection that ended without a close frame reports
+// StatusAbnormalClosure.
 func (c *Conn) ReadMessage() (int, []byte, error) {
-	if c.closed {
+	if c.closed.Load() {
 		return 0, nil, ErrWriteAfterClose
 	}
 
-	msgType, data, err := c.ws.ReadMessage()
+	msgType, data, err := c.ws.Read(context.Background())
 	if err != nil {
-		return 0, nil, fmt.Errorf("read message: %w", safetext.CappedError(err, maxCloseErrorBytes))
+		return 0, nil, fmt.Errorf("read message: %w", safetext.CappedError(readError(err), maxCloseErrorBytes))
 	}
 
-	return msgType, data, nil
+	return int(msgType), data, nil
 }
 
-// WriteMessage writes a message to the connection.
+// WriteMessage writes a TextMessage or BinaryMessage to the connection. Any
+// other message type returns ErrUnsupportedMessageType: the library sends
+// pings, pongs, and the close frame itself.
 func (c *Conn) WriteMessage(messageType int, data []byte) error {
-	if c.closed {
+	if c.closed.Load() {
 		return ErrWriteAfterClose
 	}
 
-	err := c.ws.WriteMessage(messageType, data)
+	if messageType != TextMessage && messageType != BinaryMessage {
+		return fmt.Errorf("%w: %d", ErrUnsupportedMessageType, messageType)
+	}
+
+	err := c.ws.Write(context.Background(), websocket.MessageType(messageType), data)
 	if err != nil {
 		return fmt.Errorf("write message: %w", err)
 	}
@@ -165,28 +179,22 @@ func (c *Conn) WriteMessage(messageType int, data []byte) error {
 	return nil
 }
 
-// Close closes the WebSocket connection gracefully.
+// Close closes the WebSocket connection gracefully. It sends a normal
+// closure, waits a bounded time for the server's close frame, and always
+// closes the network connection. A failed handshake means the server has
+// already gone, so it is not reported. Calling Close again does nothing.
 func (c *Conn) Close() error {
-	if c.closed {
+	if c.closed.Swap(true) {
 		return nil
 	}
 
-	c.closed = true
-
-	_ = c.ws.WriteMessage(
-		websocket.CloseMessage,
-		websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""),
-	)
-
-	err := c.ws.Close()
-	if err != nil {
-		return fmt.Errorf("close connection: %w", err)
-	}
+	_ = c.ws.Close(websocket.StatusNormalClosure, "")
 
 	return nil
 }
 
-// Underlying returns the raw gorilla websocket.Conn for callers that need it.
+// Underlying returns the github.com/coder/websocket connection for callers
+// that need it.
 func (c *Conn) Underlying() *websocket.Conn {
 	return c.ws
 }
@@ -653,22 +661,20 @@ func (p *ProxyClient) dial(ctx context.Context, apiPath string, query url.Values
 		tlsCfg = &tls.Config{InsecureSkipVerify: true}
 	}
 
-	dialer := websocket.Dialer{
-		TLSClientConfig: tlsCfg,
-	}
-
 	headers := http.Header{}
 	applyAuthHeaders(headers, p.cfg.Ticket, p.cfg.CSRFToken)
 
-	conn, resp, err := dialer.DialContext(ctx, wsURL.String(), headers)
+	conn, _, err := dialWebSocket(ctx, &dialSpec{
+		target:    &wsURL,
+		header:    headers,
+		tlsConfig: tlsCfg,
+		netDial:   nil,
+		onPong:    nil,
+	})
 	if err != nil {
-		if resp != nil {
-			_ = resp.Body.Close()
-		}
-
 		// The query holds the one-time ticket and the tunnel socket, so the
 		// error names the scheme, host, and path and nothing more.
-		return nil, fmt.Errorf("dial %s: %w", redirect.Redact(&wsURL), redirect.Scrub(err))
+		return nil, fmt.Errorf("dial %s: %w", redirect.Redact(&wsURL), err)
 	}
 
 	return &Conn{ws: conn}, nil

@@ -11,7 +11,6 @@ import (
 	"testing"
 
 	pkgws "github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/websocket"
-	"github.com/gorilla/websocket"
 )
 
 // Values a WebSocket dial error must never repeat. The ticket and the socket go
@@ -129,7 +128,7 @@ func TestProxyClient_DialErrorsLeaveNoTicket(t *testing.T) {
 			err := dial(context.Background(), proxyClientFor(t, server))
 			assertNoDialSecret(t, err)
 
-			if !errors.Is(err, websocket.ErrBadHandshake) {
+			if !errors.Is(err, pkgws.ErrBadHandshake) {
 				t.Errorf("errors.Is(%v, ErrBadHandshake) = false, want true", err)
 			}
 

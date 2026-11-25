@@ -2,20 +2,22 @@
 package websocket
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"sync"
 	"time"
 
+	"github.com/coder/websocket"
+
 	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/constants"
-	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/redirect"
 	"github.com/fivetwenty-io/proxmox-apiclient-go/v3/internal/safetext"
-	"github.com/gorilla/websocket"
 )
 
 var (
@@ -53,15 +55,15 @@ const (
 // Client represents a WebSocket client for PVE events.
 type Client struct {
 	conn          *websocket.Conn
+	rawConn       net.Conn // the network connection under conn, which carries the read deadlines
 	config        *Config
 	url           *url.URL
 	headers       http.Header
-	dialer        *websocket.Dialer
+	dialer        *dialer
 	handlers      map[string][]handlerEntry
 	nextHandlerID uint64
 	handlerSem    chan struct{} // bounds concurrently-running handler goroutines
 	mu            sync.RWMutex
-	writeMu       sync.Mutex // serialises all ws writes (gorilla not concurrent-write-safe)
 	closed        bool
 	closeChan     chan struct{}
 	errorChan     chan error
@@ -111,7 +113,8 @@ type Config struct {
 	// MaxReconnectAttempts is the maximum number of reconnection attempts.
 	MaxReconnectAttempts int
 
-	// BufferSize is the read/write buffer size.
+	// BufferSize has no effect. The WebSocket library sizes its own buffers,
+	// and the field is kept so existing configurations still compile.
 	BufferSize int
 
 	// MaxConcurrentHandlers bounds how many event handler goroutines may run
@@ -174,6 +177,7 @@ func New(config *Config) (*Client, error) {
 
 	return &Client{
 		conn:          nil,
+		rawConn:       nil,
 		config:        config,
 		url:           buildWSURL(config),
 		headers:       make(http.Header),
@@ -212,21 +216,12 @@ func buildWSURL(config *Config) *url.URL {
 	}
 }
 
-// buildDialer constructs the gorilla websocket.Dialer used for Connect.
-func buildDialer(config *Config) *websocket.Dialer {
-	return &websocket.Dialer{
-		NetDial:           nil,
-		NetDialContext:    nil,
-		NetDialTLSContext: nil,
-		Proxy:             nil,
-		TLSClientConfig:   config.TLSConfig,
-		HandshakeTimeout:  config.HandshakeTimeout,
-		ReadBufferSize:    config.BufferSize,
-		WriteBufferSize:   config.BufferSize,
-		WriteBufferPool:   nil,
-		Subprotocols:      nil,
-		EnableCompression: false,
-		Jar:               nil,
+// buildDialer constructs the dialer used for Connect.
+func buildDialer(config *Config) *dialer {
+	return &dialer{
+		TLSClientConfig:  config.TLSConfig,
+		HandshakeTimeout: config.HandshakeTimeout,
+		NetDialContext:   nil,
 	}
 }
 
@@ -261,59 +256,33 @@ func (c *Client) Connect(ctx context.Context) error {
 		return errAlreadyConnected
 	}
 
-	// Connect with context
-	conn, resp, err := c.dialer.DialContext(ctx, c.url.String(), c.headers)
+	conn, raw, err := c.dial(ctx)
 	if err != nil {
-		if resp != nil {
-			_ = resp.Body.Close()
-		}
-
-		return fmt.Errorf("failed to connect: %w", redirect.Scrub(err))
+		return fmt.Errorf("failed to connect: %w", err)
 	}
 
-	// Configure deadlines on the freshly dialed conn before publishing it as
-	// c.conn. If either call fails, close the conn and return without ever
+	// Configure the read deadline on the freshly dialed conn before publishing
+	// it as c.conn. If the call fails, close the conn and return without ever
 	// setting c.conn, so the client stays reconnectable instead of getting
 	// stuck returning errAlreadyConnected forever with a leaked connection.
+	// Writes are bounded by a context per write instead of a deadline.
 	if c.config.ReadTimeout > 0 {
-		err := conn.SetReadDeadline(time.Now().Add(c.config.ReadTimeout))
+		err := raw.SetReadDeadline(time.Now().Add(c.config.ReadTimeout))
 		if err != nil {
-			_ = conn.Close()
+			_ = conn.CloseNow()
 
 			return fmt.Errorf("failed to set read deadline: %w", err)
 		}
 	}
 
-	if c.config.WriteTimeout > 0 {
-		err := conn.SetWriteDeadline(time.Now().Add(c.config.WriteTimeout))
-		if err != nil {
-			_ = conn.Close()
-
-			return fmt.Errorf("failed to set write deadline: %w", err)
-		}
-	}
-
 	c.conn = conn
+	c.rawConn = raw
 	c.closed = false
-
-	// Set pong handler — close over local conn, not c.conn, to avoid a race
-	// when Disconnect nils c.conn concurrently.
-	pongConn := conn
-	pongConn.SetPongHandler(func(string) error {
-		if c.config.ReadTimeout > 0 {
-			err := pongConn.SetReadDeadline(time.Now().Add(c.config.ReadTimeout))
-			if err != nil {
-				return fmt.Errorf("failed to set read deadline: %w", err)
-			}
-		}
-
-		return nil
-	})
 
 	// Start ping ticker
 	if c.config.PingInterval > 0 {
 		c.pingTicker = time.NewTicker(c.config.PingInterval)
-		go c.pingLoop()
+		go c.pingLoop(context.WithoutCancel(ctx))
 	}
 
 	// Start read loop
@@ -379,23 +348,19 @@ func (c *Client) Disconnect() error {
 	if c.conn != nil {
 		conn := c.conn
 		c.conn = nil
+		c.rawConn = nil
 
-		// Release mu before acquiring writeMu to avoid lock-order inversion.
+		// Release mu while the close handshake runs, so the read loop and
+		// other callers are not held up behind it.
 		c.mu.Unlock()
 
-		c.writeMu.Lock()
-		_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
-		closeErr := conn.Close()
-		c.writeMu.Unlock()
+		// Close sends a normal closure, waits a bounded time for the server's
+		// close frame, and always closes the network connection. A failed
+		// handshake means the server has already gone, so it is not reported.
+		_ = conn.Close(websocket.StatusNormalClosure, "")
 
 		// Re-acquire mu so the deferred Unlock does not double-unlock.
 		c.mu.Lock()
-
-		if closeErr != nil {
-			return fmt.Errorf("failed to close websocket connection: %w", closeErr)
-		}
-
-		return nil
 	}
 
 	return nil
@@ -432,17 +397,19 @@ func (c *Client) Send(data interface{}) error {
 		return errNotConnected
 	}
 
-	c.writeMu.Lock()
-	defer c.writeMu.Unlock()
+	// encoding/json's Encoder ends the message with a newline, which servers
+	// have always received from Send.
+	var payload bytes.Buffer
 
-	if c.config.WriteTimeout > 0 {
-		err := conn.SetWriteDeadline(time.Now().Add(c.config.WriteTimeout))
-		if err != nil {
-			return fmt.Errorf("failed to set write deadline: %w", err)
-		}
+	err := json.NewEncoder(&payload).Encode(data)
+	if err != nil {
+		return fmt.Errorf("failed to send JSON message: %w", err)
 	}
 
-	err := conn.WriteJSON(data)
+	ctx, cancel := c.writeContext(context.Background())
+	defer cancel()
+
+	err = conn.Write(ctx, websocket.MessageText, payload.Bytes())
 	if err != nil {
 		return fmt.Errorf("failed to send JSON message: %w", err)
 	}
@@ -460,17 +427,10 @@ func (c *Client) SendText(text string) error {
 		return errNotConnected
 	}
 
-	c.writeMu.Lock()
-	defer c.writeMu.Unlock()
+	ctx, cancel := c.writeContext(context.Background())
+	defer cancel()
 
-	if c.config.WriteTimeout > 0 {
-		err := conn.SetWriteDeadline(time.Now().Add(c.config.WriteTimeout))
-		if err != nil {
-			return fmt.Errorf("failed to set write deadline: %w", err)
-		}
-	}
-
-	err := conn.WriteMessage(websocket.TextMessage, []byte(text))
+	err := conn.Write(ctx, websocket.MessageText, []byte(text))
 	if err != nil {
 		return fmt.Errorf("failed to send text message: %w", err)
 	}
@@ -577,6 +537,47 @@ func (c *Client) NewStream(bufferSize int) *Stream {
 	return stream
 }
 
+// dial opens the WebSocket connection, bounded by Config.HandshakeTimeout,
+// and returns it with the network connection under it. Each pong pushes the
+// read deadline out by Config.ReadTimeout.
+func (c *Client) dial(ctx context.Context) (*websocket.Conn, net.Conn, error) {
+	if c.dialer.HandshakeTimeout > 0 {
+		var cancel context.CancelFunc
+
+		ctx, cancel = context.WithTimeout(ctx, c.dialer.HandshakeTimeout)
+		defer cancel()
+	}
+
+	spec := &dialSpec{
+		target:    c.url,
+		header:    c.headers,
+		tlsConfig: c.dialer.TLSClientConfig,
+		netDial:   c.dialer.NetDialContext,
+		onPong:    nil,
+	}
+
+	if c.config.ReadTimeout > 0 {
+		spec.onPong = func(raw net.Conn) {
+			// A failure here surfaces at the next read, which sets the
+			// deadline again and counts the failure.
+			_ = raw.SetReadDeadline(time.Now().Add(c.config.ReadTimeout))
+		}
+	}
+
+	return dialWebSocket(ctx, spec)
+}
+
+// writeContext returns the context one write runs under, which ends after
+// Config.WriteTimeout when that is set. A write that runs out of time closes
+// the connection, and the read loop then reconnects.
+func (c *Client) writeContext(parent context.Context) (context.Context, context.CancelFunc) {
+	if c.config.WriteTimeout > 0 {
+		return context.WithTimeout(parent, c.config.WriteTimeout)
+	}
+
+	return context.WithCancel(parent)
+}
+
 // registerHandler is On's implementation, returning the ID assigned to the
 // handler so callers within the package (e.g. NewSubscription) can later
 // deregister that specific handler via removeHandler.
@@ -614,6 +615,7 @@ func (c *Client) readLoop(ctx context.Context) {
 	// reference for the lifetime of this goroutine.
 	c.mu.RLock()
 	conn := c.conn
+	raw := c.rawConn
 	c.mu.RUnlock()
 
 	defer func() {
@@ -621,9 +623,20 @@ func (c *Client) readLoop(ctx context.Context) {
 			c.sendError(fmt.Errorf("%w: %v", errPanicInReadLoop, r))
 		}
 
+		// Disconnect closes the connection itself. Any other way out of the
+		// loop leaves a connection nothing reads from, so close it here.
+		select {
+		case <-c.closeChan:
+		default:
+			_ = conn.CloseNow()
+		}
+
 		c.handleDisconnect(ctx)
 	}()
 
+	// A read is not bound to ctx: the context Connect received ends the
+	// handshake only, and Disconnect is what stops the loop.
+	readCtx := context.WithoutCancel(ctx)
 	deadlineFailures := 0
 
 	for {
@@ -631,7 +644,7 @@ func (c *Client) readLoop(ctx context.Context) {
 		case <-c.closeChan:
 			return
 		default:
-			switch c.refreshReadDeadline(conn, &deadlineFailures) {
+			switch c.refreshReadDeadline(raw, &deadlineFailures) {
 			case deadlineOutcomeFatal:
 				return
 			case deadlineOutcomeRetry:
@@ -639,20 +652,31 @@ func (c *Client) readLoop(ctx context.Context) {
 			case deadlineOutcomeOK:
 			}
 
-			messageType, data, err := conn.ReadMessage()
+			messageType, data, err := conn.Read(readCtx)
 			if err != nil {
-				if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
+				err = readError(err)
+				if isUnexpectedClose(err) {
 					c.sendError(fmt.Errorf("read error: %w", safetext.CappedError(err, maxCloseErrorBytes)))
 				}
 
 				return
 			}
 
-			if messageType == websocket.TextMessage || messageType == websocket.BinaryMessage {
+			if messageType == websocket.MessageText || messageType == websocket.MessageBinary {
 				c.handleMessage(data)
 			}
 		}
 	}
+}
+
+// isUnexpectedClose reports whether err ended the connection with a close
+// status other than a normal closure or the server going away. A peer that
+// vanished without a close frame counts, because readError gives it
+// StatusAbnormalClosure. A read timeout and a local close do not.
+func isUnexpectedClose(err error) bool {
+	status := websocket.CloseStatus(err)
+
+	return status != -1 && status != websocket.StatusNormalClosure && status != websocket.StatusGoingAway
 }
 
 // deadlineOutcome is the result of one refreshReadDeadline call, telling
@@ -671,7 +695,7 @@ const (
 // deadlineOutcomeRetry, unless *failures has reached
 // maxConsecutiveDeadlineFailures, in which case the conn is treated as dead
 // (same as a fatal ReadMessage error) and deadlineOutcomeFatal is reported.
-func (c *Client) refreshReadDeadline(conn *websocket.Conn, failures *int) deadlineOutcome {
+func (c *Client) refreshReadDeadline(conn net.Conn, failures *int) deadlineOutcome {
 	if c.config.ReadTimeout <= 0 {
 		return deadlineOutcomeOK
 	}
@@ -707,7 +731,7 @@ func (c *Client) refreshReadDeadline(conn *websocket.Conn, failures *int) deadli
 	return deadlineOutcomeRetry
 }
 
-func (c *Client) pingLoop() {
+func (c *Client) pingLoop(ctx context.Context) {
 	// Capture ticker at start; Disconnect stops and nils c.pingTicker but we
 	// hold our own reference so the channel read is always safe.
 	c.mu.RLock()
@@ -729,7 +753,12 @@ func (c *Client) pingLoop() {
 				return
 			}
 
-			err := c.sendPing(conn)
+			err := c.sendPing(ctx, conn)
+			if errors.Is(err, net.ErrClosed) {
+				// The connection is gone, and the read loop reports it.
+				return
+			}
+
 			if err != nil {
 				c.sendError(err)
 
@@ -851,25 +880,20 @@ func (c *Client) sendError(err error) {
 	}
 }
 
-// sendPing sets a write deadline (if configured) and sends a ping frame.
-// All operations are serialised through writeMu.
-func (c *Client) sendPing(conn *websocket.Conn) error {
-	c.writeMu.Lock()
-	defer c.writeMu.Unlock()
+// sendPing sends a ping frame and waits for its pong, both bounded by
+// Config.WriteTimeout. A pong that does not arrive in that time is not an
+// error: the pong, when it comes, still pushes the read deadline out, and a
+// server that never answers is caught by Config.ReadTimeout.
+func (c *Client) sendPing(parent context.Context, conn *websocket.Conn) error {
+	ctx, cancel := c.writeContext(parent)
+	defer cancel()
 
-	if c.config.WriteTimeout > 0 {
-		err := conn.SetWriteDeadline(time.Now().Add(c.config.WriteTimeout))
-		if err != nil {
-			return fmt.Errorf("failed to set write deadline: %w", err)
-		}
+	err := conn.Ping(ctx)
+	if err == nil || errors.Is(err, context.DeadlineExceeded) {
+		return nil
 	}
 
-	err := conn.WriteMessage(websocket.PingMessage, nil)
-	if err != nil {
-		return fmt.Errorf("ping error: %w", err)
-	}
-
-	return nil
+	return fmt.Errorf("ping error: %w", err)
 }
 
 // Events returns the event channel.

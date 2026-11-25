@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gorilla/websocket"
+	"github.com/coder/websocket"
 
 	pkgws "github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/websocket"
 )
@@ -22,22 +22,23 @@ func newWSServer(t *testing.T, frameJSON string) *httptest.Server {
 	t.Helper()
 
 	srv := httptest.NewServer(http.HandlerFunc(func(respWriter http.ResponseWriter, req *http.Request) {
-		conn, err := wsUpgrader.Upgrade(respWriter, req, nil)
-		if err != nil {
+		conn := acceptWS(respWriter, req, nil)
+		if conn == nil {
 			return
 		}
 
-		defer func() { _ = conn.Close() }()
-
-		if frameJSON != "" {
-			_ = conn.WriteMessage(websocket.TextMessage, []byte(frameJSON))
-		}
+		defer func() { _ = conn.CloseNow() }()
 
 		// Keep the connection open for up to 2 s or until client disconnects.
-		_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+		ctx, cancel := context.WithTimeout(req.Context(), 2*time.Second)
+		defer cancel()
+
+		if frameJSON != "" {
+			_ = conn.Write(ctx, websocket.MessageText, []byte(frameJSON))
+		}
 
 		for {
-			_, _, readErr := conn.ReadMessage()
+			_, _, readErr := conn.Read(ctx)
 			if readErr != nil {
 				break
 			}
@@ -53,23 +54,24 @@ func newPingCountingWSServer(t *testing.T, pings *int32) *httptest.Server {
 	t.Helper()
 
 	return httptest.NewServer(http.HandlerFunc(func(respWriter http.ResponseWriter, req *http.Request) {
-		conn, upErr := wsUpgrader.Upgrade(respWriter, req, nil)
-		if upErr != nil {
+		conn := acceptWS(respWriter, req, &websocket.AcceptOptions{
+			OnPingReceived: func(context.Context, []byte) bool {
+				atomic.AddInt32(pings, 1)
+
+				return true
+			},
+		})
+		if conn == nil {
 			return
 		}
 
-		defer func() { _ = conn.Close() }()
+		defer func() { _ = conn.CloseNow() }()
 
-		conn.SetPingHandler(func(appData string) error {
-			atomic.AddInt32(pings, 1)
-
-			return conn.WriteControl(websocket.PongMessage, []byte(appData), time.Now().Add(time.Second))
-		})
-
-		_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+		ctx, cancel := context.WithTimeout(req.Context(), 2*time.Second)
+		defer cancel()
 
 		for {
-			_, _, readErr := conn.ReadMessage()
+			_, _, readErr := conn.Read(ctx)
 			if readErr != nil {
 				return
 			}
@@ -572,18 +574,20 @@ func TestHandleMessage_RawFallback(t *testing.T) {
 
 	// Send a non-JSON payload; client should fall back to raw event type.
 	rawSrv := httptest.NewServer(http.HandlerFunc(func(respWriter http.ResponseWriter, req *http.Request) {
-		conn, err := wsUpgrader.Upgrade(respWriter, req, nil)
-		if err != nil {
+		conn := acceptWS(respWriter, req, nil)
+		if conn == nil {
 			return
 		}
 
-		defer func() { _ = conn.Close() }()
+		defer func() { _ = conn.CloseNow() }()
 
-		_ = conn.WriteMessage(websocket.TextMessage, []byte("not-json"))
+		ctx, cancel := context.WithTimeout(req.Context(), 2*time.Second)
+		defer cancel()
 
-		_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+		_ = conn.Write(ctx, websocket.MessageText, []byte("not-json"))
+
 		for {
-			_, _, readErr := conn.ReadMessage()
+			_, _, readErr := conn.Read(ctx)
 			if readErr != nil {
 				break
 			}

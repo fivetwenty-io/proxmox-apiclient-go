@@ -1261,3 +1261,28 @@ func sendConcurrently(client *pkgws.Client, senders, perSender int) []error {
 
 	return errs
 }
+
+// TestBehavior_HandshakeAddsNoUserAgentOrEncoding checks that the upgrade
+// request carries only the headers the caller and the WebSocket protocol set.
+func TestBehavior_HandshakeAddsNoUserAgentOrEncoding(t *testing.T) {
+	t.Parallel()
+
+	rec := newRecordingServer(t, "", nil)
+	client := newBehaviorClient(t, behaviorConfig(rec.Server))
+
+	err := client.Connect(context.Background())
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+
+	select {
+	case got := <-rec.headers:
+		for _, name := range []string{"User-Agent", "Accept-Encoding", "Origin"} {
+			if values := got.Values(name); len(values) != 0 {
+				t.Errorf("header %s: want none, got %q", name, values)
+			}
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("timeout waiting for the upgrade request")
+	}
+}

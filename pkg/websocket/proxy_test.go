@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gorilla/websocket"
+	"github.com/coder/websocket"
 
 	pkgws "github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/websocket"
 )
@@ -37,11 +37,6 @@ const (
 
 // --- helpers ---
 
-//nolint:gochecknoglobals // shared test-only WebSocket upgrader; not mutated after init
-var wsUpgrader = websocket.Upgrader{
-	CheckOrigin: func(_ *http.Request) bool { return true },
-}
-
 // newTestServer returns an httptest.Server that:
 //   - POST /api2/json/* → replies with the given JSON body and status code
 //   - GET /api2/json/*  → upgrades to WebSocket, sends one text frame, then closes
@@ -58,21 +53,16 @@ func newTestServer(t *testing.T, postBody string, postStatus int) *httptest.Serv
 			_, _ = fmt.Fprint(respWriter, postBody)
 
 		case http.MethodGet:
-			conn, err := wsUpgrader.Upgrade(respWriter, req, nil)
-			if err != nil {
-				http.Error(respWriter, "upgrade failed", http.StatusInternalServerError)
-
+			conn := acceptWS(respWriter, req, nil)
+			if conn == nil {
 				return
 			}
 
-			defer func() { _ = conn.Close() }()
+			defer func() { _ = conn.CloseNow() }()
 
 			// Send a single text frame then close normally.
-			_ = conn.WriteMessage(websocket.TextMessage, []byte("hello"))
-			_ = conn.WriteMessage(
-				websocket.CloseMessage,
-				websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""),
-			)
+			_ = conn.Write(req.Context(), websocket.MessageText, []byte("hello"))
+			_ = conn.Close(websocket.StatusNormalClosure, "")
 
 		default:
 			http.Error(respWriter, "method not allowed", http.StatusMethodNotAllowed)
@@ -308,8 +298,8 @@ func TestVMVNCConnect_HappyPath(t *testing.T) {
 		t.Fatalf("ReadMessage: %v", err)
 	}
 
-	if msgType != websocket.TextMessage {
-		t.Errorf("message type: want %d, got %d", websocket.TextMessage, msgType)
+	if msgType != pkgws.TextMessage {
+		t.Errorf("message type: want %d, got %d", pkgws.TextMessage, msgType)
 	}
 
 	if string(data) != "hello" {
@@ -805,7 +795,7 @@ func TestConn_WriteAfterClose(t *testing.T) {
 	}
 
 	// Write after close returns ErrWriteAfterClose.
-	err = conn.WriteMessage(websocket.TextMessage, []byte("after-close"))
+	err = conn.WriteMessage(pkgws.TextMessage, []byte("after-close"))
 	if !errors.Is(err, pkgws.ErrWriteAfterClose) {
 		t.Errorf("expected ErrWriteAfterClose, got %v", err)
 	}
@@ -821,7 +811,9 @@ func TestVMVNCConnect_ContextCancelled(t *testing.T) {
 		if req.Method == http.MethodGet {
 			time.Sleep(500 * time.Millisecond)
 
-			_, _ = wsUpgrader.Upgrade(respWriter, req, nil)
+			if conn := acceptWS(respWriter, req, nil); conn != nil {
+				_ = conn.CloseNow()
+			}
 		}
 	}))
 	defer slow.Close()
@@ -857,12 +849,12 @@ func TestAuthHeaders_InjectedOnConnect(t *testing.T) {
 			gotCookie = req.Header.Get("Cookie")
 			gotCSRF = req.Header.Get("Csrfpreventiontoken")
 
-			conn, err := wsUpgrader.Upgrade(respWriter, req, nil)
-			if err != nil {
+			conn := acceptWS(respWriter, req, nil)
+			if conn == nil {
 				return
 			}
 
-			defer func() { _ = conn.Close() }()
+			defer func() { _ = conn.CloseNow() }()
 		}
 	}))
 	defer srv.Close()

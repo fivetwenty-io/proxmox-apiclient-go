@@ -19,16 +19,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gorilla/websocket"
+	"github.com/coder/websocket"
 )
 
 var errForcedDeadlineFailure = errors.New("forced deadline failure for test")
 
 // failingDeadlineConn wraps a real net.Conn so tests can force
 // SetReadDeadline to fail after a fixed number of leading successful calls.
-// gorilla's handshake uses SetDeadline (not SetReadDeadline/SetWriteDeadline),
-// so it is unaffected by this override and the WebSocket upgrade always
-// completes normally.
+// The handshake never calls SetReadDeadline, so it is unaffected by this
+// override and the WebSocket upgrade always completes normally.
 type failingDeadlineConn struct {
 	net.Conn
 
@@ -80,20 +79,19 @@ func newFailingReadDeadlineDialer(
 func newInternalWSServer(t *testing.T) *httptest.Server {
 	t.Helper()
 
-	upgrader := websocket.Upgrader{CheckOrigin: func(_ *http.Request) bool { return true }}
-
 	return httptest.NewServer(http.HandlerFunc(func(respWriter http.ResponseWriter, req *http.Request) {
-		conn, err := upgrader.Upgrade(respWriter, req, nil)
+		conn, err := websocket.Accept(respWriter, req, nil)
 		if err != nil {
 			return
 		}
 
-		defer func() { _ = conn.Close() }()
+		defer func() { _ = conn.CloseNow() }()
 
-		_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+		ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
+		defer cancel()
 
 		for {
-			_, _, readErr := conn.ReadMessage()
+			_, _, readErr := conn.Read(ctx)
 			if readErr != nil {
 				return
 			}

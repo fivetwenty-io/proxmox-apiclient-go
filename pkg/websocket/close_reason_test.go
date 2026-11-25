@@ -10,7 +10,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/gorilla/websocket"
+	"github.com/coder/websocket"
 
 	pkgws "github.com/fivetwenty-io/proxmox-apiclient-go/v3/pkg/websocket"
 )
@@ -28,17 +28,14 @@ func closeWithReason(t *testing.T) *httptest.Server {
 	t.Helper()
 
 	srv := httptest.NewServer(http.HandlerFunc(func(respWriter http.ResponseWriter, req *http.Request) {
-		conn, err := wsUpgrader.Upgrade(respWriter, req, nil)
-		if err != nil {
+		conn := acceptWS(respWriter, req, nil)
+		if conn == nil {
 			return
 		}
 
-		defer func() { _ = conn.Close() }()
+		defer func() { _ = conn.CloseNow() }()
 
-		_ = conn.WriteMessage(
-			websocket.CloseMessage,
-			websocket.FormatCloseMessage(websocket.ClosePolicyViolation, hostileCloseReason),
-		)
+		_ = conn.Close(websocket.StatusPolicyViolation, hostileCloseReason)
 	}))
 	t.Cleanup(srv.Close)
 
@@ -70,8 +67,8 @@ func assertEscaped(t *testing.T, err error) {
 		t.Errorf("error text is %d bytes, want it cut near 256", len(err.Error()))
 	}
 
-	var closeErr *websocket.CloseError
-	if !errors.As(err, &closeErr) || closeErr.Code != websocket.ClosePolicyViolation {
+	var closeErr websocket.CloseError
+	if !errors.As(err, &closeErr) || closeErr.Code != websocket.StatusPolicyViolation {
 		t.Errorf("error %v no longer unwraps to the close error", err)
 	}
 }
