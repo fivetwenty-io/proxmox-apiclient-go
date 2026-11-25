@@ -108,6 +108,7 @@ var (
 	errUnusedOverride  = errors.New("override matches no endpoint in the spec")
 	errPatchTarget     = errors.New("property override needs an object returns schema")
 	errPatchProperty   = errors.New("property override names a property the spec does not declare")
+	errNoDiscriminator = errors.New("optional-discriminator entry names an endpoint whose parameters declare no type-property")
 )
 
 // indexedParamRe matches PVE spec param names of the form "word[n]" or
@@ -167,6 +168,15 @@ type dialectConfig struct {
 	// inherited from the spec so the emitted doc comment and pointer-ness
 	// still follow upstream. Applied after returnsOverrides.
 	returnsPropertyOverrides map[string]map[string]*schema
+
+	// optionalDiscriminators lists "VERB /path" tuples whose composite
+	// parameter schema names a type-property discriminator the server
+	// resolves on its own, so a caller need not send it. flattenComposite
+	// forces the discriminator required everywhere else; for these
+	// endpoints it keeps it optional instead. Only parameters are
+	// affected. Every entry must name an endpoint whose parameters declare
+	// a type-property, or collectEndpoints refuses to run.
+	optionalDiscriminators map[string]bool
 }
 
 //nolint:gochecknoglobals // intentional package-level lookup table; consulted throughout emission
@@ -544,7 +554,7 @@ type schema struct {
 	// rule endpoints (pve-ha-manager 5.2) are the first to declare their
 	// parameters this way: an allOf of the common properties plus a
 	// oneOf with one variant per rule type, discriminated by
-	// TypeProperty. flattenCompositeParameters merges them back into a
+	// TypeProperty. flattenComposite merges them back into a
 	// single Properties map before any emission code looks at them.
 	AllOf []*schema `json:"allOf,omitempty"`
 	OneOf []*schema `json:"oneOf,omitempty"`
@@ -761,21 +771,38 @@ func collectEndpoints(tree []*node) ([]endpoint, error) {
 // endpoint and records which entries were consumed, so collectEndpoints
 // can report the ones that matched nothing.
 type overrideTracker struct {
-	usedReturns map[string]bool
-	usedPatches map[string]bool
+	usedReturns        map[string]bool
+	usedPatches        map[string]bool
+	usedDiscriminators map[string]bool
 }
 
 func newOverrideTracker() *overrideTracker {
-	return &overrideTracker{usedReturns: map[string]bool{}, usedPatches: map[string]bool{}}
+	return &overrideTracker{
+		usedReturns:        map[string]bool{},
+		usedPatches:        map[string]bool{},
+		usedDiscriminators: map[string]bool{},
+	}
 }
 
 // apply flattens composite schemas and substitutes the overrides keyed by
-// "VERB /path" into info. A property override that cannot be applied is
-// returned as an error naming the endpoint; info is returned as far as it
-// got so the caller can still list the endpoint.
+// "VERB /path" into info. An optional-discriminator entry whose endpoint
+// declares no discriminator, or a property override that cannot be
+// applied, is returned as an error naming the endpoint; info is returned
+// as far as it got so the caller can still list the endpoint.
 func (tracker *overrideTracker) apply(key string, info endpointInfo) (endpointInfo, error) {
-	info.Parameters = flattenComposite(info.Parameters)
-	info.Returns = flattenComposite(info.Returns)
+	var discriminatorErr error
+
+	optionalDiscriminator := activeDialect.optionalDiscriminators[key]
+	if optionalDiscriminator {
+		tracker.usedDiscriminators[key] = true
+
+		if !hasDiscriminator(info.Parameters) {
+			discriminatorErr = fmt.Errorf("%s: %w", key, errNoDiscriminator)
+		}
+	}
+
+	info.Parameters = flattenComposite(info.Parameters, optionalDiscriminator)
+	info.Returns = flattenComposite(info.Returns, false)
 
 	if override, ok := activeDialect.returnsOverrides[key]; ok {
 		info.Returns = override
@@ -784,19 +811,19 @@ func (tracker *overrideTracker) apply(key string, info endpointInfo) (endpointIn
 
 	patches, ok := activeDialect.returnsPropertyOverrides[key]
 	if !ok {
-		return info, nil
+		return info, discriminatorErr
 	}
 
 	tracker.usedPatches[key] = true
 
 	patched, err := patchReturnsProperties(info.Returns, patches)
 	if err != nil {
-		return info, fmt.Errorf("%s: %w", key, err)
+		return info, errors.Join(discriminatorErr, fmt.Errorf("%s: %w", key, err))
 	}
 
 	info.Returns = patched
 
-	return info, nil
+	return info, discriminatorErr
 }
 
 // unused returns one error per override table entry no endpoint consumed,
@@ -813,6 +840,12 @@ func (tracker *overrideTracker) unused() []error {
 	for _, key := range sortedKeys(activeDialect.returnsPropertyOverrides) {
 		if !tracker.usedPatches[key] {
 			errs = append(errs, fmt.Errorf("%w: returnsPropertyOverrides[%q]", errUnusedOverride, key))
+		}
+	}
+
+	for _, key := range sortedKeys(activeDialect.optionalDiscriminators) {
+		if !tracker.usedDiscriminators[key] {
+			errs = append(errs, fmt.Errorf("%w: optionalDiscriminators[%q]", errUnusedOverride, key))
 		}
 	}
 
@@ -893,8 +926,11 @@ func patchReturnsProperties(returns *schema, patches map[string]*schema) (*schem
 //     required only when every variant declares it required; a property
 //     missing from, or optional in, any variant becomes optional. The
 //     discriminator named by TypeProperty is added from
-//     TypePropertySchema and forced required, replacing any variant's
-//     own declaration of it, so the caller can always select the variant.
+//     TypePropertySchema, replacing any variant's own declaration of it,
+//     and forced required so the caller can always select the variant.
+//     With optionalDiscriminator set it is forced optional instead, for
+//     endpoints whose server resolves the variant itself (see
+//     dialectConfig.optionalDiscriminators).
 //
 // Where two members declare the same property, the required declaration
 // wins for allOf and the first variant's schema (with optionality
@@ -902,13 +938,13 @@ func patchReturnsProperties(returns *schema, patches map[string]*schema) (*schem
 // differently, the descriptions are concatenated, each labelled with the
 // variant's discriminator value, so the emitted field doc covers every
 // meaning.
-func flattenComposite(objSchema *schema) *schema {
+func flattenComposite(objSchema *schema, optionalDiscriminator bool) *schema {
 	if objSchema == nil || (len(objSchema.AllOf) == 0 && len(objSchema.OneOf) == 0) {
 		return objSchema
 	}
 
 	flat := *objSchema
-	flat.Properties = compositeProperties(objSchema)
+	flat.Properties = compositeProperties(objSchema, optionalDiscriminator)
 	flat.AllOf = nil
 	flat.OneOf = nil
 	flat.TypeProperty = ""
@@ -923,8 +959,8 @@ func flattenComposite(objSchema *schema) *schema {
 
 // compositeProperties recursively resolves the property set of a schema
 // that may combine plain Properties with AllOf members and OneOf variants.
-// See flattenComposite for the merge rules.
-func compositeProperties(objSchema *schema) map[string]*schema {
+// See flattenComposite for the merge rules and optionalDiscriminator.
+func compositeProperties(objSchema *schema, optionalDiscriminator bool) map[string]*schema {
 	props := map[string]*schema{}
 	if objSchema == nil {
 		return props
@@ -935,24 +971,51 @@ func compositeProperties(objSchema *schema) map[string]*schema {
 	}
 
 	for _, member := range objSchema.AllOf {
-		for name, prop := range compositeProperties(member) {
+		for name, prop := range compositeProperties(member, optionalDiscriminator) {
 			mergeRequiredWins(props, name, prop)
 		}
 	}
 
 	if len(objSchema.OneOf) > 0 {
-		for name, prop := range oneOfUnion(objSchema.OneOf, objSchema.TypeProperty) {
+		for name, prop := range oneOfUnion(objSchema.OneOf, objSchema.TypeProperty, optionalDiscriminator) {
 			mergeRequiredWins(props, name, prop)
 		}
 	}
 
 	if objSchema.TypeProperty != "" && objSchema.TypePropertySchema != nil {
 		discriminator := *objSchema.TypePropertySchema
+
 		discriminator.Optional = nil
+		if optionalDiscriminator {
+			discriminator.Optional = schemaOptional
+		}
+
 		props[objSchema.TypeProperty] = &discriminator
 	}
 
 	return props
+}
+
+// hasDiscriminator reports whether objSchema, or any allOf member or
+// oneOf variant nested in it, names a type-property discriminator. Only
+// the composition itself is searched, never the schemas of individual
+// properties, because flattenComposite resolves discriminators only there.
+func hasDiscriminator(objSchema *schema) bool {
+	if objSchema == nil {
+		return false
+	}
+
+	if objSchema.TypeProperty != "" {
+		return true
+	}
+
+	for _, member := range slices.Concat(objSchema.AllOf, objSchema.OneOf) {
+		if hasDiscriminator(member) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // mergeRequiredWins stores prop under name unless an existing entry is
@@ -974,11 +1037,12 @@ func mergeRequiredWins(props map[string]*schema, name string, prop *schema) {
 // extended with another variant's differing description, a copy is
 // stored so the spec tree itself is never mutated. typeProperty names the
 // discriminator and, together with each variant's InstanceType, labels
-// the merged descriptions.
-func oneOfUnion(variants []*schema, typeProperty string) map[string]*schema {
+// the merged descriptions. optionalDiscriminator is passed through to any
+// discriminator nested inside a variant.
+func oneOfUnion(variants []*schema, typeProperty string, optionalDiscriminator bool) map[string]*schema {
 	resolved := make([]map[string]*schema, 0, len(variants))
 	for _, variant := range variants {
-		resolved = append(resolved, compositeProperties(variant))
+		resolved = append(resolved, compositeProperties(variant, optionalDiscriminator))
 	}
 
 	union := map[string]*schema{}

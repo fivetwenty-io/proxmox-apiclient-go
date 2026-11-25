@@ -40,6 +40,10 @@ const (
 	fieldAffinity              = "affinity"
 	fieldComment               = "comment"
 	fieldResources             = "resources"
+	fieldDigest                = "digest"
+	fieldStorage               = "storage"
+	fieldShared                = "shared"
+	fieldOptions               = "options"
 )
 
 func TestPascalize(t *testing.T) {
@@ -856,7 +860,7 @@ func TestFlattenCompositeHaRules(t *testing.T) {
 	t.Parallel()
 
 	original := haRuleParams()
-	flat := flattenComposite(original)
+	flat := flattenComposite(original, false)
 
 	if flat == original {
 		t.Fatal("flattenComposite() returned the input schema; want a flattened copy")
@@ -911,17 +915,17 @@ func TestFlattenCompositeHaRules(t *testing.T) {
 func TestFlattenCompositePassThrough(t *testing.T) {
 	t.Parallel()
 
-	if got := flattenComposite(nil); got != nil {
-		t.Errorf("flattenComposite(nil) = %+v, want nil", got)
+	if got := flattenComposite(nil, false); got != nil {
+		t.Errorf("flattenComposite(nil, false) = %+v, want nil", got)
 	}
 
 	plain := &schema{Type: schemaTypeObject, Properties: map[string]*schema{fieldForce: {Type: schemaTypeBoolean}}}
-	if got := flattenComposite(plain); got != plain {
-		t.Errorf("flattenComposite(plain) returned a copy; want the same pointer")
+	if got := flattenComposite(plain, false); got != plain {
+		t.Errorf("flattenComposite(plain, false) returned a copy; want the same pointer")
 	}
 
 	empty := &schema{Type: schemaTypeObject}
-	if got := flattenComposite(empty); got != empty {
+	if got := flattenComposite(empty, false); got != empty {
 		t.Errorf("flattenComposite(no composition) returned a copy; want the same pointer")
 	}
 }
@@ -934,7 +938,7 @@ func TestOneOfUnionSingleVariantKeepsRequired(t *testing.T) {
 			fieldHostname: {Type: schemaTypeString},
 			fieldForce:    {Type: schemaTypeBoolean, Optional: schemaOptional},
 		}},
-	}, "")
+	}, "", false)
 
 	if isOptional(union[fieldHostname]) {
 		t.Error("a property required in the only variant must stay required")
@@ -1130,7 +1134,7 @@ func TestFlattenCompositeKeepsPlainProperties(t *testing.T) {
 		AllOf:      []*schema{{Properties: map[string]*schema{fieldForce: {Type: schemaTypeBoolean}}}},
 	}
 
-	flat := flattenComposite(mixed)
+	flat := flattenComposite(mixed, false)
 	if flat == mixed {
 		t.Fatal("a schema mixing properties and allOf must be flattened, not returned untouched")
 	}
@@ -1155,7 +1159,7 @@ func TestCompositePropertiesForcesDiscriminatorRequired(t *testing.T) {
 		TypePropertySchema: &schema{Type: schemaTypeString, Description: "HA rule type.", Optional: schemaOptional},
 	}
 
-	props := compositeProperties(composite)
+	props := compositeProperties(composite, false)
 
 	disc := props[fieldType]
 	if disc == nil || isOptional(disc) || disc.Description != "HA rule type." {
@@ -1181,7 +1185,7 @@ func TestOneOfUnionMergesDifferingDescriptions(t *testing.T) {
 		}},
 	}
 
-	union := oneOfUnion(variants, fieldType)
+	union := oneOfUnion(variants, fieldType, false)
 
 	want := "With type=node-affinity: Placed on the given nodes. With type=resource-affinity: Kept on the same node."
 	if got := union[fieldAffinity].Description; got != want {
@@ -1226,5 +1230,188 @@ func TestCollectEndpointsAppliesReturnsPropertyOverrides(t *testing.T) {
 
 	if got := eps[0].Info.Returns.Properties["ha"]; got.Type != schemaTypeObject || !isOptional(got) {
 		t.Errorf("ha = %+v, want an optional object", got)
+	}
+}
+
+// storageUpdateParams builds the allOf/oneOf parameter schema PVE 9.3
+// declares for PUT /storage/{storage}: the common update properties, the
+// storage ID, then one variant per storage type discriminated by "type".
+// None of the variants lists "type", because the server reads it from the
+// existing storage configuration.
+func storageUpdateParams() *schema {
+	return &schema{
+		AllOf: []*schema{
+			{Properties: map[string]*schema{
+				fieldDigest: {Type: schemaTypeString, Optional: schemaOptional},
+			}},
+			{Properties: map[string]*schema{
+				fieldStorage: {Type: schemaTypeString},
+			}},
+			{
+				TypeProperty:       fieldType,
+				TypePropertySchema: &schema{Type: schemaTypeString, Description: "Storage type."},
+				OneOf: []*schema{
+					{InstanceType: "dir", Properties: map[string]*schema{
+						fieldShared: {Type: schemaTypeBoolean, Optional: schemaOptional},
+					}},
+					{InstanceType: "nfs", Properties: map[string]*schema{
+						fieldOptions: {Type: schemaTypeString, Optional: schemaOptional},
+					}},
+				},
+			},
+		},
+	}
+}
+
+func TestFlattenCompositeOptionalDiscriminator(t *testing.T) {
+	t.Parallel()
+
+	original := storageUpdateParams()
+
+	optional := flattenComposite(original, true)
+
+	disc := optional.Properties[fieldType]
+	if disc == nil || !isOptional(disc) || disc.Description != "Storage type." {
+		t.Errorf("type = %+v, want the optional type-property-schema", disc)
+	}
+
+	if isOptional(optional.Properties[fieldStorage]) {
+		t.Error("an optional discriminator must not relax the required storage ID")
+	}
+
+	for _, name := range []string{fieldDigest, fieldShared, fieldOptions} {
+		if !isOptional(optional.Properties[name]) {
+			t.Errorf("property %q optional = false, want true", name)
+		}
+	}
+
+	if isOptional(original.AllOf[2].TypePropertySchema) {
+		t.Error("flattenComposite() mutated the spec's type-property-schema")
+	}
+
+	required := flattenComposite(original, false)
+	if isOptional(required.Properties[fieldType]) {
+		t.Error("type is optional without an optional-discriminator entry; want it forced required")
+	}
+}
+
+func TestFlattenCompositeOptionalDiscriminatorNestedInVariant(t *testing.T) {
+	t.Parallel()
+
+	nested := &schema{OneOf: []*schema{{
+		TypeProperty:       fieldType,
+		TypePropertySchema: &schema{Type: schemaTypeString},
+		OneOf: []*schema{{Properties: map[string]*schema{
+			fieldShared: {Type: schemaTypeBoolean, Optional: schemaOptional},
+		}}},
+	}}}
+
+	if got := flattenComposite(nested, true).Properties[fieldType]; got == nil || !isOptional(got) {
+		t.Errorf("type = %+v, want a discriminator nested in a variant to stay optional too", got)
+	}
+}
+
+func TestHasDiscriminator(t *testing.T) {
+	t.Parallel()
+
+	nestedProperty := &schema{Type: schemaTypeObject, Properties: map[string]*schema{
+		"redistribute": {Type: schemaTypeString, TypeProperty: fieldType},
+	}}
+
+	tests := []struct {
+		name   string
+		schema *schema
+		want   bool
+	}{
+		{"nil", nil, false},
+		{"plain", &schema{Properties: map[string]*schema{fieldHostname: {Type: schemaTypeString}}}, false},
+		{"allOf without discriminator", &schema{AllOf: []*schema{{Properties: map[string]*schema{}}}}, false},
+		{"discriminator on a property only", nestedProperty, false},
+		{"top-level", &schema{TypeProperty: fieldType}, true},
+		{"inside allOf", storageUpdateParams(), true},
+		{"inside oneOf", &schema{OneOf: []*schema{{TypeProperty: fieldType}}}, true},
+	}
+
+	for _, tc := range tests {
+		if got := hasDiscriminator(tc.schema); got != tc.want {
+			t.Errorf("hasDiscriminator(%s) = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+//nolint:paralleltest // mutates the package-level activeDialect global via withDialect
+func TestCollectEndpointsAppliesOptionalDiscriminators(t *testing.T) {
+	withDialect(t, &dialectConfig{
+		optionalDiscriminators: map[string]bool{"PUT /storage/{storage}": true},
+	})
+
+	tree := []*node{
+		{Path: "/storage", Info: map[string]endpointInfo{
+			verbHTTPPost: {Parameters: storageUpdateParams()},
+		}},
+		{Path: "/storage/{storage}", Info: map[string]endpointInfo{
+			verbHTTPPut: {Parameters: storageUpdateParams(), Returns: storageUpdateParams()},
+		}},
+	}
+
+	eps, err := collectEndpoints(tree)
+	if err != nil {
+		t.Fatalf("collectEndpoints() error = %v", err)
+	}
+
+	if len(eps) != 2 {
+		t.Fatalf("collectEndpoints() returned %d endpoints, want 2", len(eps))
+	}
+
+	create, update := eps[0], eps[1]
+
+	if isOptional(create.Info.Parameters.Properties[fieldType]) {
+		t.Error("POST /storage type is optional; want it required, since the table does not list it")
+	}
+
+	if !isOptional(update.Info.Parameters.Properties[fieldType]) {
+		t.Error("PUT /storage/{storage} type is required; want it optional, as the table lists it")
+	}
+
+	if isOptional(update.Info.Returns.Properties[fieldType]) {
+		t.Error("the table relaxed a returns discriminator; want it to affect parameters only")
+	}
+}
+
+//nolint:paralleltest // mutates the package-level activeDialect global via withDialect
+func TestCollectEndpointsRejectsStaleOptionalDiscriminators(t *testing.T) {
+	withDialect(t, &dialectConfig{
+		optionalDiscriminators: map[string]bool{
+			"PUT /storage/{storage}":                   true,
+			"POST /cluster/ha/resources/{sid}/migrate": true,
+		},
+	})
+
+	tree := []*node{{
+		Path: "/storage/{storage}",
+		Info: map[string]endpointInfo{
+			verbHTTPPut: {Parameters: &schema{Type: schemaTypeObject, Properties: map[string]*schema{
+				fieldStorage: {Type: schemaTypeString},
+			}}},
+		},
+	}}
+
+	_, err := collectEndpoints(tree)
+
+	if !errors.Is(err, errNoDiscriminator) {
+		t.Errorf("collectEndpoints() error = %v, want errNoDiscriminator for the flat PUT /storage/{storage}", err)
+	}
+
+	if !errors.Is(err, errUnusedOverride) {
+		t.Errorf("collectEndpoints() error = %v, want errUnusedOverride for the missing migrate endpoint", err)
+	}
+
+	for _, want := range []string{
+		"PUT /storage/{storage}: " + errNoDiscriminator.Error(),
+		`optionalDiscriminators["POST /cluster/ha/resources/{sid}/migrate"]`,
+	} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("error %v does not name %s", err, want)
+		}
 	}
 }
