@@ -1928,7 +1928,7 @@ func TestGenerated_Config_Methods(t *testing.T) {
 	t.Run("GetNotificationsMatchers", func(t *testing.T) {
 		harness.set(http.StatusOK, `{"data":{},"success":1}`)
 
-		resp, err := svc.GetNotificationsMatchers(ctx, "sample-name")
+		resp, err := svc.GetNotificationsMatchers(ctx, "sample-name", &config.GetNotificationsMatchersParams{})
 		if err != nil {
 			t.Fatalf("GetNotificationsMatchers: unexpected error: %v", err)
 		}
@@ -1940,7 +1940,7 @@ func TestGenerated_Config_Methods(t *testing.T) {
 		assertRequestLine(t, got, "GET", "/api2/json/config/notifications/matchers/sample-name")
 
 		var nilCtx context.Context
-		if _, err := svc.GetNotificationsMatchers(nilCtx, "sample-name"); err == nil {
+		if _, err := svc.GetNotificationsMatchers(nilCtx, "sample-name", &config.GetNotificationsMatchersParams{}); err == nil {
 			t.Errorf("GetNotificationsMatchers: expected error for nil context, got nil")
 		}
 	})

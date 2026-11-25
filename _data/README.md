@@ -103,8 +103,8 @@ ten namespaces (`access`, `admin`, `config`, `nodes`, `ping`, `pull`,
 `push`, `status`, `tape`, `version`), skipping the `/backup` and `/reader`
 HTTP/2 chunk-protocol endpoints and the `GET /` directory index.
 
-**Current pin: fetched 2026-10-04 — PBS 4.2.7 — 246 paths / 367 method-operations in
-the API tree (346 generated once the skips above are applied).**
+**Current pin: fetched 2026-11-25 — PBS 4.2.14 — 253 paths / 374 method-operations in
+the API tree (353 generated once the skips above are applied).**
 
 Dialect differences from the PVE spec (all tolerated by the generator):
 `additionalProperties` is a JSON boolean rather than 0/1, `format` is a

@@ -29,12 +29,24 @@ type Service interface {
 	// GetNodes GET /nodes/{node}
 	// Directory index.
 	GetNodes(ctx context.Context, node string) error
+	// ListAccessLog GET /nodes/{node}/access-log
+	// Read a page of the API access log, including its rotated copies, newest requests first.  A page ends once enough requests matched or after reading 512 MiB of log data, also without any match, and the next page continues at its `next-cursor`. To follow the log, `after` takes the `head-cursor` of an earlier page instead of a `cursor`. The values of query parameters are redacted for all but root@pam. Protected calls get logged once, by the privileged API daemon.
+	ListAccessLog(ctx context.Context, node string, params *ListAccessLogParams) (*ListAccessLogResponse, error)
+	// ListAccessLogStats GET /nodes/{node}/access-log/stats
+	// Count the requests of the API access log, including its rotated copies, in a time range.  The range defaults to the last day. As the log is not ordered by time, the counting reads through the files like a page of the access log does, as much as one page at most, and tells which parts of the files it covered.
+	ListAccessLogStats(ctx context.Context, node string, params *ListAccessLogStatsParams) (*ListAccessLogStatsResponse, error)
 	// ListApt GET /nodes/{node}/apt
 	// Directory index.
 	ListApt(ctx context.Context, node string) error
 	// ListAptChangelog GET /nodes/{node}/apt/changelog
 	// Retrieve the changelog of the specified package.
 	ListAptChangelog(ctx context.Context, node string, params *ListAptChangelogParams) (*ListAptChangelogResponse, error)
+	// ListAptHistory GET /nodes/{node}/apt/history
+	// List past APT transactions and their package changes, newest first.
+	ListAptHistory(ctx context.Context, node string, params *ListAptHistoryParams) (*ListAptHistoryResponse, error)
+	// ListAptInstalledChangelog GET /nodes/{node}/apt/installed-changelog
+	// Get the Debian changelog that an installed package ships, optionally limited to a version range.
+	ListAptInstalledChangelog(ctx context.Context, node string, params *ListAptInstalledChangelogParams) (*ListAptInstalledChangelogResponse, error)
 	// ListAptRepositories GET /nodes/{node}/apt/repositories
 	// Get APT repository information.
 	ListAptRepositories(ctx context.Context, node string) (*ListAptRepositoriesResponse, error)
@@ -44,12 +56,21 @@ type Service interface {
 	// UpdateAptRepositories PUT /nodes/{node}/apt/repositories
 	// Add the repository identified by the `handle`. If the repository is already configured, it will be set to enabled.  The `digest` parameter asserts that the configuration has not been modified.
 	UpdateAptRepositories(ctx context.Context, node string, params *UpdateAptRepositoriesParams) error
+	// ListAptTermlog GET /nodes/{node}/apt/termlog
+	// Get the terminal output of a past APT transaction.
+	ListAptTermlog(ctx context.Context, node string, params *ListAptTermlogParams) (*ListAptTermlogResponse, error)
+	// ListAptTransactionChangelogs GET /nodes/{node}/apt/transaction-changelogs
+	// Get the changelog entries for the package changes of a past APT transaction, from the changelogs of the installed packages.
+	ListAptTransactionChangelogs(ctx context.Context, node string, params *ListAptTransactionChangelogsParams) (*ListAptTransactionChangelogsResponse, error)
 	// ListAptUpdate GET /nodes/{node}/apt/update
 	// List available APT updates
 	ListAptUpdate(ctx context.Context, node string) (*ListAptUpdateResponse, error)
 	// CreateAptUpdate POST /nodes/{node}/apt/update
 	// Update the APT database
 	CreateAptUpdate(ctx context.Context, node string, params *CreateAptUpdateParams) (*CreateAptUpdateResponse, error)
+	// ListAptUpdateChangelogs GET /nodes/{node}/apt/update-changelogs
+	// Get the changelog entries for pending updates.
+	ListAptUpdateChangelogs(ctx context.Context, node string) (*ListAptUpdateChangelogsResponse, error)
 	// ListAptVersions GET /nodes/{node}/apt/versions
 	// Get package information for important Proxmox Backup Server packages.
 	ListAptVersions(ctx context.Context, node string) (*ListAptVersionsResponse, error)
@@ -273,6 +294,208 @@ func (s *service) GetNodes(ctx context.Context, node string) error {
 	return nil
 }
 
+// ListAccessLogParams is the request payload for ListAccessLog.
+type ListAccessLogParams struct {
+	// After Only the entries logged after this position, the head cursor of an earlier page.
+	After *string `json:"after,omitempty"`
+	// AuthId Only requests of this user or API token. A user also matches its own API tokens.
+	AuthId *string `json:"auth-id,omitempty"`
+	// AuthIdExact Whether the auth-id only matches itself, so a user does not match its API tokens, and `-` matches requests without any.
+	AuthIdExact *bool `json:"auth-id-exact,omitempty"`
+	// Client IP (IPv4 or IPv6) address.
+	Client *string `json:"client,omitempty"`
+	// Cursor Continue with the entries logged before this position, the next cursor of the previous page.
+	Cursor *string `json:"cursor,omitempty"`
+	// Limit The maximum number of entries to return.
+	Limit *int64 `json:"limit,omitempty"`
+	// MaxStatus Only responses with a known status code of at most this value.
+	MaxStatus *int64 `json:"max-status,omitempty"`
+	// Method Only requests with this method, compared case-insensitively.
+	Method *string `json:"method,omitempty"`
+	// MinStatus Only responses with a known status code of at least this value.
+	MinStatus *int64 `json:"min-status,omitempty"`
+	// Path Only requests whose path contains this text. Repeated slashes count as one, as the servers route requests that way, and both are also compared percent-decoded.
+	Path *string `json:"path,omitempty"`
+	// PathGroup Only requests whose path belongs to this group, as listed by the access log statistics.
+	PathGroup *string `json:"path-group,omitempty"`
+	// Search Only requests whose client address, user or path contains this text, ignoring case. The path compares like for the path filter.
+	Search *string `json:"search,omitempty"`
+	// Since Only entries logged at or after this time, in seconds since the epoch.
+	Since *int64 `json:"since,omitempty"`
+	// Until Only entries logged at or before this time, in seconds since the epoch.
+	Until *int64 `json:"until,omitempty"`
+	// UserAgent Only requests with this user agent, as logged. Only proxmox-rest-server logs these.
+	UserAgent *string `json:"user-agent,omitempty"`
+}
+
+// ListAccessLogResponse mirrors the shape returned by GET /nodes/{node}/access-log.
+// One page of the entries of a log that match a filter.
+type ListAccessLogResponse struct {
+	// Complete Whether this page and the ones before it covered the whole log, without any gap. For entries logged after a head cursor, whether this page holds all of them.
+	Complete client.PVEBool `json:"complete"`
+	// Entries The matching entries, in reverse order of logging: from the end of the log on, then the rotated copies from the newest on. Timestamps do not need to decrease strictly, as servers write entries late at times and rotated copies can overlap.
+	Entries []json.RawMessage `json:"entries"`
+	// Gaps The parts of the log this page skipped, as they could not be read.
+	Gaps []json.RawMessage `json:"gaps"`
+	// HeadCursor Where the log ended when this page started reading it, to get the entries logged since. Missing on pages continuing at a cursor, or if the log has no complete line yet or ends in an unfinished overlong one.
+	HeadCursor *string `json:"head-cursor,omitempty"`
+	// InvalidLines The number of lines this page looked at that failed to parse.
+	InvalidLines client.PVEInt `json:"invalid-lines"`
+	// NextCursor Where the next page continues, missing if no older entries are left to look at.
+	NextCursor *string `json:"next-cursor,omitempty"`
+	// SearchedBackTo The time of the oldest entry this page looked at, matching or not. As entries are not strictly ordered, older entries can still follow.
+	SearchedBackTo *client.PVEInt `json:"searched-back-to,omitempty"`
+}
+
+// ListAccessLog implements Service.ListAccessLog. GET /nodes/{node}/access-log.
+func (s *service) ListAccessLog(ctx context.Context, node string, params *ListAccessLogParams) (*ListAccessLogResponse, error) {
+	if ctx == nil {
+		return nil, fmt.Errorf("nodes.ListAccessLog: ctx must not be nil")
+	}
+	path := fmt.Sprintf("/nodes/%s/access-log", url.PathEscape(node))
+	var body map[string]interface{}
+	if params != nil {
+		raw, err := json.Marshal(params)
+		if err != nil {
+			return nil, fmt.Errorf("nodes.ListAccessLog: marshal params: %w", err)
+		}
+		dec := json.NewDecoder(strings.NewReader(string(raw)))
+		dec.UseNumber()
+		err = dec.Decode(&body)
+		if err != nil {
+			return nil, fmt.Errorf("nodes.ListAccessLog: decode params: %w", err)
+		}
+	}
+	resp, err := s.c.GetRawCtx(ctx, path, body)
+	if err != nil {
+		return nil, fmt.Errorf("nodes.ListAccessLog: %w", err)
+	}
+	if resp == nil {
+		return nil, fmt.Errorf("nodes.ListAccessLog: nil response from client")
+	}
+	if resp.Data == nil {
+		return nil, fmt.Errorf("nodes.ListAccessLog: empty data in response (code=%d)", resp.Code)
+	}
+	raw, err := json.Marshal(resp.Data)
+	if err != nil {
+		return nil, fmt.Errorf("nodes.ListAccessLog: re-marshal data: %w", err)
+	}
+	out := &ListAccessLogResponse{}
+	err = json.Unmarshal(raw, out)
+	if err != nil {
+		return nil, fmt.Errorf("nodes.ListAccessLog: unmarshal data: %w", err)
+	}
+	return out, nil
+}
+
+// ListAccessLogStatsParams is the request payload for ListAccessLogStats.
+type ListAccessLogStatsParams struct {
+	// AuthId Only requests of this user or API token. A user also matches its own API tokens.
+	AuthId *string `json:"auth-id,omitempty"`
+	// AuthIdExact Whether the auth-id only matches itself, so a user does not match its API tokens, and `-` matches requests without any.
+	AuthIdExact *bool `json:"auth-id-exact,omitempty"`
+	// Bucket The length of a histogram bucket in seconds, chosen for at most 300 buckets if not set.
+	Bucket *int64 `json:"bucket,omitempty"`
+	// Client IP (IPv4 or IPv6) address.
+	Client *string `json:"client,omitempty"`
+	// MaxStatus Only responses with a known status code of at most this value.
+	MaxStatus *int64 `json:"max-status,omitempty"`
+	// Method Only requests with this method, compared case-insensitively.
+	Method *string `json:"method,omitempty"`
+	// MinStatus Only responses with a known status code of at least this value.
+	MinStatus *int64 `json:"min-status,omitempty"`
+	// Path Only requests whose path contains this text. Repeated slashes count as one, as the servers route requests that way, and both are also compared percent-decoded.
+	Path *string `json:"path,omitempty"`
+	// PathGroup Only requests whose path belongs to this group, as listed by the access log statistics.
+	PathGroup *string `json:"path-group,omitempty"`
+	// Search Only requests whose client address, user or path contains this text, ignoring case. The path compares like for the path filter.
+	Search *string `json:"search,omitempty"`
+	// Since Only entries logged at or after this time, in seconds since the epoch.
+	Since *int64 `json:"since,omitempty"`
+	// Top The number of values with the most requests to list, 10 if not set.
+	Top *int64 `json:"top,omitempty"`
+	// Until Only entries logged at or before this time, in seconds since the epoch.
+	Until *int64 `json:"until,omitempty"`
+	// UserAgent Only requests with this user agent, as logged. Only proxmox-rest-server logs these.
+	UserAgent *string `json:"user-agent,omitempty"`
+}
+
+// ListAccessLogStatsResponse mirrors the shape returned by GET /nodes/{node}/access-log/stats.
+// Statistics of the requests of a log that match a filter.
+type ListAccessLogStatsResponse struct {
+	// AuthIds The values with the most requests.
+	AuthIds json.RawMessage `json:"auth-ids"`
+	// Clients The values with the most requests.
+	Clients json.RawMessage `json:"clients"`
+	// Complete Whether all lines of all files got counted. Otherwise, the counts are only those of the covered parts, and more requests of the time range can be in the rest.
+	Complete client.PVEBool `json:"complete"`
+	// Covered The parts of the files that got counted, newest first.
+	Covered []json.RawMessage `json:"covered"`
+	// Gaps The damaged compressed copy the counting stopped at.
+	Gaps []json.RawMessage `json:"gaps"`
+	// Histogram The requests over time.
+	Histogram json.RawMessage `json:"histogram"`
+	// InvalidLines The number of lines that failed to parse, of the ones parsed completely. Lines whose first fields already rule them out do not get parsed further.
+	InvalidLines client.PVEInt `json:"invalid-lines"`
+	// PathGroups The values with the most requests.
+	PathGroups json.RawMessage `json:"path-groups"`
+	// SearchedBackTo The time of the oldest request looked at, matching or not, in seconds since the epoch, as the first fields of its line tell. Requests are not strictly ordered in the log, so this does not bound the covered time.
+	SearchedBackTo *client.PVEInt `json:"searched-back-to,omitempty"`
+	// Since The start of the time range, in seconds since the epoch.
+	Since client.PVEInt `json:"since"`
+	// Statuses The values with the most requests.
+	Statuses json.RawMessage `json:"statuses"`
+	// Stopped Why statistics did not get through all files.
+	Stopped *string `json:"stopped,omitempty"`
+	// Total Request counts.
+	Total json.RawMessage `json:"total"`
+	// Until The end of the time range, in seconds since the epoch.
+	Until client.PVEInt `json:"until"`
+	// UserAgents The values with the most requests.
+	UserAgents json.RawMessage `json:"user-agents,omitempty"`
+}
+
+// ListAccessLogStats implements Service.ListAccessLogStats. GET /nodes/{node}/access-log/stats.
+func (s *service) ListAccessLogStats(ctx context.Context, node string, params *ListAccessLogStatsParams) (*ListAccessLogStatsResponse, error) {
+	if ctx == nil {
+		return nil, fmt.Errorf("nodes.ListAccessLogStats: ctx must not be nil")
+	}
+	path := fmt.Sprintf("/nodes/%s/access-log/stats", url.PathEscape(node))
+	var body map[string]interface{}
+	if params != nil {
+		raw, err := json.Marshal(params)
+		if err != nil {
+			return nil, fmt.Errorf("nodes.ListAccessLogStats: marshal params: %w", err)
+		}
+		dec := json.NewDecoder(strings.NewReader(string(raw)))
+		dec.UseNumber()
+		err = dec.Decode(&body)
+		if err != nil {
+			return nil, fmt.Errorf("nodes.ListAccessLogStats: decode params: %w", err)
+		}
+	}
+	resp, err := s.c.GetRawCtx(ctx, path, body)
+	if err != nil {
+		return nil, fmt.Errorf("nodes.ListAccessLogStats: %w", err)
+	}
+	if resp == nil {
+		return nil, fmt.Errorf("nodes.ListAccessLogStats: nil response from client")
+	}
+	if resp.Data == nil {
+		return nil, fmt.Errorf("nodes.ListAccessLogStats: empty data in response (code=%d)", resp.Code)
+	}
+	raw, err := json.Marshal(resp.Data)
+	if err != nil {
+		return nil, fmt.Errorf("nodes.ListAccessLogStats: re-marshal data: %w", err)
+	}
+	out := &ListAccessLogStatsResponse{}
+	err = json.Unmarshal(raw, out)
+	if err != nil {
+		return nil, fmt.Errorf("nodes.ListAccessLogStats: unmarshal data: %w", err)
+	}
+	return out, nil
+}
+
 // ListApt implements Service.ListApt. GET /nodes/{node}/apt.
 func (s *service) ListApt(ctx context.Context, node string) error {
 	if ctx == nil {
@@ -341,6 +564,120 @@ func (s *service) ListAptChangelog(ctx context.Context, node string, params *Lis
 	err = json.Unmarshal(raw, out)
 	if err != nil {
 		return nil, fmt.Errorf("nodes.ListAptChangelog: unmarshal data: %w", err)
+	}
+	return out, nil
+}
+
+// ListAptHistoryParams is the request payload for ListAptHistory.
+type ListAptHistoryParams struct {
+	// Limit List at most this many entries.
+	Limit *int64 `json:"limit,omitempty"`
+	// Package Only list entries that changed the package with this name.
+	Package *string `json:"package,omitempty"`
+	// Since Only list entries that started at or after this Unix epoch.
+	Since *int64 `json:"since,omitempty"`
+	// Until Only list entries that started at or before this Unix epoch.
+	Until *int64 `json:"until,omitempty"`
+}
+
+// ListAptHistoryResponse mirrors the shape returned by GET /nodes/{node}/apt/history.
+// Past APT transactions, newest first.
+type ListAptHistoryResponse []json.RawMessage
+
+// ListAptHistory implements Service.ListAptHistory. GET /nodes/{node}/apt/history.
+func (s *service) ListAptHistory(ctx context.Context, node string, params *ListAptHistoryParams) (*ListAptHistoryResponse, error) {
+	if ctx == nil {
+		return nil, fmt.Errorf("nodes.ListAptHistory: ctx must not be nil")
+	}
+	path := fmt.Sprintf("/nodes/%s/apt/history", url.PathEscape(node))
+	var body map[string]interface{}
+	if params != nil {
+		raw, err := json.Marshal(params)
+		if err != nil {
+			return nil, fmt.Errorf("nodes.ListAptHistory: marshal params: %w", err)
+		}
+		dec := json.NewDecoder(strings.NewReader(string(raw)))
+		dec.UseNumber()
+		err = dec.Decode(&body)
+		if err != nil {
+			return nil, fmt.Errorf("nodes.ListAptHistory: decode params: %w", err)
+		}
+	}
+	resp, err := s.c.GetRawCtx(ctx, path, body)
+	if err != nil {
+		return nil, fmt.Errorf("nodes.ListAptHistory: %w", err)
+	}
+	if resp == nil {
+		return nil, fmt.Errorf("nodes.ListAptHistory: nil response from client")
+	}
+	if resp.Data == nil {
+		out := ListAptHistoryResponse{}
+		return &out, nil
+	}
+	raw, err := json.Marshal(resp.Data)
+	if err != nil {
+		return nil, fmt.Errorf("nodes.ListAptHistory: re-marshal data: %w", err)
+	}
+	out := &ListAptHistoryResponse{}
+	err = json.Unmarshal(raw, out)
+	if err != nil {
+		return nil, fmt.Errorf("nodes.ListAptHistory: unmarshal data: %w", err)
+	}
+	return out, nil
+}
+
+// ListAptInstalledChangelogParams is the request payload for ListAptInstalledChangelog.
+type ListAptInstalledChangelogParams struct {
+	// Name Name of the installed package.
+	Name string `json:"name"`
+	// SinceVersion Only list the entries of versions later than this one.
+	SinceVersion *string `json:"since-version,omitempty"`
+	// ToVersion Only list the entries of versions up to including this one, or only the newest entry if the changelog does not list this version.
+	ToVersion *string `json:"to-version,omitempty"`
+}
+
+// ListAptInstalledChangelogResponse mirrors the shape returned by GET /nodes/{node}/apt/installed-changelog.
+// The changelog entries, usually newest first.
+type ListAptInstalledChangelogResponse []json.RawMessage
+
+// ListAptInstalledChangelog implements Service.ListAptInstalledChangelog. GET /nodes/{node}/apt/installed-changelog.
+func (s *service) ListAptInstalledChangelog(ctx context.Context, node string, params *ListAptInstalledChangelogParams) (*ListAptInstalledChangelogResponse, error) {
+	if ctx == nil {
+		return nil, fmt.Errorf("nodes.ListAptInstalledChangelog: ctx must not be nil")
+	}
+	path := fmt.Sprintf("/nodes/%s/apt/installed-changelog", url.PathEscape(node))
+	var body map[string]interface{}
+	if params != nil {
+		raw, err := json.Marshal(params)
+		if err != nil {
+			return nil, fmt.Errorf("nodes.ListAptInstalledChangelog: marshal params: %w", err)
+		}
+		dec := json.NewDecoder(strings.NewReader(string(raw)))
+		dec.UseNumber()
+		err = dec.Decode(&body)
+		if err != nil {
+			return nil, fmt.Errorf("nodes.ListAptInstalledChangelog: decode params: %w", err)
+		}
+	}
+	resp, err := s.c.GetRawCtx(ctx, path, body)
+	if err != nil {
+		return nil, fmt.Errorf("nodes.ListAptInstalledChangelog: %w", err)
+	}
+	if resp == nil {
+		return nil, fmt.Errorf("nodes.ListAptInstalledChangelog: nil response from client")
+	}
+	if resp.Data == nil {
+		out := ListAptInstalledChangelogResponse{}
+		return &out, nil
+	}
+	raw, err := json.Marshal(resp.Data)
+	if err != nil {
+		return nil, fmt.Errorf("nodes.ListAptInstalledChangelog: re-marshal data: %w", err)
+	}
+	out := &ListAptInstalledChangelogResponse{}
+	err = json.Unmarshal(raw, out)
+	if err != nil {
+		return nil, fmt.Errorf("nodes.ListAptInstalledChangelog: unmarshal data: %w", err)
 	}
 	return out, nil
 }
@@ -469,6 +806,116 @@ func (s *service) UpdateAptRepositories(ctx context.Context, node string, params
 	return nil
 }
 
+// ListAptTermlogParams is the request payload for ListAptTermlog.
+type ListAptTermlogParams struct {
+	// Format Format of the terminal output of a transaction.
+	Format *string `json:"format,omitempty"`
+	// StartIndex Start index of the transaction, as listed in the APT history.
+	StartIndex *int64 `json:"start-index,omitempty"`
+	// StartTime Start time of the transaction, as listed in the APT history.
+	StartTime int64 `json:"start-time"`
+}
+
+// ListAptTermlogResponse is the raw JSON returned by GET /nodes/{node}/apt/termlog.
+// The terminal output.
+type ListAptTermlogResponse = json.RawMessage
+
+// ListAptTermlog implements Service.ListAptTermlog. GET /nodes/{node}/apt/termlog.
+func (s *service) ListAptTermlog(ctx context.Context, node string, params *ListAptTermlogParams) (*ListAptTermlogResponse, error) {
+	if ctx == nil {
+		return nil, fmt.Errorf("nodes.ListAptTermlog: ctx must not be nil")
+	}
+	path := fmt.Sprintf("/nodes/%s/apt/termlog", url.PathEscape(node))
+	var body map[string]interface{}
+	if params != nil {
+		raw, err := json.Marshal(params)
+		if err != nil {
+			return nil, fmt.Errorf("nodes.ListAptTermlog: marshal params: %w", err)
+		}
+		dec := json.NewDecoder(strings.NewReader(string(raw)))
+		dec.UseNumber()
+		err = dec.Decode(&body)
+		if err != nil {
+			return nil, fmt.Errorf("nodes.ListAptTermlog: decode params: %w", err)
+		}
+	}
+	resp, err := s.c.GetRawCtx(ctx, path, body)
+	if err != nil {
+		return nil, fmt.Errorf("nodes.ListAptTermlog: %w", err)
+	}
+	if resp == nil {
+		return nil, fmt.Errorf("nodes.ListAptTermlog: nil response from client")
+	}
+	if resp.Data == nil {
+		out := ListAptTermlogResponse{}
+		return &out, nil
+	}
+	raw, err := json.Marshal(resp.Data)
+	if err != nil {
+		return nil, fmt.Errorf("nodes.ListAptTermlog: re-marshal data: %w", err)
+	}
+	out := &ListAptTermlogResponse{}
+	err = json.Unmarshal(raw, out)
+	if err != nil {
+		return nil, fmt.Errorf("nodes.ListAptTermlog: unmarshal data: %w", err)
+	}
+	return out, nil
+}
+
+// ListAptTransactionChangelogsParams is the request payload for ListAptTransactionChangelogs.
+type ListAptTransactionChangelogsParams struct {
+	// StartIndex Start index of the transaction, as listed in the APT history.
+	StartIndex *int64 `json:"start-index,omitempty"`
+	// StartTime Start time of the transaction, as listed in the APT history.
+	StartTime int64 `json:"start-time"`
+}
+
+// ListAptTransactionChangelogsResponse mirrors the shape returned by GET /nodes/{node}/apt/transaction-changelogs.
+// The changelog entries, grouped by source package, upgrades first, then downgrades, installs and other changes, each sorted by name.
+type ListAptTransactionChangelogsResponse []json.RawMessage
+
+// ListAptTransactionChangelogs implements Service.ListAptTransactionChangelogs. GET /nodes/{node}/apt/transaction-changelogs.
+func (s *service) ListAptTransactionChangelogs(ctx context.Context, node string, params *ListAptTransactionChangelogsParams) (*ListAptTransactionChangelogsResponse, error) {
+	if ctx == nil {
+		return nil, fmt.Errorf("nodes.ListAptTransactionChangelogs: ctx must not be nil")
+	}
+	path := fmt.Sprintf("/nodes/%s/apt/transaction-changelogs", url.PathEscape(node))
+	var body map[string]interface{}
+	if params != nil {
+		raw, err := json.Marshal(params)
+		if err != nil {
+			return nil, fmt.Errorf("nodes.ListAptTransactionChangelogs: marshal params: %w", err)
+		}
+		dec := json.NewDecoder(strings.NewReader(string(raw)))
+		dec.UseNumber()
+		err = dec.Decode(&body)
+		if err != nil {
+			return nil, fmt.Errorf("nodes.ListAptTransactionChangelogs: decode params: %w", err)
+		}
+	}
+	resp, err := s.c.GetRawCtx(ctx, path, body)
+	if err != nil {
+		return nil, fmt.Errorf("nodes.ListAptTransactionChangelogs: %w", err)
+	}
+	if resp == nil {
+		return nil, fmt.Errorf("nodes.ListAptTransactionChangelogs: nil response from client")
+	}
+	if resp.Data == nil {
+		out := ListAptTransactionChangelogsResponse{}
+		return &out, nil
+	}
+	raw, err := json.Marshal(resp.Data)
+	if err != nil {
+		return nil, fmt.Errorf("nodes.ListAptTransactionChangelogs: re-marshal data: %w", err)
+	}
+	out := &ListAptTransactionChangelogsResponse{}
+	err = json.Unmarshal(raw, out)
+	if err != nil {
+		return nil, fmt.Errorf("nodes.ListAptTransactionChangelogs: unmarshal data: %w", err)
+	}
+	return out, nil
+}
+
 // ListAptUpdateResponse mirrors the shape returned by GET /nodes/{node}/apt/update.
 // A list of packages with available updates.
 type ListAptUpdateResponse []json.RawMessage
@@ -553,6 +1000,40 @@ func (s *service) CreateAptUpdate(ctx context.Context, node string, params *Crea
 	err = json.Unmarshal(raw, out)
 	if err != nil {
 		return nil, fmt.Errorf("nodes.CreateAptUpdate: unmarshal data: %w", err)
+	}
+	return out, nil
+}
+
+// ListAptUpdateChangelogsResponse mirrors the shape returned by GET /nodes/{node}/apt/update-changelogs.
+// Changelog entries for pending updates, grouped by source package.
+type ListAptUpdateChangelogsResponse []json.RawMessage
+
+// ListAptUpdateChangelogs implements Service.ListAptUpdateChangelogs. GET /nodes/{node}/apt/update-changelogs.
+func (s *service) ListAptUpdateChangelogs(ctx context.Context, node string) (*ListAptUpdateChangelogsResponse, error) {
+	if ctx == nil {
+		return nil, fmt.Errorf("nodes.ListAptUpdateChangelogs: ctx must not be nil")
+	}
+	path := fmt.Sprintf("/nodes/%s/apt/update-changelogs", url.PathEscape(node))
+	var body map[string]interface{}
+	resp, err := s.c.GetRawCtx(ctx, path, body)
+	if err != nil {
+		return nil, fmt.Errorf("nodes.ListAptUpdateChangelogs: %w", err)
+	}
+	if resp == nil {
+		return nil, fmt.Errorf("nodes.ListAptUpdateChangelogs: nil response from client")
+	}
+	if resp.Data == nil {
+		out := ListAptUpdateChangelogsResponse{}
+		return &out, nil
+	}
+	raw, err := json.Marshal(resp.Data)
+	if err != nil {
+		return nil, fmt.Errorf("nodes.ListAptUpdateChangelogs: re-marshal data: %w", err)
+	}
+	out := &ListAptUpdateChangelogsResponse{}
+	err = json.Unmarshal(raw, out)
+	if err != nil {
+		return nil, fmt.Errorf("nodes.ListAptUpdateChangelogs: unmarshal data: %w", err)
 	}
 	return out, nil
 }
@@ -1359,6 +1840,8 @@ type CreateDisksZfsParams struct {
 	Name string `json:"name"`
 	// Raidlevel The ZFS RAID level to use.
 	Raidlevel string `json:"raidlevel"`
+	// Recordsize ZFS Recordsize. Use numbers with optional k or m suffix (e.g., 128k).
+	Recordsize *string `json:"recordsize,omitempty"`
 }
 
 // CreateDisksZfsResponse is the raw JSON returned by POST /nodes/{node}/disks/zfs.
@@ -1713,7 +2196,7 @@ type CreateNetworkParams struct {
 	Cidr6 *string `json:"cidr6,omitempty"`
 	// Comments Comments (inet, may span multiple lines)
 	Comments *string `json:"comments,omitempty"`
-	// Comments6 Comments (inet5, may span multiple lines)
+	// Comments6 Comments (inet6, may span multiple lines)
 	Comments6 *string `json:"comments6,omitempty"`
 	// Gateway IPv4 address.
 	Gateway *string `json:"gateway,omitempty"`
@@ -1923,7 +2406,7 @@ type UpdateNetwork2Params struct {
 	Cidr6 *string `json:"cidr6,omitempty"`
 	// Comments Comments (inet, may span multiple lines)
 	Comments *string `json:"comments,omitempty"`
-	// Comments6 Comments (inet5, may span multiple lines)
+	// Comments6 Comments (inet6, may span multiple lines)
 	Comments6 *string `json:"comments6,omitempty"`
 	// Delete List of properties to delete.
 	Delete []string `json:"delete,omitempty"`

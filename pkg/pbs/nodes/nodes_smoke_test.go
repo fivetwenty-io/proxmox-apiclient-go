@@ -182,6 +182,44 @@ func TestGenerated_Nodes_Methods(t *testing.T) {
 			t.Errorf("GetNodes: expected error for nil context, got nil")
 		}
 	})
+	t.Run("ListAccessLog", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListAccessLog(ctx, "sample-node", &nodes.ListAccessLogParams{})
+		if err != nil {
+			t.Fatalf("ListAccessLog: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListAccessLog: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/access-log")
+
+		var nilCtx context.Context
+		if _, err := svc.ListAccessLog(nilCtx, "sample-node", &nodes.ListAccessLogParams{}); err == nil {
+			t.Errorf("ListAccessLog: expected error for nil context, got nil")
+		}
+	})
+	t.Run("ListAccessLogStats", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListAccessLogStats(ctx, "sample-node", &nodes.ListAccessLogStatsParams{})
+		if err != nil {
+			t.Fatalf("ListAccessLogStats: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListAccessLogStats: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/access-log/stats")
+
+		var nilCtx context.Context
+		if _, err := svc.ListAccessLogStats(nilCtx, "sample-node", &nodes.ListAccessLogStatsParams{}); err == nil {
+			t.Errorf("ListAccessLogStats: expected error for nil context, got nil")
+		}
+	})
 	t.Run("ListApt", func(t *testing.T) {
 		harness.set(http.StatusOK, `{"data":{},"success":1}`)
 
@@ -216,6 +254,45 @@ func TestGenerated_Nodes_Methods(t *testing.T) {
 		var nilCtx context.Context
 		if _, err := svc.ListAptChangelog(nilCtx, "sample-node", &nodes.ListAptChangelogParams{Name: "sample-name"}); err == nil {
 			t.Errorf("ListAptChangelog: expected error for nil context, got nil")
+		}
+	})
+	t.Run("ListAptHistory", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListAptHistory(ctx, "sample-node", &nodes.ListAptHistoryParams{})
+		if err != nil {
+			t.Fatalf("ListAptHistory: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListAptHistory: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/apt/history")
+
+		var nilCtx context.Context
+		if _, err := svc.ListAptHistory(nilCtx, "sample-node", &nodes.ListAptHistoryParams{}); err == nil {
+			t.Errorf("ListAptHistory: expected error for nil context, got nil")
+		}
+	})
+	t.Run("ListAptInstalledChangelog", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListAptInstalledChangelog(ctx, "sample-node", &nodes.ListAptInstalledChangelogParams{Name: "sample-name"})
+		if err != nil {
+			t.Fatalf("ListAptInstalledChangelog: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListAptInstalledChangelog: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/apt/installed-changelog")
+		assertParamValue(t, got.query, "name", "sample-name")
+
+		var nilCtx context.Context
+		if _, err := svc.ListAptInstalledChangelog(nilCtx, "sample-node", &nodes.ListAptInstalledChangelogParams{Name: "sample-name"}); err == nil {
+			t.Errorf("ListAptInstalledChangelog: expected error for nil context, got nil")
 		}
 	})
 	t.Run("ListAptRepositories", func(t *testing.T) {
@@ -272,6 +349,46 @@ func TestGenerated_Nodes_Methods(t *testing.T) {
 			t.Errorf("UpdateAptRepositories: expected error for nil context, got nil")
 		}
 	})
+	t.Run("ListAptTermlog", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListAptTermlog(ctx, "sample-node", &nodes.ListAptTermlogParams{StartTime: 42})
+		if err != nil {
+			t.Fatalf("ListAptTermlog: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListAptTermlog: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/apt/termlog")
+		assertParamValue(t, got.query, "start-time", "42")
+
+		var nilCtx context.Context
+		if _, err := svc.ListAptTermlog(nilCtx, "sample-node", &nodes.ListAptTermlogParams{StartTime: 42}); err == nil {
+			t.Errorf("ListAptTermlog: expected error for nil context, got nil")
+		}
+	})
+	t.Run("ListAptTransactionChangelogs", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListAptTransactionChangelogs(ctx, "sample-node", &nodes.ListAptTransactionChangelogsParams{StartTime: 42})
+		if err != nil {
+			t.Fatalf("ListAptTransactionChangelogs: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListAptTransactionChangelogs: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/apt/transaction-changelogs")
+		assertParamValue(t, got.query, "start-time", "42")
+
+		var nilCtx context.Context
+		if _, err := svc.ListAptTransactionChangelogs(nilCtx, "sample-node", &nodes.ListAptTransactionChangelogsParams{StartTime: 42}); err == nil {
+			t.Errorf("ListAptTransactionChangelogs: expected error for nil context, got nil")
+		}
+	})
 	t.Run("ListAptUpdate", func(t *testing.T) {
 		harness.set(http.StatusOK, `{"data":[],"success":1}`)
 
@@ -308,6 +425,25 @@ func TestGenerated_Nodes_Methods(t *testing.T) {
 		var nilCtx context.Context
 		if _, err := svc.CreateAptUpdate(nilCtx, "sample-node", &nodes.CreateAptUpdateParams{}); err == nil {
 			t.Errorf("CreateAptUpdate: expected error for nil context, got nil")
+		}
+	})
+	t.Run("ListAptUpdateChangelogs", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListAptUpdateChangelogs(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListAptUpdateChangelogs: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListAptUpdateChangelogs: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/apt/update-changelogs")
+
+		var nilCtx context.Context
+		if _, err := svc.ListAptUpdateChangelogs(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListAptUpdateChangelogs: expected error for nil context, got nil")
 		}
 	})
 	t.Run("ListAptVersions", func(t *testing.T) {

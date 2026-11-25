@@ -325,7 +325,7 @@ type Service interface {
 	DeleteNotificationsMatchers(ctx context.Context, name string) error
 	// GetNotificationsMatchers GET /config/notifications/matchers/{name}
 	// Get a notification matcher.
-	GetNotificationsMatchers(ctx context.Context, name string) (*GetNotificationsMatchersResponse, error)
+	GetNotificationsMatchers(ctx context.Context, name string, params *GetNotificationsMatchersParams) (*GetNotificationsMatchersResponse, error)
 	// UpdateNotificationsMatchers PUT /config/notifications/matchers/{name}
 	// Update notification matcher.
 	UpdateNotificationsMatchers(ctx context.Context, name string, params *UpdateNotificationsMatchersParams) error
@@ -2510,7 +2510,7 @@ type CreateDatastoreParams struct {
 	Backend *string `json:"backend,omitempty"`
 	// BackingDevice The UUID of the filesystem partition for removable datastores.
 	BackingDevice *string `json:"backing-device,omitempty"`
-	// Comment Comment.
+	// Comment Datastore comment (may span multiple lines and contain markdown formatting).
 	Comment *string `json:"comment,omitempty"`
 	// CounterResetSchedule Reset notification threshold related counters at specified schedule.
 	CounterResetSchedule *string `json:"counter-reset-schedule,omitempty"`
@@ -2532,6 +2532,8 @@ type CreateDatastoreParams struct {
 	KeepYearly *int64 `json:"keep-yearly,omitempty"`
 	// MaintenanceMode Maintenance mode, type is either 'offline' or 'read-only', message should be enclosed in "
 	MaintenanceMode *string `json:"maintenance-mode,omitempty"`
+	// MaxSnapshotTimeSkew Maximum allowed time skew between new snapshot's timestamp and server system time (<= 1 day, default = 1 minute)
+	MaxSnapshotTimeSkew *string `json:"max-snapshot-time-skew,omitempty"`
 	// Name Datastore name.
 	Name string `json:"name"`
 	// NotificationMode Configure how notifications for this datastore should be sent. `legacy-sendmail` sends email notifications to the user configured in `notify-user` via the system's `sendmail` executable. `notification-system` emits matchable notification events to the notification system.
@@ -2649,7 +2651,7 @@ type GetDatastoreResponse struct {
 	Backend *string `json:"backend,omitempty"`
 	// BackingDevice The UUID of the filesystem partition for removable datastores.
 	BackingDevice *string `json:"backing-device,omitempty"`
-	// Comment Comment.
+	// Comment Datastore comment (may span multiple lines and contain markdown formatting).
 	Comment *string `json:"comment,omitempty"`
 	// CounterResetSchedule Reset notification threshold related counters at specified schedule.
 	CounterResetSchedule *string `json:"counter-reset-schedule,omitempty"`
@@ -2671,6 +2673,8 @@ type GetDatastoreResponse struct {
 	KeepYearly *client.PVEInt `json:"keep-yearly,omitempty"`
 	// MaintenanceMode Maintenance mode, type is either 'offline' or 'read-only', message should be enclosed in "
 	MaintenanceMode *string `json:"maintenance-mode,omitempty"`
+	// MaxSnapshotTimeSkew Maximum allowed time skew between new snapshot's timestamp and server system time (<= 1 day, default = 1 minute)
+	MaxSnapshotTimeSkew *string `json:"max-snapshot-time-skew,omitempty"`
 	// Name Datastore name.
 	Name string `json:"name"`
 	// NotificationMode Configure how notifications for this datastore should be sent. `legacy-sendmail` sends email notifications to the user configured in `notify-user` via the system's `sendmail` executable. `notification-system` emits matchable notification events to the notification system.
@@ -2722,7 +2726,7 @@ func (s *service) GetDatastore(ctx context.Context, name string) (*GetDatastoreR
 
 // UpdateDatastoreParams is the request payload for UpdateDatastore.
 type UpdateDatastoreParams struct {
-	// Comment Comment.
+	// Comment Datastore comment (may span multiple lines and contain markdown formatting).
 	Comment *string `json:"comment,omitempty"`
 	// CounterResetSchedule Reset notification threshold related counters at specified schedule.
 	CounterResetSchedule *string `json:"counter-reset-schedule,omitempty"`
@@ -2748,6 +2752,8 @@ type UpdateDatastoreParams struct {
 	KeepYearly *int64 `json:"keep-yearly,omitempty"`
 	// MaintenanceMode Maintenance mode, type is either 'offline' or 'read-only', message should be enclosed in "
 	MaintenanceMode *string `json:"maintenance-mode,omitempty"`
+	// MaxSnapshotTimeSkew Maximum allowed time skew between new snapshot's timestamp and server system time (<= 1 day, default = 1 minute)
+	MaxSnapshotTimeSkew *string `json:"max-snapshot-time-skew,omitempty"`
 	// NotificationMode Configure how notifications for this datastore should be sent. `legacy-sendmail` sends email notifications to the user configured in `notify-user` via the system's `sendmail` executable. `notification-system` emits matchable notification events to the notification system.
 	NotificationMode *string `json:"notification-mode,omitempty"`
 	// NotificationThresholds Threshold values for notifications
@@ -3913,7 +3919,7 @@ func (s *service) DeleteNotificationsEndpointsGotify(ctx context.Context, name s
 }
 
 // GetNotificationsEndpointsGotifyResponse mirrors the shape returned by GET /config/notifications/endpoints/gotify/{name}.
-// Config for  Gotify notification endpoints
+// Config for Gotify notification endpoints
 type GetNotificationsEndpointsGotifyResponse struct {
 	// Comment Comment.
 	Comment *string `json:"comment,omitempty"`
@@ -4323,7 +4329,7 @@ func (s *service) DeleteNotificationsEndpointsSmtp(ctx context.Context, name str
 }
 
 // GetNotificationsEndpointsSmtpResponse mirrors the shape returned by GET /config/notifications/endpoints/smtp/{name}.
-// Config for Sendmail notification endpoints
+// Config for SMTP notification endpoints
 type GetNotificationsEndpointsSmtpResponse struct {
 	// Author Author of the mail. Defaults to 'Proxmox Backup Server ($hostname)'
 	Author *string `json:"author,omitempty"`
@@ -4545,7 +4551,7 @@ func (s *service) DeleteNotificationsEndpointsWebhook(ctx context.Context, name 
 }
 
 // GetNotificationsEndpointsWebhookResponse mirrors the shape returned by GET /config/notifications/endpoints/webhook/{name}.
-// Config for  Webhook notification endpoints
+// Config for Webhook notification endpoints
 type GetNotificationsEndpointsWebhookResponse struct {
 	// Body The HTTP body to send. Supports templating.
 	Body *string `json:"body,omitempty"`
@@ -4756,9 +4762,11 @@ type CreateNotificationsMatchersParams struct {
 	Comment *string `json:"comment,omitempty"`
 	// Disable Disable this matcher.
 	Disable *bool `json:"disable,omitempty"`
+	// Expression Match expression as inline JSON. This option is mutually exclusive with the following options.  - match-field - match-calendar - match-severity - invert-match - mode  All of the above can be represented as (sub)-expressions of this expression.
+	Expression *string `json:"expression,omitempty"`
 	// InvertMatch Invert match of the whole filter.
 	InvertMatch *bool `json:"invert-match,omitempty"`
-	// MatchCalendar List of matched severity levels.
+	// MatchCalendar List of matched calendar entries.
 	MatchCalendar []string `json:"match-calendar,omitempty"`
 	// MatchField List of matched metadata fields.
 	MatchField []string `json:"match-field,omitempty"`
@@ -4822,16 +4830,24 @@ func (s *service) DeleteNotificationsMatchers(ctx context.Context, name string) 
 	return nil
 }
 
+// GetNotificationsMatchersParams is the request payload for GetNotificationsMatchers.
+type GetNotificationsMatchersParams struct {
+	// MigrateToExpression Automatically translate existing 'match-*', 'invert-match' and 'mode' to an equivalent matching 'expression'
+	MigrateToExpression *bool `json:"migrate-to-expression,omitempty"`
+}
+
 // GetNotificationsMatchersResponse mirrors the shape returned by GET /config/notifications/matchers/{name}.
-// Config for Sendmail notification endpoints
+// Config for notification matchers.
 type GetNotificationsMatchersResponse struct {
 	// Comment Comment.
 	Comment *string `json:"comment,omitempty"`
 	// Disable Disable this matcher.
 	Disable *client.PVEBool `json:"disable,omitempty"`
+	// Expression Match expression as inline JSON. This option is mutually exclusive with the following options.  - match-field - match-calendar - match-severity - invert-match - mode  All of the above can be represented as (sub)-expressions of this expression.
+	Expression *string `json:"expression,omitempty"`
 	// InvertMatch Invert match of the whole filter.
 	InvertMatch *client.PVEBool `json:"invert-match,omitempty"`
-	// MatchCalendar List of matched severity levels.
+	// MatchCalendar List of matched calendar entries.
 	MatchCalendar []string `json:"match-calendar,omitempty"`
 	// MatchField List of matched metadata fields.
 	MatchField []string `json:"match-field,omitempty"`
@@ -4848,12 +4864,24 @@ type GetNotificationsMatchersResponse struct {
 }
 
 // GetNotificationsMatchers implements Service.GetNotificationsMatchers. GET /config/notifications/matchers/{name}.
-func (s *service) GetNotificationsMatchers(ctx context.Context, name string) (*GetNotificationsMatchersResponse, error) {
+func (s *service) GetNotificationsMatchers(ctx context.Context, name string, params *GetNotificationsMatchersParams) (*GetNotificationsMatchersResponse, error) {
 	if ctx == nil {
 		return nil, fmt.Errorf("config.GetNotificationsMatchers: ctx must not be nil")
 	}
 	path := fmt.Sprintf("/config/notifications/matchers/%s", url.PathEscape(name))
 	var body map[string]interface{}
+	if params != nil {
+		raw, err := json.Marshal(params)
+		if err != nil {
+			return nil, fmt.Errorf("config.GetNotificationsMatchers: marshal params: %w", err)
+		}
+		dec := json.NewDecoder(strings.NewReader(string(raw)))
+		dec.UseNumber()
+		err = dec.Decode(&body)
+		if err != nil {
+			return nil, fmt.Errorf("config.GetNotificationsMatchers: decode params: %w", err)
+		}
+	}
 	resp, err := s.c.GetRawCtx(ctx, path, body)
 	if err != nil {
 		return nil, fmt.Errorf("config.GetNotificationsMatchers: %w", err)
@@ -4886,9 +4914,11 @@ type UpdateNotificationsMatchersParams struct {
 	Digest *string `json:"digest,omitempty"`
 	// Disable Disable this matcher.
 	Disable *bool `json:"disable,omitempty"`
+	// Expression Match expression as inline JSON. This option is mutually exclusive with the following options.  - match-field - match-calendar - match-severity - invert-match - mode  All of the above can be represented as (sub)-expressions of this expression.
+	Expression *string `json:"expression,omitempty"`
 	// InvertMatch Invert match of the whole filter.
 	InvertMatch *bool `json:"invert-match,omitempty"`
-	// MatchCalendar List of matched severity levels.
+	// MatchCalendar List of matched calendar entries.
 	MatchCalendar []string `json:"match-calendar,omitempty"`
 	// MatchField List of matched metadata fields.
 	MatchField []string `json:"match-field,omitempty"`
