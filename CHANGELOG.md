@@ -5,6 +5,45 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security
+
+- `pkg/websocket` now runs on `github.com/coder/websocket` v1.8.15 instead of `github.com/gorilla/websocket` v1.5.3. Gorilla builds the mask key of every frame a client sends from a weak random generator (GO-2026-6278, GHSA-w67g-5rqw-f597), and its fix exists only as an untagged commit on a branch that hasn't moved since March 2025. The new library reads each mask key from `crypto/rand`, and gorilla is no longer a dependency. The handshake still refuses redirects, pins the certificate fingerprint the client was given, sends the same headers and cookies, and keeps tickets out of dial errors. The read limit is lifted, as it effectively was before, so a console message of any size is read whole.
+
+### Added
+
+- The bindings now follow the current upstream API specifications, fetched 2026-11-25, which are Proxmox VE 9.3 (pve-docs 9.3.1, pve-manager 9.3.1), Proxmox Backup Server 4.2.14, and Proxmox Datacenter Manager 1.1.10. PVE now covers 716 method-operations (was 680) across 481 endpoints, PBS covers 374 (was 367), and the PDM count is unchanged at 327.
+- PVE has a new `pkg/api/plugins` package for the `/plugins` namespace. It offers `ListPlugins`, `ListStorage`, `ListStoragePlugin`, and `GetStoragePlugin`, which list the available storage plugins and return the metadata of each one.
+- PVE now supports multipath and SAN. `Cluster()` gains `ListMultipath`, `ListMultipathOverrides`, and `UpdateMultipathOverrides`, the WWID calls `ListMultipathWwid`, `CreateMultipathWwid`, `GetMultipathWwid`, `UpdateMultipathWwid`, and `DeleteMultipathWwid`, and the cluster-wide `ListSan` and `ListSanStatus`. `Nodes()` gains per-node SAN calls for iSCSI and NVMe over Fabrics, such as `ListSanIscsiTarget`, `ListSanLuns`, and `ListSanNvmeofController`, along with `DeleteSanNvmeofController` and `ListScanNvmeof`. The storage parameters gain the matching `nvmeof` type and its fields, such as `Portals` and `Subsysnqn`.
+- PVE nodes gain `ListAccessLog` and `ListAccessLogStats` for the API access log, five APT history calls (`ListAptHistory`, `ListAptTermlog`, `ListAptInstalledChangelog`, `ListAptTransactionChangelogs`, and `ListAptUpdateChangelogs`), and `UpdateMaintenance`, which turns the HA maintenance mode of a node on or off. QEMU guests gain the guest-agent calls `ListQemuAgentGetCpustats`, `ListQemuAgentGetDisks`, `ListQemuAgentGetDiskstats`, and `ListQemuAgentGetLoad`.
+- `GET /cluster/options` now returns `token-policy`. The spec calls it a string, but pve-cluster parses it into an object before it sends it, so `ListOptionsResponse.TokenPolicy` is a `json.RawMessage` that holds that object. When we set the option, `TokenPolicy` is still a property string.
+- PBS nodes gain the same access log and APT history calls as PVE nodes, seven in all. PBS datastores gain `max-snapshot-time-skew`, notification matchers gain `expression` and `migrate-to-expression`, and `POST /nodes/{node}/disks/zfs` gains `recordsize`. A datastore comment can now be up to 8192 characters long and span several lines.
+- PDM automated installation gains bonding and VLAN settings. The prepared answer configurations accept `bond-enabled`, `bond-mode`, `bond-hash-policy`, `bond-members-filter`, `bond-members-filter-match`, and `vlan-id`, and an installation can now report the status `installer-outdated`. PDM node network interfaces accept `auto` as a `method` and `method6` value, the PVE node status that PDM relays gains `Idle` and `Uptime`, and PBS datastores that PDM relays gain `max-snapshot-time-skew`.
+
+### Changed
+
+- The generator can now keep the discriminator of a composite parameter schema optional for a given endpoint, and it refuses to run when an entry in that table matches no endpoint or an endpoint without a discriminator. PVE uses it for `PUT /storage/{storage}`, where pve-storage reads the type from the existing storage entry, and for `POST /cluster/ha/resources/{sid}/migrate`, where pve-ha-manager works out the resource type from the service ID. `UpdateStorageParams.Type` and `CreateHaResourcesMigrateParams.ResourceType` are therefore pointers that are sent only when set. `CreateStorageParams.Type` and the HA rule types stay required.
+- PDM 1.1.10 wraps 44 parameter schemas and 4 return schemas in `allOf`. Once flattened, their fields and types are the same as in 1.1.7 apart from the new optional fields listed above.
+- PDM 1.1.10 tightens several permissions on the server. Syncing a realm now needs `Access.Modify` instead of `Access.Audit`, reading the ACME terms of service needs `System.Modify` on `/system/certificates`, and reading node RRD data needs `System.Audit` on `/system/status`. The PDM firewall status no longer needs `Resource.Audit`. None of this changes a Go signature.
+- These breaking corrections are compile-time breaks that follow the upstream specifications.
+  - `clusterstorage.CreateStorageParams.Authsupported` is gone, because no PVE 9.3 storage plugin accepts it.
+  - `clusterstorage.UpdateStorageParams.Server` is gone, because every PVE 9.3 storage plugin that has a server marks it fixed after creation.
+  - `clusterstorage.Service.DeleteStorage` takes a third argument, `*DeleteStorageParams`, because the endpoint now accepts a `digest`.
+  - `GetNotificationsMatchers` takes a third argument for `migrate-to-expression`, both in PVE `cluster.Service` and in PBS `config.Service`. Pass nil to keep the old request.
+  - `Cidr` changes from `string` to `*string` in `cluster.UpdateFirewallAliasesParams`, `nodes.UpdateLxcFirewallAliasesParams`, and `nodes.UpdateQemuFirewallAliasesParams`, because PVE 9.3 makes it optional.
+  - `Zone` changes from `string` to `*string` in `cluster.CreateSdnVnetsIpsParams`, `cluster.UpdateSdnVnetsIpsParams`, and `cluster.DeleteSdnVnetsIpsParams`, for the same reason.
+  - `nodes.ListReplicationStatusResponse` changes from a `json.RawMessage` to a struct with `Guest`, `Id`, `Jobnum`, `Type`, and `Vmtype` fields, because PVE 9.3 now describes the response.
+  - Every `Service` interface that gained methods breaks custom implementations and mocks of it.
+- These breaking changes in `pkg/websocket` come with the move to `github.com/coder/websocket`.
+  - `Conn.Underlying` returns a `*websocket.Conn` from `github.com/coder/websocket`, so code that used the gorilla type needs a new import.
+  - `ReadMessage` reports a close frame as a coder/websocket `CloseError`, which `websocket.CloseStatus` and `errors.As` read.
+  - `Conn.WriteMessage` accepts only `TextMessage` and `BinaryMessage`, which are new exports, and it returns the new `ErrUnsupportedMessageType` for anything else.
+  - A server that answers a dial without upgrading the connection now gets an error that wraps the new `ErrBadHandshake` and gives the status code. Dial errors carry a few more words from the library, and they still unwrap to the same network errors.
+  - `Config.BufferSize` no longer has any effect.
+  - `Disconnect` and `Conn.Close` now wait up to five seconds for the server's close frame. Gorilla closed the connection at once.
+  - The handshake now fails when the server picks a subprotocol the client didn't offer, or when it negotiates compression.
+
 ## [v3.13.2] — 2026-11-11
 
 ### Changed
