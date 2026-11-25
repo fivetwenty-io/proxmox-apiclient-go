@@ -15,7 +15,7 @@ import (
 // 9.x): every property-string option arrives already split into an
 // object keyed by sub-option, and registered-tags arrives as an array.
 // The spec declares all of them as plain strings; cmd/pvegen corrects the
-// eleven affected properties through returnsPropertyOverrides. The values
+// twelve affected properties through returnsPropertyOverrides. The values
 // are hand-authored from the parser's rules, not captured from a live
 // cluster, so they pin the container shapes rather than any exact
 // sub-option set.
@@ -30,6 +30,7 @@ const clusterOptionsBody = `{"data":{
 	"notify":{"fencing":"always","target-fencing":"mail-to-root"},
 	"replication":{"max_workers":2},
 	"tag-style":{"shape":"full","color-map":"prod:FF0000"},
+	"token-policy":{"require-expiry":1,"max-lifetime":7776000,"disallow-expiry-extension":1,"require-privilege-separation":1},
 	"u2f":{"appid":"https://pve.example:8006"},
 	"webauthn":{"rp":"pve.example","origin":"https://pve.example:8006","id":"pve.example"},
 	"user-tag-access":{"user-allow":"list","user-allow-list":["dev","test"]},
@@ -83,7 +84,14 @@ func TestListOptionsDecodesCapturedResponse(t *testing.T) {
 		t.Errorf("AllowedTags = %#v, want an empty, non-nil list", resp.AllowedTags)
 	}
 
-	for name, raw := range map[string]json.RawMessage{"ha": resp.Ha, "migration": resp.Migration, "next-id": resp.NextId} {
+	absent := map[string]json.RawMessage{
+		"ha":           resp.Ha,
+		"migration":    resp.Migration,
+		"next-id":      resp.NextId,
+		"token-policy": resp.TokenPolicy,
+	}
+
+	for name, raw := range absent {
 		if raw != nil {
 			t.Errorf("%s = %s, want absent", name, raw)
 		}
@@ -130,7 +138,7 @@ func assertScalarOptions(t *testing.T, resp *cluster.ListOptionsResponse) {
 	}
 }
 
-// assertObjectOptions checks the ten property-string options the spec
+// assertObjectOptions checks the eleven property-string options the spec
 // declares as strings but the server sends as parsed objects.
 func assertObjectOptions(t *testing.T, resp *cluster.ListOptionsResponse) {
 	t.Helper()
@@ -156,6 +164,8 @@ func assertObjectOptions(t *testing.T, resp *cluster.ListOptionsResponse) {
 		t.Errorf("next-id = %+v, want lower=100 upper=1000000", nextID)
 	}
 
+	assertTokenPolicy(t, resp.TokenPolicy)
+
 	objects := map[string]json.RawMessage{
 		"crs":             resp.Crs,
 		"migration":       resp.Migration,
@@ -175,6 +185,30 @@ func assertObjectOptions(t *testing.T, resp *cluster.ListOptionsResponse) {
 		if len(obj) == 0 {
 			t.Errorf("%s = %s, want a non-empty JSON object", name, raw)
 		}
+	}
+}
+
+// assertTokenPolicy checks the PVE 9.3 token-policy option, which
+// parse_datacenter_config turns into an object of 0/1 booleans plus the
+// integer max-lifetime in seconds.
+func assertTokenPolicy(t *testing.T, raw json.RawMessage) {
+	t.Helper()
+
+	var policy struct {
+		RequireExpiry              int   `json:"require-expiry"`
+		MaxLifetime                int64 `json:"max-lifetime"`
+		DisallowExpiryExtension    int   `json:"disallow-expiry-extension"`
+		RequirePrivilegeSeparation int   `json:"require-privilege-separation"`
+	}
+
+	decodeOption(t, "token-policy", raw, &policy)
+
+	if policy.RequireExpiry != 1 || policy.MaxLifetime != 7776000 {
+		t.Errorf("token-policy = %+v, want require-expiry=1 max-lifetime=7776000", policy)
+	}
+
+	if policy.DisallowExpiryExtension != 1 || policy.RequirePrivilegeSeparation != 1 {
+		t.Errorf("token-policy = %+v, want disallow-expiry-extension=1 require-privilege-separation=1", policy)
 	}
 }
 

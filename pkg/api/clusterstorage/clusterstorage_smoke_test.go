@@ -193,7 +193,7 @@ func TestGenerated_Clusterstorage_Methods(t *testing.T) {
 	t.Run("DeleteStorage", func(t *testing.T) {
 		harness.set(http.StatusOK, `{"data":{},"success":1}`)
 
-		err := svc.DeleteStorage(ctx, "sample-storage")
+		err := svc.DeleteStorage(ctx, "sample-storage", &clusterstorage.DeleteStorageParams{})
 		if err != nil {
 			t.Fatalf("DeleteStorage: unexpected error: %v", err)
 		}
@@ -202,7 +202,7 @@ func TestGenerated_Clusterstorage_Methods(t *testing.T) {
 		assertRequestLine(t, got, "DELETE", "/api2/json/storage/sample-storage")
 
 		var nilCtx context.Context
-		if err := svc.DeleteStorage(nilCtx, "sample-storage"); err == nil {
+		if err := svc.DeleteStorage(nilCtx, "sample-storage", &clusterstorage.DeleteStorageParams{}); err == nil {
 			t.Errorf("DeleteStorage: expected error for nil context, got nil")
 		}
 	})
@@ -263,7 +263,7 @@ func TestGenerated_Clusterstorage_Methods(t *testing.T) {
 	t.Run("ErrorPath_DELETE", func(t *testing.T) {
 		harness.set(http.StatusInternalServerError, `{"data":null,"success":0,"message":"boom"}`)
 
-		err := svc.DeleteStorage(ctx, "sample-storage")
+		err := svc.DeleteStorage(ctx, "sample-storage", &clusterstorage.DeleteStorageParams{})
 		if err == nil {
 			t.Fatalf("DeleteStorage: expected error on 500 response, got nil")
 		}

@@ -138,7 +138,7 @@ Supported proxy methods: `VMVNCProxy`, `VMVNCConnect`, `VMTermProxy`,
 
 ## Generated API bindings (pkg/api/\*)
 
-The packages under `pkg/api/` expose typed bindings for all 678 PVE 9.2
+The packages under `pkg/api/` expose typed bindings for all 716 PVE 9.3
 method-operations. They are generated from `_data/apidoc.json` by `cmd/pvegen` and
 **must not be edited by hand** — changes will be lost when `make generate` runs.
 
@@ -150,6 +150,7 @@ method-operations. They are generated from `_data/apidoc.json` by `cmd/pvegen` a
 | `pkg/api/clusterstorage` | `/storage` | Cluster-wide storage config |
 | `pkg/api/nodes` | `/nodes` | Per-node resources, VMs, containers |
 | `pkg/api/pools` | `/pools` | Resource pools |
+| `pkg/api/plugins` | `/plugins` | Storage plugin metadata |
 
 Construct a service with the shared client:
 
@@ -278,8 +279,8 @@ The library is organized in three layers:
 
 - **Generated typed bindings** (`pkg/api/version`, `pkg/api/access`,
   `pkg/api/cluster`, `pkg/api/clusterstorage`, `pkg/api/nodes`,
-  `pkg/api/pools`) — the primary API. Generated from `_data/apidoc.json`,
-  these cover all 678 PVE 9.2 method-operations with full parameter and response
+  `pkg/api/pools`, `pkg/api/plugins`) — the primary API. Generated from `_data/apidoc.json`,
+  these cover all 716 PVE 9.3 method-operations with full parameter and response
   typing. Use these when you need a specific parameter or response field, or
   compile-time-checked request/response shapes.
 

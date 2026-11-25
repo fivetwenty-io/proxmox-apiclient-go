@@ -4,7 +4,7 @@ This directory holds the upstream Proxmox API specifications used as input
 to the typed client codegen pipeline at `cmd/pvegen`: `apidoc.json` for
 Proxmox VE, `pbs-apidoc.json` for Proxmox Backup Server, and
 `pdm-apidoc.json` for Proxmox Datacenter Manager. For PVE, the
-generator emits typed bindings for all six top-level namespaces:
+generator emits typed bindings for all seven top-level namespaces:
 
 - `/version`  → `pkg/api/version/`
 - `/access`   → `pkg/api/access/`
@@ -14,6 +14,7 @@ generator emits typed bindings for all six top-level namespaces:
   hand-written `pkg/api/storage/` helpers that target
   `/nodes/{node}/storage/...`)
 - `/nodes`    → `pkg/api/nodes/`
+- `/plugins`  → `pkg/api/plugins/` (storage plugin metadata, new in PVE 9.3)
 
 ## Files
 
@@ -22,7 +23,7 @@ generator emits typed bindings for all six top-level namespaces:
   each node has `path`, `text`, `leaf`, `info` (map of HTTP method to
   endpoint definition), and optional `children`.
 
-  **Current pin: fetched 2026-10-04 — PVE 9.2 (pve-docs 9.2.13, pve-manager 9.2.21) — 449 endpoints / 680 method-operations.**
+  **Current pin: fetched 2026-11-25 — PVE 9.3 (pve-docs 9.3.1, pve-manager 9.3.1) — 481 endpoints / 716 method-operations.**
 
 ## Provenance
 
@@ -87,13 +88,13 @@ To refresh against a newer PVE release:
    make check
    ```
 
-## Schema shapes the generator normalises
+## Schema shapes the generator normalizes
 
 - Composite parameters
-  Since PVE 9.2 (pve-ha-manager 5.2) the HA rule endpoints declare their parameters as an `allOf` of common properties plus a `oneOf` with one variant per rule type, discriminated by `type-property`. `cmd/pvegen` flattens these into a single property map before emission (`flattenComposite`): plain properties beside the composition are kept, a property is required only when every variant requires it, the discriminator comes from `type-property-schema` and is forced required, and a property the variants describe differently gets every description in its doc comment, each labelled with the variant's `instance-type`. Parameters and returns both pass through the same flattening, so any future endpoint using this encoding is handled the same way.
+  Since PVE 9.2 (pve-ha-manager 5.2) the HA rule endpoints declare their parameters as an `allOf` of common properties plus a `oneOf` with one variant per rule type, discriminated by `type-property`. PVE 9.3 uses the same encoding for the storage create and update endpoints, with one variant per storage plugin, and for `POST /cluster/ha/resources/{sid}/migrate`, with one variant per resource type and `resource-type` as the discriminator. `cmd/pvegen` flattens these into a single property map before emission (`flattenComposite`). Plain properties beside the composition are kept, a property is required only when every variant requires it, and a property the variants describe differently gets every description in its doc comment, each labeled with the variant's `instance-type`. The discriminator comes from `type-property-schema` and is forced required, unless the endpoint appears in the dialect's `optionalDiscriminators` table. That table lists the endpoints whose server works the discriminator out for itself, so the caller may leave it out. For PVE these are `PUT /storage/{storage}`, where the server resolves the type from the existing storage entry, and the HA migrate endpoint, where the server derives the type from the service ID. `POST /storage` and the HA rule endpoints keep a required discriminator. The generator refuses to run when an entry in that table matches no endpoint or names an endpoint without a discriminator. Parameters and returns both pass through the same flattening, so any future endpoint using this encoding is handled the same way.
 
 - Wrong declared response types
-  Where the spec documents a response property as one type and the server sends another, the dialect's `returnsPropertyOverrides` table patches that property alone, keeping the spec's description and optionality. `GET /cluster/options` is the current entry: PVE returns the parsed `datacenter.cfg`, so its property-string options (`ha`, `migration`, `notify`, ...) arrive as objects and `registered-tags` as an array. The generator refuses to run when an entry in either override table matches no endpoint, or when a property override names a property the spec does not declare, so a refresh that renames or drops the target surfaces at once instead of leaving the override dead.
+  Where the spec documents a response property as one type and the server sends another, the dialect's `returnsPropertyOverrides` table patches that property alone, keeping the spec's description and optionality. `GET /cluster/options` is the current entry: PVE returns the parsed `datacenter.cfg`, so its property-string options (`ha`, `migration`, `notify`, and since PVE 9.3 `token-policy`, among others) arrive as objects and `registered-tags` as an array. The generator refuses to run when an entry in either override table matches no endpoint, or when a property override names a property the spec does not declare, so a refresh that renames or drops the target surfaces at once instead of leaving the override dead.
 
 ## PBS specification (`pbs-apidoc.json`)
 

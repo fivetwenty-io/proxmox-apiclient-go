@@ -1178,17 +1178,16 @@ func TestGenerated_Cluster_Methods(t *testing.T) {
 	t.Run("UpdateFirewallAliases", func(t *testing.T) {
 		harness.set(http.StatusOK, `{"data":{},"success":1}`)
 
-		err := svc.UpdateFirewallAliases(ctx, "sample-name", &cluster.UpdateFirewallAliasesParams{Cidr: "sample-cidr"})
+		err := svc.UpdateFirewallAliases(ctx, "sample-name", &cluster.UpdateFirewallAliasesParams{})
 		if err != nil {
 			t.Fatalf("UpdateFirewallAliases: unexpected error: %v", err)
 		}
 
 		got := harness.snapshot()
 		assertRequestLine(t, got, "PUT", "/api2/json/cluster/firewall/aliases/sample-name")
-		assertParamValue(t, got.form, "cidr", "sample-cidr")
 
 		var nilCtx context.Context
-		if err := svc.UpdateFirewallAliases(nilCtx, "sample-name", &cluster.UpdateFirewallAliasesParams{Cidr: "sample-cidr"}); err == nil {
+		if err := svc.UpdateFirewallAliases(nilCtx, "sample-name", &cluster.UpdateFirewallAliasesParams{}); err == nil {
 			t.Errorf("UpdateFirewallAliases: expected error for nil context, got nil")
 		}
 	})
@@ -2605,6 +2604,147 @@ func TestGenerated_Cluster_Methods(t *testing.T) {
 			t.Errorf("UpdateMetricsServer: expected error for nil context, got nil")
 		}
 	})
+	t.Run("ListMultipath", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListMultipath(ctx)
+		if err != nil {
+			t.Fatalf("ListMultipath: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListMultipath: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/multipath")
+
+		var nilCtx context.Context
+		if _, err := svc.ListMultipath(nilCtx); err == nil {
+			t.Errorf("ListMultipath: expected error for nil context, got nil")
+		}
+	})
+	t.Run("ListMultipathOverrides", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListMultipathOverrides(ctx)
+		if err != nil {
+			t.Fatalf("ListMultipathOverrides: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListMultipathOverrides: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/multipath/overrides")
+
+		var nilCtx context.Context
+		if _, err := svc.ListMultipathOverrides(nilCtx); err == nil {
+			t.Errorf("ListMultipathOverrides: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateMultipathOverrides", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateMultipathOverrides(ctx, &cluster.UpdateMultipathOverridesParams{})
+		if err != nil {
+			t.Fatalf("UpdateMultipathOverrides: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/cluster/multipath/overrides")
+
+		var nilCtx context.Context
+		if err := svc.UpdateMultipathOverrides(nilCtx, &cluster.UpdateMultipathOverridesParams{}); err == nil {
+			t.Errorf("UpdateMultipathOverrides: expected error for nil context, got nil")
+		}
+	})
+	t.Run("ListMultipathWwid", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListMultipathWwid(ctx)
+		if err != nil {
+			t.Fatalf("ListMultipathWwid: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListMultipathWwid: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/multipath/wwid")
+
+		var nilCtx context.Context
+		if _, err := svc.ListMultipathWwid(nilCtx); err == nil {
+			t.Errorf("ListMultipathWwid: expected error for nil context, got nil")
+		}
+	})
+	t.Run("CreateMultipathWwid", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.CreateMultipathWwid(ctx, &cluster.CreateMultipathWwidParams{Wwid: "sample-wwid"})
+		if err != nil {
+			t.Fatalf("CreateMultipathWwid: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "POST", "/api2/json/cluster/multipath/wwid")
+		assertParamValue(t, got.form, "wwid", "sample-wwid")
+
+		var nilCtx context.Context
+		if err := svc.CreateMultipathWwid(nilCtx, &cluster.CreateMultipathWwidParams{Wwid: "sample-wwid"}); err == nil {
+			t.Errorf("CreateMultipathWwid: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteMultipathWwid", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.DeleteMultipathWwid(ctx, "sample-wwid", &cluster.DeleteMultipathWwidParams{})
+		if err != nil {
+			t.Fatalf("DeleteMultipathWwid: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/cluster/multipath/wwid/sample-wwid")
+
+		var nilCtx context.Context
+		if err := svc.DeleteMultipathWwid(nilCtx, "sample-wwid", &cluster.DeleteMultipathWwidParams{}); err == nil {
+			t.Errorf("DeleteMultipathWwid: expected error for nil context, got nil")
+		}
+	})
+	t.Run("GetMultipathWwid", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.GetMultipathWwid(ctx, "sample-wwid")
+		if err != nil {
+			t.Fatalf("GetMultipathWwid: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("GetMultipathWwid: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/multipath/wwid/sample-wwid")
+
+		var nilCtx context.Context
+		if _, err := svc.GetMultipathWwid(nilCtx, "sample-wwid"); err == nil {
+			t.Errorf("GetMultipathWwid: expected error for nil context, got nil")
+		}
+	})
+	t.Run("UpdateMultipathWwid", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateMultipathWwid(ctx, "sample-wwid", &cluster.UpdateMultipathWwidParams{})
+		if err != nil {
+			t.Fatalf("UpdateMultipathWwid: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/cluster/multipath/wwid/sample-wwid")
+
+		var nilCtx context.Context
+		if err := svc.UpdateMultipathWwid(nilCtx, "sample-wwid", &cluster.UpdateMultipathWwidParams{}); err == nil {
+			t.Errorf("UpdateMultipathWwid: expected error for nil context, got nil")
+		}
+	})
 	t.Run("ListNextid", func(t *testing.T) {
 		harness.set(http.StatusOK, `{"data":{},"success":1}`)
 
@@ -3109,7 +3249,7 @@ func TestGenerated_Cluster_Methods(t *testing.T) {
 	t.Run("GetNotificationsMatchers", func(t *testing.T) {
 		harness.set(http.StatusOK, `{"data":{},"success":1}`)
 
-		resp, err := svc.GetNotificationsMatchers(ctx, "sample-name")
+		resp, err := svc.GetNotificationsMatchers(ctx, "sample-name", &cluster.GetNotificationsMatchersParams{})
 		if err != nil {
 			t.Fatalf("GetNotificationsMatchers: unexpected error: %v", err)
 		}
@@ -3121,7 +3261,7 @@ func TestGenerated_Cluster_Methods(t *testing.T) {
 		assertRequestLine(t, got, "GET", "/api2/json/cluster/notifications/matchers/sample-name")
 
 		var nilCtx context.Context
-		if _, err := svc.GetNotificationsMatchers(nilCtx, "sample-name"); err == nil {
+		if _, err := svc.GetNotificationsMatchers(nilCtx, "sample-name", &cluster.GetNotificationsMatchersParams{}); err == nil {
 			t.Errorf("GetNotificationsMatchers: expected error for nil context, got nil")
 		}
 	})
@@ -3443,6 +3583,44 @@ func TestGenerated_Cluster_Methods(t *testing.T) {
 		var nilCtx context.Context
 		if _, err := svc.ListResources(nilCtx, &cluster.ListResourcesParams{}); err == nil {
 			t.Errorf("ListResources: expected error for nil context, got nil")
+		}
+	})
+	t.Run("ListSan", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListSan(ctx)
+		if err != nil {
+			t.Fatalf("ListSan: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListSan: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/san")
+
+		var nilCtx context.Context
+		if _, err := svc.ListSan(nilCtx); err == nil {
+			t.Errorf("ListSan: expected error for nil context, got nil")
+		}
+	})
+	t.Run("ListSanStatus", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListSanStatus(ctx)
+		if err != nil {
+			t.Fatalf("ListSanStatus: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListSanStatus: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/cluster/san/status")
+
+		var nilCtx context.Context
+		if _, err := svc.ListSanStatus(nilCtx); err == nil {
+			t.Errorf("ListSanStatus: expected error for nil context, got nil")
 		}
 	})
 	t.Run("ListSdn", func(t *testing.T) {
@@ -4615,7 +4793,7 @@ func TestGenerated_Cluster_Methods(t *testing.T) {
 	t.Run("DeleteSdnVnetsIps", func(t *testing.T) {
 		harness.set(http.StatusOK, `{"data":{},"success":1}`)
 
-		err := svc.DeleteSdnVnetsIps(ctx, "sample-vnet", &cluster.DeleteSdnVnetsIpsParams{Ip: "sample-ip", Zone: "sample-zone"})
+		err := svc.DeleteSdnVnetsIps(ctx, "sample-vnet", &cluster.DeleteSdnVnetsIpsParams{Ip: "sample-ip"})
 		if err != nil {
 			t.Fatalf("DeleteSdnVnetsIps: unexpected error: %v", err)
 		}
@@ -4623,17 +4801,16 @@ func TestGenerated_Cluster_Methods(t *testing.T) {
 		got := harness.snapshot()
 		assertRequestLine(t, got, "DELETE", "/api2/json/cluster/sdn/vnets/sample-vnet/ips")
 		assertParamValue(t, got.query, "ip", "sample-ip")
-		assertParamValue(t, got.query, "zone", "sample-zone")
 
 		var nilCtx context.Context
-		if err := svc.DeleteSdnVnetsIps(nilCtx, "sample-vnet", &cluster.DeleteSdnVnetsIpsParams{Ip: "sample-ip", Zone: "sample-zone"}); err == nil {
+		if err := svc.DeleteSdnVnetsIps(nilCtx, "sample-vnet", &cluster.DeleteSdnVnetsIpsParams{Ip: "sample-ip"}); err == nil {
 			t.Errorf("DeleteSdnVnetsIps: expected error for nil context, got nil")
 		}
 	})
 	t.Run("CreateSdnVnetsIps", func(t *testing.T) {
 		harness.set(http.StatusOK, `{"data":{},"success":1}`)
 
-		err := svc.CreateSdnVnetsIps(ctx, "sample-vnet", &cluster.CreateSdnVnetsIpsParams{Ip: "sample-ip", Zone: "sample-zone"})
+		err := svc.CreateSdnVnetsIps(ctx, "sample-vnet", &cluster.CreateSdnVnetsIpsParams{Ip: "sample-ip"})
 		if err != nil {
 			t.Fatalf("CreateSdnVnetsIps: unexpected error: %v", err)
 		}
@@ -4641,17 +4818,16 @@ func TestGenerated_Cluster_Methods(t *testing.T) {
 		got := harness.snapshot()
 		assertRequestLine(t, got, "POST", "/api2/json/cluster/sdn/vnets/sample-vnet/ips")
 		assertParamValue(t, got.form, "ip", "sample-ip")
-		assertParamValue(t, got.form, "zone", "sample-zone")
 
 		var nilCtx context.Context
-		if err := svc.CreateSdnVnetsIps(nilCtx, "sample-vnet", &cluster.CreateSdnVnetsIpsParams{Ip: "sample-ip", Zone: "sample-zone"}); err == nil {
+		if err := svc.CreateSdnVnetsIps(nilCtx, "sample-vnet", &cluster.CreateSdnVnetsIpsParams{Ip: "sample-ip"}); err == nil {
 			t.Errorf("CreateSdnVnetsIps: expected error for nil context, got nil")
 		}
 	})
 	t.Run("UpdateSdnVnetsIps", func(t *testing.T) {
 		harness.set(http.StatusOK, `{"data":{},"success":1}`)
 
-		err := svc.UpdateSdnVnetsIps(ctx, "sample-vnet", &cluster.UpdateSdnVnetsIpsParams{Ip: "sample-ip", Zone: "sample-zone"})
+		err := svc.UpdateSdnVnetsIps(ctx, "sample-vnet", &cluster.UpdateSdnVnetsIpsParams{Ip: "sample-ip"})
 		if err != nil {
 			t.Fatalf("UpdateSdnVnetsIps: unexpected error: %v", err)
 		}
@@ -4659,10 +4835,9 @@ func TestGenerated_Cluster_Methods(t *testing.T) {
 		got := harness.snapshot()
 		assertRequestLine(t, got, "PUT", "/api2/json/cluster/sdn/vnets/sample-vnet/ips")
 		assertParamValue(t, got.form, "ip", "sample-ip")
-		assertParamValue(t, got.form, "zone", "sample-zone")
 
 		var nilCtx context.Context
-		if err := svc.UpdateSdnVnetsIps(nilCtx, "sample-vnet", &cluster.UpdateSdnVnetsIpsParams{Ip: "sample-ip", Zone: "sample-zone"}); err == nil {
+		if err := svc.UpdateSdnVnetsIps(nilCtx, "sample-vnet", &cluster.UpdateSdnVnetsIpsParams{Ip: "sample-ip"}); err == nil {
 			t.Errorf("UpdateSdnVnetsIps: expected error for nil context, got nil")
 		}
 	})

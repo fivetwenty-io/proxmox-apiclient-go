@@ -125,12 +125,14 @@ linters:
       - pkg/api/cluster/.*_gen\.go
       - pkg/api/clusterstorage/.*_gen\.go
       - pkg/api/nodes/.*_gen\.go
+      - pkg/api/plugins/.*_gen\.go
       - pkg/api/pools/.*_gen\.go
       - pkg/api/version/.*_gen\.go
       - pkg/api/access/.*_smoke_test\.go
       - pkg/api/cluster/.*_smoke_test\.go
       - pkg/api/clusterstorage/.*_smoke_test\.go
       - pkg/api/nodes/.*_smoke_test\.go
+      - pkg/api/plugins/.*_smoke_test\.go
       - pkg/api/pools/.*_smoke_test\.go
       # Every pkg/pbs subdirectory is generator-owned (hand-written code
       # lives only at the pkg/pbs root), so a wildcard is safe here.
@@ -207,12 +209,14 @@ formatters:
       - pkg/api/cluster/.*_gen\.go
       - pkg/api/clusterstorage/.*_gen\.go
       - pkg/api/nodes/.*_gen\.go
+      - pkg/api/plugins/.*_gen\.go
       - pkg/api/pools/.*_gen\.go
       - pkg/api/version/.*_gen\.go
       - pkg/api/access/.*_smoke_test\.go
       - pkg/api/cluster/.*_smoke_test\.go
       - pkg/api/clusterstorage/.*_smoke_test\.go
       - pkg/api/nodes/.*_smoke_test\.go
+      - pkg/api/plugins/.*_smoke_test\.go
       - pkg/api/pools/.*_smoke_test\.go
       - pkg/pbs/.*/.*_gen\.go
       - pkg/pbs/.*/.*_smoke_test\.go

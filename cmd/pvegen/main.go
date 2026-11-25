@@ -202,6 +202,7 @@ var dialects = map[string]*dialectConfig{
 		skipSmokeTests:           map[string]bool{namespaceVersion: true},
 		returnsOverrides:         pveReturnsOverrides,
 		returnsPropertyOverrides: pveReturnsPropertyOverrides,
+		optionalDiscriminators:   pveOptionalDiscriminators,
 	},
 	"pbs": {
 		pkgImportRoot: "pkg/pbs",
@@ -368,9 +369,12 @@ var pveReturnsPropertyOverrides = map[string]map[string]*schema{
 	// GET /cluster/options documents every datacenter.cfg option as the
 	// property string a caller writes with PUT, but the handler returns
 	// the parsed configuration (pve-cluster's parse_datacenter_config):
-	// ten property-string options arrive as JSON objects keyed by their
+	// eleven property-string options arrive as JSON objects keyed by their
 	// sub-options, and registered-tags arrives split into an array. A
 	// *string field would fail to decode any real cluster's response.
+	// token-policy (PVE 9.3) goes through the same parse_property_string
+	// call as ha and migration, so it arrives as an object of booleans
+	// plus the integer max-lifetime.
 	"GET /cluster/options": {
 		"crs":             {Type: schemaTypeObject},
 		"ha":              {Type: schemaTypeObject},
@@ -379,11 +383,29 @@ var pveReturnsPropertyOverrides = map[string]map[string]*schema{
 		"notify":          {Type: schemaTypeObject},
 		"replication":     {Type: schemaTypeObject},
 		"tag-style":       {Type: schemaTypeObject},
+		"token-policy":    {Type: schemaTypeObject},
 		"u2f":             {Type: schemaTypeObject},
 		"user-tag-access": {Type: schemaTypeObject},
 		"webauthn":        {Type: schemaTypeObject},
 		"registered-tags": {Type: schemaTypeArray, Items: &schema{Type: schemaTypeString}},
 	},
+}
+
+// pveOptionalDiscriminators lists the PVE endpoints whose composite
+// parameters name a discriminator the server fills in itself, so the
+// flattened request keeps it optional (see
+// dialectConfig.optionalDiscriminators). Every other composite endpoint,
+// POST /storage and the HA rule endpoints included, keeps it required.
+//
+//nolint:gochecknoglobals // hand-authored override table, mirrors the dialects map above
+var pveOptionalDiscriminators = map[string]bool{
+	// pve-storage's update handler (src/PVE/API2/Storage/Config.pm)
+	// declares a resolve_type that reads "type" from the existing
+	// storage configuration, and none of the update variants lists it.
+	"PUT /storage/{storage}": true,
+	// The spec's own type-property-schema says resource-type is
+	// "Automatically determined from the service ID."
+	"POST /cluster/ha/resources/{sid}/migrate": true,
 }
 
 // journalLinesSchema is the response shape of the journal endpoints on
@@ -554,12 +576,16 @@ type schema struct {
 	// rule endpoints (pve-ha-manager 5.2) are the first to declare their
 	// parameters this way: an allOf of the common properties plus a
 	// oneOf with one variant per rule type, discriminated by
-	// TypeProperty. flattenComposite merges them back into a
-	// single Properties map before any emission code looks at them.
+	// TypeProperty. PVE 9.3 adds POST /storage and PUT /storage/{storage}
+	// (one variant per storage type) and POST
+	// /cluster/ha/resources/{sid}/migrate (one per resource type).
+	// flattenComposite merges them back into a single Properties map
+	// before any emission code looks at them.
 	AllOf []*schema `json:"allOf,omitempty"`
 	OneOf []*schema `json:"oneOf,omitempty"`
 	// TypeProperty names the discriminator parameter selecting a OneOf
-	// variant ("type" for HA rules); TypePropertySchema is its schema.
+	// variant ("type" for HA rules and storage, "resource-type" for HA
+	// migrate); TypePropertySchema is its schema.
 	TypeProperty       string  `json:"type-property,omitempty"`
 	InstanceType       string  `json:"instance-type,omitempty"`
 	TypePropertySchema *schema `json:"type-property-schema,omitempty"`

@@ -37,7 +37,8 @@ GO_FILES := $(shell find . -name '*.go' -type f -not -path "./vendor/*")
 GOSEC_EXCLUDE_DIRS := -exclude-dir=examples -exclude-dir=cmd \
 	-exclude-dir=pkg/api/access -exclude-dir=pkg/api/cluster \
 	-exclude-dir=pkg/api/clusterstorage -exclude-dir=pkg/api/nodes \
-	-exclude-dir=pkg/api/pools -exclude-dir=pkg/api/version \
+	-exclude-dir=pkg/api/plugins -exclude-dir=pkg/api/pools \
+	-exclude-dir=pkg/api/version \
 	-exclude-dir=pkg/pbs/access -exclude-dir=pkg/pbs/admin \
 	-exclude-dir=pkg/pbs/config -exclude-dir=pkg/pbs/nodes \
 	-exclude-dir=pkg/pbs/ping -exclude-dir=pkg/pbs/pull \

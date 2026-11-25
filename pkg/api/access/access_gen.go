@@ -1970,7 +1970,7 @@ func (s *service) GetUsersToken(ctx context.Context, userid string, tokenid stri
 // CreateUsersTokenParams is the request payload for CreateUsersToken.
 type CreateUsersTokenParams struct {
 	Comment *string `json:"comment,omitempty"`
-	// Expire API token expiration date (seconds since epoch). '0' means no expiration date.
+	// Expire API token expiration date (seconds since epoch). '0' means no expiration date, or the maximum lifetime if the datacenter token policy sets 'default-to-max-lifetime'.
 	Expire *int64 `json:"expire,omitempty"`
 	// Privsep Restrict API token privileges with separate ACLs (default), or give full privileges of corresponding user.
 	Privsep *bool `json:"privsep,omitempty"`

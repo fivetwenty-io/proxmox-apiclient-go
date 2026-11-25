@@ -44,6 +44,7 @@ const (
 	fieldStorage               = "storage"
 	fieldShared                = "shared"
 	fieldOptions               = "options"
+	keyStorageUpdate           = "PUT /storage/{storage}"
 )
 
 func TestPascalize(t *testing.T) {
@@ -1342,7 +1343,7 @@ func TestHasDiscriminator(t *testing.T) {
 //nolint:paralleltest // mutates the package-level activeDialect global via withDialect
 func TestCollectEndpointsAppliesOptionalDiscriminators(t *testing.T) {
 	withDialect(t, &dialectConfig{
-		optionalDiscriminators: map[string]bool{"PUT /storage/{storage}": true},
+		optionalDiscriminators: map[string]bool{keyStorageUpdate: true},
 	})
 
 	tree := []*node{
@@ -1382,7 +1383,7 @@ func TestCollectEndpointsAppliesOptionalDiscriminators(t *testing.T) {
 func TestCollectEndpointsRejectsStaleOptionalDiscriminators(t *testing.T) {
 	withDialect(t, &dialectConfig{
 		optionalDiscriminators: map[string]bool{
-			"PUT /storage/{storage}":                   true,
+			keyStorageUpdate:                   true,
 			"POST /cluster/ha/resources/{sid}/migrate": true,
 		},
 	})
@@ -1413,5 +1414,65 @@ func TestCollectEndpointsRejectsStaleOptionalDiscriminators(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("error %v does not name %s", err, want)
 		}
+	}
+}
+
+// TestPveOverridesAgainstVendoredSpec runs the pve dialect's override
+// tables over _data/apidoc.json and pins the outcome of each entry this
+// spec relies on: which composite discriminators stay optional, which stay
+// required, and that token-policy decodes as an object.
+//
+//nolint:paralleltest // mutates the package-level activeDialect global via withDialect
+func TestPveOverridesAgainstVendoredSpec(t *testing.T) {
+	withDialect(t, dialects["pve"])
+
+	tree, err := loadSpec("../../_data/apidoc.json")
+	if err != nil {
+		t.Fatalf("loadSpec() error = %v", err)
+	}
+
+	eps, err := collectEndpoints(tree)
+	if err != nil {
+		t.Fatalf("collectEndpoints() error = %v", err)
+	}
+
+	byKey := make(map[string]endpoint, len(eps))
+	for _, endpt := range eps {
+		byKey[endpt.Verb+" "+endpt.Path] = endpt
+	}
+
+	discriminators := []struct {
+		key, name string
+		optional  bool
+	}{
+		{keyStorageUpdate, fieldType, true},
+		{"POST /cluster/ha/resources/{sid}/migrate", "resource-type", true},
+		{"POST /storage", fieldType, false},
+		{"POST /cluster/ha/rules", fieldType, false},
+		{"PUT /cluster/ha/rules/{rule}", fieldType, false},
+	}
+
+	for _, tc := range discriminators {
+		endpt, ok := byKey[tc.key]
+		if !ok {
+			t.Errorf("%s is missing from the spec", tc.key)
+
+			continue
+		}
+
+		prop := endpt.Info.Parameters.Properties[tc.name]
+		if prop == nil || isOptional(prop) != tc.optional {
+			t.Errorf("%s %s = %+v, want optional = %v", tc.key, tc.name, prop, tc.optional)
+		}
+	}
+
+	if len(dialects["pve"].optionalDiscriminators) != 2 {
+		t.Errorf("pve optionalDiscriminators = %v, want only the two endpoints pinned above",
+			dialects["pve"].optionalDiscriminators)
+	}
+
+	options := byKey["GET /cluster/options"].Info.Returns
+	if got := options.Properties["token-policy"]; got == nil || got.Type != schemaTypeObject || !isOptional(got) {
+		t.Errorf("GET /cluster/options token-policy = %+v, want an optional object", got)
 	}
 }

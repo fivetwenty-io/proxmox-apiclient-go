@@ -188,6 +188,44 @@ func TestGenerated_Nodes_Methods(t *testing.T) {
 			t.Errorf("GetNodes: expected error for nil context, got nil")
 		}
 	})
+	t.Run("ListAccessLog", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListAccessLog(ctx, "sample-node", &nodes.ListAccessLogParams{})
+		if err != nil {
+			t.Fatalf("ListAccessLog: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListAccessLog: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/access-log")
+
+		var nilCtx context.Context
+		if _, err := svc.ListAccessLog(nilCtx, "sample-node", &nodes.ListAccessLogParams{}); err == nil {
+			t.Errorf("ListAccessLog: expected error for nil context, got nil")
+		}
+	})
+	t.Run("ListAccessLogStats", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListAccessLogStats(ctx, "sample-node", &nodes.ListAccessLogStatsParams{})
+		if err != nil {
+			t.Fatalf("ListAccessLogStats: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListAccessLogStats: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/access-log/stats")
+
+		var nilCtx context.Context
+		if _, err := svc.ListAccessLogStats(nilCtx, "sample-node", &nodes.ListAccessLogStatsParams{}); err == nil {
+			t.Errorf("ListAccessLogStats: expected error for nil context, got nil")
+		}
+	})
 	t.Run("ListAplinfo", func(t *testing.T) {
 		harness.set(http.StatusOK, `{"data":[],"success":1}`)
 
@@ -267,6 +305,45 @@ func TestGenerated_Nodes_Methods(t *testing.T) {
 			t.Errorf("ListAptChangelog: expected error for nil context, got nil")
 		}
 	})
+	t.Run("ListAptHistory", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListAptHistory(ctx, "sample-node", &nodes.ListAptHistoryParams{})
+		if err != nil {
+			t.Fatalf("ListAptHistory: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListAptHistory: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/apt/history")
+
+		var nilCtx context.Context
+		if _, err := svc.ListAptHistory(nilCtx, "sample-node", &nodes.ListAptHistoryParams{}); err == nil {
+			t.Errorf("ListAptHistory: expected error for nil context, got nil")
+		}
+	})
+	t.Run("ListAptInstalledChangelog", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListAptInstalledChangelog(ctx, "sample-node", &nodes.ListAptInstalledChangelogParams{Name: "sample-name"})
+		if err != nil {
+			t.Fatalf("ListAptInstalledChangelog: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListAptInstalledChangelog: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/apt/installed-changelog")
+		assertParamValue(t, got.query, "name", "sample-name")
+
+		var nilCtx context.Context
+		if _, err := svc.ListAptInstalledChangelog(nilCtx, "sample-node", &nodes.ListAptInstalledChangelogParams{Name: "sample-name"}); err == nil {
+			t.Errorf("ListAptInstalledChangelog: expected error for nil context, got nil")
+		}
+	})
 	t.Run("ListAptRepositories", func(t *testing.T) {
 		harness.set(http.StatusOK, `{"data":{},"success":1}`)
 
@@ -321,6 +398,46 @@ func TestGenerated_Nodes_Methods(t *testing.T) {
 			t.Errorf("UpdateAptRepositories: expected error for nil context, got nil")
 		}
 	})
+	t.Run("ListAptTermlog", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListAptTermlog(ctx, "sample-node", &nodes.ListAptTermlogParams{StartTime: 42})
+		if err != nil {
+			t.Fatalf("ListAptTermlog: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListAptTermlog: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/apt/termlog")
+		assertParamValue(t, got.query, "start-time", "42")
+
+		var nilCtx context.Context
+		if _, err := svc.ListAptTermlog(nilCtx, "sample-node", &nodes.ListAptTermlogParams{StartTime: 42}); err == nil {
+			t.Errorf("ListAptTermlog: expected error for nil context, got nil")
+		}
+	})
+	t.Run("ListAptTransactionChangelogs", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListAptTransactionChangelogs(ctx, "sample-node", &nodes.ListAptTransactionChangelogsParams{StartTime: 42})
+		if err != nil {
+			t.Fatalf("ListAptTransactionChangelogs: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListAptTransactionChangelogs: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/apt/transaction-changelogs")
+		assertParamValue(t, got.query, "start-time", "42")
+
+		var nilCtx context.Context
+		if _, err := svc.ListAptTransactionChangelogs(nilCtx, "sample-node", &nodes.ListAptTransactionChangelogsParams{StartTime: 42}); err == nil {
+			t.Errorf("ListAptTransactionChangelogs: expected error for nil context, got nil")
+		}
+	})
 	t.Run("ListAptUpdate", func(t *testing.T) {
 		harness.set(http.StatusOK, `{"data":[],"success":1}`)
 
@@ -357,6 +474,25 @@ func TestGenerated_Nodes_Methods(t *testing.T) {
 		var nilCtx context.Context
 		if _, err := svc.CreateAptUpdate(nilCtx, "sample-node", &nodes.CreateAptUpdateParams{}); err == nil {
 			t.Errorf("CreateAptUpdate: expected error for nil context, got nil")
+		}
+	})
+	t.Run("ListAptUpdateChangelogs", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListAptUpdateChangelogs(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListAptUpdateChangelogs: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListAptUpdateChangelogs: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/apt/update-changelogs")
+
+		var nilCtx context.Context
+		if _, err := svc.ListAptUpdateChangelogs(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListAptUpdateChangelogs: expected error for nil context, got nil")
 		}
 	})
 	t.Run("ListAptVersions", func(t *testing.T) {
@@ -2458,17 +2594,16 @@ func TestGenerated_Nodes_Methods(t *testing.T) {
 	t.Run("UpdateLxcFirewallAliases", func(t *testing.T) {
 		harness.set(http.StatusOK, `{"data":{},"success":1}`)
 
-		err := svc.UpdateLxcFirewallAliases(ctx, "sample-node", "sample-vmid", "sample-name", &nodes.UpdateLxcFirewallAliasesParams{Cidr: "sample-cidr"})
+		err := svc.UpdateLxcFirewallAliases(ctx, "sample-node", "sample-vmid", "sample-name", &nodes.UpdateLxcFirewallAliasesParams{})
 		if err != nil {
 			t.Fatalf("UpdateLxcFirewallAliases: unexpected error: %v", err)
 		}
 
 		got := harness.snapshot()
 		assertRequestLine(t, got, "PUT", "/api2/json/nodes/sample-node/lxc/sample-vmid/firewall/aliases/sample-name")
-		assertParamValue(t, got.form, "cidr", "sample-cidr")
 
 		var nilCtx context.Context
-		if err := svc.UpdateLxcFirewallAliases(nilCtx, "sample-node", "sample-vmid", "sample-name", &nodes.UpdateLxcFirewallAliasesParams{Cidr: "sample-cidr"}); err == nil {
+		if err := svc.UpdateLxcFirewallAliases(nilCtx, "sample-node", "sample-vmid", "sample-name", &nodes.UpdateLxcFirewallAliasesParams{}); err == nil {
 			t.Errorf("UpdateLxcFirewallAliases: expected error for nil context, got nil")
 		}
 	})
@@ -3370,6 +3505,23 @@ func TestGenerated_Nodes_Methods(t *testing.T) {
 			t.Errorf("ListLxcVncwebsocket: expected error for nil context, got nil")
 		}
 	})
+	t.Run("UpdateMaintenance", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		err := svc.UpdateMaintenance(ctx, "sample-node", &nodes.UpdateMaintenanceParams{MaintenanceMode: "sample-maintenance-mode"})
+		if err != nil {
+			t.Fatalf("UpdateMaintenance: unexpected error: %v", err)
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "PUT", "/api2/json/nodes/sample-node/maintenance")
+		assertParamValue(t, got.form, "maintenance-mode", "sample-maintenance-mode")
+
+		var nilCtx context.Context
+		if err := svc.UpdateMaintenance(nilCtx, "sample-node", &nodes.UpdateMaintenanceParams{MaintenanceMode: "sample-maintenance-mode"}); err == nil {
+			t.Errorf("UpdateMaintenance: expected error for nil context, got nil")
+		}
+	})
 	t.Run("CreateMigrateall", func(t *testing.T) {
 		harness.set(http.StatusOK, `{"data":{},"success":1}`)
 
@@ -3803,6 +3955,63 @@ func TestGenerated_Nodes_Methods(t *testing.T) {
 			t.Errorf("CreateQemuAgentFstrim: expected error for nil context, got nil")
 		}
 	})
+	t.Run("ListQemuAgentGetCpustats", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListQemuAgentGetCpustats(ctx, "sample-node", "sample-vmid")
+		if err != nil {
+			t.Fatalf("ListQemuAgentGetCpustats: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListQemuAgentGetCpustats: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/qemu/sample-vmid/agent/get-cpustats")
+
+		var nilCtx context.Context
+		if _, err := svc.ListQemuAgentGetCpustats(nilCtx, "sample-node", "sample-vmid"); err == nil {
+			t.Errorf("ListQemuAgentGetCpustats: expected error for nil context, got nil")
+		}
+	})
+	t.Run("ListQemuAgentGetDisks", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListQemuAgentGetDisks(ctx, "sample-node", "sample-vmid")
+		if err != nil {
+			t.Fatalf("ListQemuAgentGetDisks: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListQemuAgentGetDisks: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/qemu/sample-vmid/agent/get-disks")
+
+		var nilCtx context.Context
+		if _, err := svc.ListQemuAgentGetDisks(nilCtx, "sample-node", "sample-vmid"); err == nil {
+			t.Errorf("ListQemuAgentGetDisks: expected error for nil context, got nil")
+		}
+	})
+	t.Run("ListQemuAgentGetDiskstats", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListQemuAgentGetDiskstats(ctx, "sample-node", "sample-vmid")
+		if err != nil {
+			t.Fatalf("ListQemuAgentGetDiskstats: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListQemuAgentGetDiskstats: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/qemu/sample-vmid/agent/get-diskstats")
+
+		var nilCtx context.Context
+		if _, err := svc.ListQemuAgentGetDiskstats(nilCtx, "sample-node", "sample-vmid"); err == nil {
+			t.Errorf("ListQemuAgentGetDiskstats: expected error for nil context, got nil")
+		}
+	})
 	t.Run("ListQemuAgentGetFsinfo", func(t *testing.T) {
 		harness.set(http.StatusOK, `{"data":{},"success":1}`)
 
@@ -3839,6 +4048,25 @@ func TestGenerated_Nodes_Methods(t *testing.T) {
 		var nilCtx context.Context
 		if _, err := svc.ListQemuAgentGetHostName(nilCtx, "sample-node", "sample-vmid"); err == nil {
 			t.Errorf("ListQemuAgentGetHostName: expected error for nil context, got nil")
+		}
+	})
+	t.Run("ListQemuAgentGetLoad", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListQemuAgentGetLoad(ctx, "sample-node", "sample-vmid")
+		if err != nil {
+			t.Fatalf("ListQemuAgentGetLoad: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListQemuAgentGetLoad: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/qemu/sample-vmid/agent/get-load")
+
+		var nilCtx context.Context
+		if _, err := svc.ListQemuAgentGetLoad(nilCtx, "sample-node", "sample-vmid"); err == nil {
+			t.Errorf("ListQemuAgentGetLoad: expected error for nil context, got nil")
 		}
 	})
 	t.Run("ListQemuAgentGetMemoryBlockInfo", func(t *testing.T) {
@@ -4388,17 +4616,16 @@ func TestGenerated_Nodes_Methods(t *testing.T) {
 	t.Run("UpdateQemuFirewallAliases", func(t *testing.T) {
 		harness.set(http.StatusOK, `{"data":{},"success":1}`)
 
-		err := svc.UpdateQemuFirewallAliases(ctx, "sample-node", "sample-vmid", "sample-name", &nodes.UpdateQemuFirewallAliasesParams{Cidr: "sample-cidr"})
+		err := svc.UpdateQemuFirewallAliases(ctx, "sample-node", "sample-vmid", "sample-name", &nodes.UpdateQemuFirewallAliasesParams{})
 		if err != nil {
 			t.Fatalf("UpdateQemuFirewallAliases: unexpected error: %v", err)
 		}
 
 		got := harness.snapshot()
 		assertRequestLine(t, got, "PUT", "/api2/json/nodes/sample-node/qemu/sample-vmid/firewall/aliases/sample-name")
-		assertParamValue(t, got.form, "cidr", "sample-cidr")
 
 		var nilCtx context.Context
-		if err := svc.UpdateQemuFirewallAliases(nilCtx, "sample-node", "sample-vmid", "sample-name", &nodes.UpdateQemuFirewallAliasesParams{Cidr: "sample-cidr"}); err == nil {
+		if err := svc.UpdateQemuFirewallAliases(nilCtx, "sample-node", "sample-vmid", "sample-name", &nodes.UpdateQemuFirewallAliasesParams{}); err == nil {
 			t.Errorf("UpdateQemuFirewallAliases: expected error for nil context, got nil")
 		}
 	})
@@ -5552,6 +5779,177 @@ func TestGenerated_Nodes_Methods(t *testing.T) {
 			t.Errorf("ListRrddata: expected error for nil context, got nil")
 		}
 	})
+	t.Run("ListSan", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListSan(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListSan: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListSan: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/san")
+
+		var nilCtx context.Context
+		if _, err := svc.ListSan(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListSan: expected error for nil context, got nil")
+		}
+	})
+	t.Run("ListSanIscsi", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListSanIscsi(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListSanIscsi: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListSanIscsi: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/san/iscsi")
+
+		var nilCtx context.Context
+		if _, err := svc.ListSanIscsi(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListSanIscsi: expected error for nil context, got nil")
+		}
+	})
+	t.Run("ListSanIscsiStatus", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListSanIscsiStatus(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListSanIscsiStatus: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListSanIscsiStatus: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/san/iscsi/status")
+
+		var nilCtx context.Context
+		if _, err := svc.ListSanIscsiStatus(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListSanIscsiStatus: expected error for nil context, got nil")
+		}
+	})
+	t.Run("ListSanIscsiTarget", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListSanIscsiTarget(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListSanIscsiTarget: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListSanIscsiTarget: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/san/iscsi/target")
+
+		var nilCtx context.Context
+		if _, err := svc.ListSanIscsiTarget(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListSanIscsiTarget: expected error for nil context, got nil")
+		}
+	})
+	t.Run("ListSanLuns", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListSanLuns(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListSanLuns: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListSanLuns: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/san/luns")
+
+		var nilCtx context.Context
+		if _, err := svc.ListSanLuns(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListSanLuns: expected error for nil context, got nil")
+		}
+	})
+	t.Run("ListSanNvmeof", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListSanNvmeof(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListSanNvmeof: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListSanNvmeof: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/san/nvmeof")
+
+		var nilCtx context.Context
+		if _, err := svc.ListSanNvmeof(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListSanNvmeof: expected error for nil context, got nil")
+		}
+	})
+	t.Run("ListSanNvmeofController", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListSanNvmeofController(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListSanNvmeofController: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListSanNvmeofController: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/san/nvmeof/controller")
+
+		var nilCtx context.Context
+		if _, err := svc.ListSanNvmeofController(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListSanNvmeofController: expected error for nil context, got nil")
+		}
+	})
+	t.Run("DeleteSanNvmeofController", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.DeleteSanNvmeofController(ctx, "sample-node", "sample-controller", &nodes.DeleteSanNvmeofControllerParams{})
+		if err != nil {
+			t.Fatalf("DeleteSanNvmeofController: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("DeleteSanNvmeofController: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "DELETE", "/api2/json/nodes/sample-node/san/nvmeof/controller/sample-controller")
+
+		var nilCtx context.Context
+		if _, err := svc.DeleteSanNvmeofController(nilCtx, "sample-node", "sample-controller", &nodes.DeleteSanNvmeofControllerParams{}); err == nil {
+			t.Errorf("DeleteSanNvmeofController: expected error for nil context, got nil")
+		}
+	})
+	t.Run("ListSanNvmeofStatus", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":{},"success":1}`)
+
+		resp, err := svc.ListSanNvmeofStatus(ctx, "sample-node")
+		if err != nil {
+			t.Fatalf("ListSanNvmeofStatus: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListSanNvmeofStatus: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/san/nvmeof/status")
+
+		var nilCtx context.Context
+		if _, err := svc.ListSanNvmeofStatus(nilCtx, "sample-node"); err == nil {
+			t.Errorf("ListSanNvmeofStatus: expected error for nil context, got nil")
+		}
+	})
 	t.Run("ListScan", func(t *testing.T) {
 		harness.set(http.StatusOK, `{"data":[],"success":1}`)
 
@@ -5668,6 +6066,26 @@ func TestGenerated_Nodes_Methods(t *testing.T) {
 		var nilCtx context.Context
 		if _, err := svc.ListScanNfs(nilCtx, "sample-node", &nodes.ListScanNfsParams{Server: "sample-server"}); err == nil {
 			t.Errorf("ListScanNfs: expected error for nil context, got nil")
+		}
+	})
+	t.Run("ListScanNvmeof", func(t *testing.T) {
+		harness.set(http.StatusOK, `{"data":[],"success":1}`)
+
+		resp, err := svc.ListScanNvmeof(ctx, "sample-node", &nodes.ListScanNvmeofParams{Portal: "sample-portal"})
+		if err != nil {
+			t.Fatalf("ListScanNvmeof: unexpected error: %v", err)
+		}
+		if resp == nil {
+			t.Fatal("ListScanNvmeof: response is nil")
+		}
+
+		got := harness.snapshot()
+		assertRequestLine(t, got, "GET", "/api2/json/nodes/sample-node/scan/nvmeof")
+		assertParamValue(t, got.query, "portal", "sample-portal")
+
+		var nilCtx context.Context
+		if _, err := svc.ListScanNvmeof(nilCtx, "sample-node", &nodes.ListScanNvmeofParams{Portal: "sample-portal"}); err == nil {
+			t.Errorf("ListScanNvmeof: expected error for nil context, got nil")
 		}
 	})
 	t.Run("ListScanPbs", func(t *testing.T) {
